@@ -40,6 +40,19 @@ public class AppSettings
     public bool ShowColumnPermissions { get; set; } = false; // Linux/POSIX Permissions (e.g. rwxr-xr-x / 0755)
     public bool ShowColumnOwnerGroup { get; set; } = false;  // Linux/POSIX User & Group
 
+    // Smart Column Sizing & Custom Widths
+    public bool SmartColumnSizing { get; set; } = true;
+    public double ColumnWidthName { get; set; } = 280;
+    public double ColumnWidthExt { get; set; } = 65;
+    public double ColumnWidthSize { get; set; } = 95;
+    public double ColumnWidthDateModified { get; set; } = 150;
+    public double ColumnWidthDateCreated { get; set; } = 150;
+    public double ColumnWidthDateAccessed { get; set; } = 150;
+    public double ColumnWidthItemType { get; set; } = 110;
+    public double ColumnWidthAttributes { get; set; } = 90;
+    public double ColumnWidthPermissions { get; set; } = 110;
+    public double ColumnWidthOwnerGroup { get; set; } = 110;
+
     public AppSettings Clone()
     {
         return new AppSettings
@@ -68,7 +81,18 @@ public class AppSettings
             ShowColumnAttributes = this.ShowColumnAttributes,
             ShowColumnItemType = this.ShowColumnItemType,
             ShowColumnPermissions = this.ShowColumnPermissions,
-            ShowColumnOwnerGroup = this.ShowColumnOwnerGroup
+            ShowColumnOwnerGroup = this.ShowColumnOwnerGroup,
+            SmartColumnSizing = this.SmartColumnSizing,
+            ColumnWidthName = this.ColumnWidthName,
+            ColumnWidthExt = this.ColumnWidthExt,
+            ColumnWidthSize = this.ColumnWidthSize,
+            ColumnWidthDateModified = this.ColumnWidthDateModified,
+            ColumnWidthDateCreated = this.ColumnWidthDateCreated,
+            ColumnWidthDateAccessed = this.ColumnWidthDateAccessed,
+            ColumnWidthItemType = this.ColumnWidthItemType,
+            ColumnWidthAttributes = this.ColumnWidthAttributes,
+            ColumnWidthPermissions = this.ColumnWidthPermissions,
+            ColumnWidthOwnerGroup = this.ColumnWidthOwnerGroup
         };
     }
 }

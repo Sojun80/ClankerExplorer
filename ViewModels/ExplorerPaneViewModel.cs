@@ -92,6 +92,40 @@ public partial class ExplorerPaneViewModel : ObservableObject
     [ObservableProperty]
     private bool _showColumnOwnerGroup = false;
 
+    // Smart Column Sizing & Custom Widths
+    [ObservableProperty]
+    private bool _smartColumnSizing = true;
+
+    [ObservableProperty]
+    private double _columnWidthName = 280;
+
+    [ObservableProperty]
+    private double _columnWidthExt = 65;
+
+    [ObservableProperty]
+    private double _columnWidthSize = 95;
+
+    [ObservableProperty]
+    private double _columnWidthDateModified = 150;
+
+    [ObservableProperty]
+    private double _columnWidthDateCreated = 150;
+
+    [ObservableProperty]
+    private double _columnWidthDateAccessed = 150;
+
+    [ObservableProperty]
+    private double _columnWidthItemType = 110;
+
+    [ObservableProperty]
+    private double _columnWidthAttributes = 90;
+
+    [ObservableProperty]
+    private double _columnWidthPermissions = 110;
+
+    [ObservableProperty]
+    private double _columnWidthOwnerGroup = 110;
+
     public string EditActionLabel => FileSystemService.Instance.GetEditMenuLabel();
 
     public event Action<FileItem?>? FileSelectedForPreview;
@@ -130,6 +164,57 @@ public partial class ExplorerPaneViewModel : ObservableObject
         ShowColumnItemType = s.ShowColumnItemType;
         ShowColumnPermissions = s.ShowColumnPermissions;
         ShowColumnOwnerGroup = s.ShowColumnOwnerGroup;
+
+        SmartColumnSizing = s.SmartColumnSizing;
+        ColumnWidthName = s.ColumnWidthName > 0 ? s.ColumnWidthName : 280;
+        ColumnWidthExt = s.ColumnWidthExt > 0 ? s.ColumnWidthExt : 65;
+        ColumnWidthSize = s.ColumnWidthSize > 0 ? s.ColumnWidthSize : 95;
+        ColumnWidthDateModified = s.ColumnWidthDateModified > 0 ? s.ColumnWidthDateModified : 150;
+        ColumnWidthDateCreated = s.ColumnWidthDateCreated > 0 ? s.ColumnWidthDateCreated : 150;
+        ColumnWidthDateAccessed = s.ColumnWidthDateAccessed > 0 ? s.ColumnWidthDateAccessed : 150;
+        ColumnWidthItemType = s.ColumnWidthItemType > 0 ? s.ColumnWidthItemType : 110;
+        ColumnWidthAttributes = s.ColumnWidthAttributes > 0 ? s.ColumnWidthAttributes : 90;
+        ColumnWidthPermissions = s.ColumnWidthPermissions > 0 ? s.ColumnWidthPermissions : 110;
+        ColumnWidthOwnerGroup = s.ColumnWidthOwnerGroup > 0 ? s.ColumnWidthOwnerGroup : 110;
+    }
+
+    [RelayCommand]
+    public void ToggleSmartSizing()
+    {
+        SmartColumnSizing = !SmartColumnSizing;
+        var s = SettingsService.Instance.CurrentSettings;
+        s.SmartColumnSizing = SmartColumnSizing;
+        SettingsService.Instance.SaveSettings(s);
+    }
+
+    [RelayCommand]
+    public void ResetColumnWidths()
+    {
+        SmartColumnSizing = true;
+        ColumnWidthName = 280;
+        ColumnWidthExt = 65;
+        ColumnWidthSize = 95;
+        ColumnWidthDateModified = 150;
+        ColumnWidthDateCreated = 150;
+        ColumnWidthDateAccessed = 150;
+        ColumnWidthItemType = 110;
+        ColumnWidthAttributes = 90;
+        ColumnWidthPermissions = 110;
+        ColumnWidthOwnerGroup = 110;
+
+        var s = SettingsService.Instance.CurrentSettings;
+        s.SmartColumnSizing = true;
+        s.ColumnWidthName = 280;
+        s.ColumnWidthExt = 65;
+        s.ColumnWidthSize = 95;
+        s.ColumnWidthDateModified = 150;
+        s.ColumnWidthDateCreated = 150;
+        s.ColumnWidthDateAccessed = 150;
+        s.ColumnWidthItemType = 110;
+        s.ColumnWidthAttributes = 90;
+        s.ColumnWidthPermissions = 110;
+        s.ColumnWidthOwnerGroup = 110;
+        SettingsService.Instance.SaveSettings(s);
     }
 
     [RelayCommand]

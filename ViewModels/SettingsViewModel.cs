@@ -181,6 +181,40 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _showColumnOwnerGroup = false;
 
+    // Smart Column Sizing & Custom Widths
+    [ObservableProperty]
+    private bool _smartColumnSizing = true;
+
+    [ObservableProperty]
+    private double _columnWidthName = 280;
+
+    [ObservableProperty]
+    private double _columnWidthExt = 65;
+
+    [ObservableProperty]
+    private double _columnWidthSize = 95;
+
+    [ObservableProperty]
+    private double _columnWidthDateModified = 150;
+
+    [ObservableProperty]
+    private double _columnWidthDateCreated = 150;
+
+    [ObservableProperty]
+    private double _columnWidthDateAccessed = 150;
+
+    [ObservableProperty]
+    private double _columnWidthItemType = 110;
+
+    [ObservableProperty]
+    private double _columnWidthAttributes = 90;
+
+    [ObservableProperty]
+    private double _columnWidthPermissions = 110;
+
+    [ObservableProperty]
+    private double _columnWidthOwnerGroup = 110;
+
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
@@ -223,6 +257,18 @@ public partial class SettingsViewModel : ObservableObject
         ShowColumnItemType = s.ShowColumnItemType;
         ShowColumnPermissions = s.ShowColumnPermissions;
         ShowColumnOwnerGroup = s.ShowColumnOwnerGroup;
+
+        SmartColumnSizing = s.SmartColumnSizing;
+        ColumnWidthName = s.ColumnWidthName > 0 ? s.ColumnWidthName : 280;
+        ColumnWidthExt = s.ColumnWidthExt > 0 ? s.ColumnWidthExt : 65;
+        ColumnWidthSize = s.ColumnWidthSize > 0 ? s.ColumnWidthSize : 95;
+        ColumnWidthDateModified = s.ColumnWidthDateModified > 0 ? s.ColumnWidthDateModified : 150;
+        ColumnWidthDateCreated = s.ColumnWidthDateCreated > 0 ? s.ColumnWidthDateCreated : 150;
+        ColumnWidthDateAccessed = s.ColumnWidthDateAccessed > 0 ? s.ColumnWidthDateAccessed : 150;
+        ColumnWidthItemType = s.ColumnWidthItemType > 0 ? s.ColumnWidthItemType : 110;
+        ColumnWidthAttributes = s.ColumnWidthAttributes > 0 ? s.ColumnWidthAttributes : 90;
+        ColumnWidthPermissions = s.ColumnWidthPermissions > 0 ? s.ColumnWidthPermissions : 110;
+        ColumnWidthOwnerGroup = s.ColumnWidthOwnerGroup > 0 ? s.ColumnWidthOwnerGroup : 110;
     }
 
     partial void OnThemePresetChanged(string value)
@@ -280,7 +326,18 @@ public partial class SettingsViewModel : ObservableObject
             ShowColumnAttributes = ShowColumnAttributes,
             ShowColumnItemType = ShowColumnItemType,
             ShowColumnPermissions = ShowColumnPermissions,
-            ShowColumnOwnerGroup = ShowColumnOwnerGroup
+            ShowColumnOwnerGroup = ShowColumnOwnerGroup,
+            SmartColumnSizing = SmartColumnSizing,
+            ColumnWidthName = ColumnWidthName,
+            ColumnWidthExt = ColumnWidthExt,
+            ColumnWidthSize = ColumnWidthSize,
+            ColumnWidthDateModified = ColumnWidthDateModified,
+            ColumnWidthDateCreated = ColumnWidthDateCreated,
+            ColumnWidthDateAccessed = ColumnWidthDateAccessed,
+            ColumnWidthItemType = ColumnWidthItemType,
+            ColumnWidthAttributes = ColumnWidthAttributes,
+            ColumnWidthPermissions = ColumnWidthPermissions,
+            ColumnWidthOwnerGroup = ColumnWidthOwnerGroup
         };
     }
 

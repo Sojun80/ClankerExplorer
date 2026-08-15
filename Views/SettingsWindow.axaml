@@ -175,6 +175,21 @@
         <TabItem Header="📊 Columns &amp; Display">
           <ScrollViewer Margin="0,10">
             <StackPanel Spacing="14">
+              <!-- Smart Column Sizing Mode -->
+              <TextBlock Text="COLUMN SIZING &amp; AUTO-FIT" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+              <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12,10">
+                <StackPanel Spacing="8">
+                  <CheckBox IsChecked="{Binding SmartColumnSizing, Mode=TwoWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="⚡ Smart Dynamic Sizing" Foreground="{DynamicResource AppHighlightBrush}" FontSize="12" FontWeight="SemiBold"/>
+                      <TextBlock Text="(Dynamically expands Name while keeping metadata columns compact)" Foreground="{DynamicResource AppSubTextBrush}" FontSize="11"/>
+                    </StackPanel>
+                  </CheckBox>
+                  <TextBlock Text="• Drag any column header separator to resize manually." FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <TextBlock Text="• Drag &amp; drop any column header left or right to reorder columns." FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}"/>
+                </StackPanel>
+              </Border>
+
               <TextBlock Text="VISIBLE COLUMNS IN FILE LIST" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
               <TextBlock Text="Choose which details and metadata columns to display in the main file browser table."
                          FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" TextWrapping="Wrap"/>
@@ -234,6 +249,48 @@
                     </StackPanel>
                   </CheckBox>
                 </StackPanel>
+              </Border>
+
+              <!-- Default Custom Column Widths -->
+              <TextBlock Text="DEFAULT COLUMN WIDTHS (PIXELS)" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+              <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12,10">
+                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="0,2">
+                  <!-- Name Width -->
+                  <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2" Margin="0,0,8,6">
+                    <DockPanel>
+                      <TextBlock Text="Name Width:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                      <TextBlock Text="{Binding ColumnWidthName, StringFormat='{}{0:F0} px'}" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}" HorizontalAlignment="Right"/>
+                    </DockPanel>
+                    <Slider Minimum="150" Maximum="600" Value="{Binding ColumnWidthName, Mode=TwoWay}"/>
+                  </StackPanel>
+
+                  <!-- Size Width -->
+                  <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2" Margin="8,0,0,6">
+                    <DockPanel>
+                      <TextBlock Text="Size Width:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                      <TextBlock Text="{Binding ColumnWidthSize, StringFormat='{}{0:F0} px'}" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}" HorizontalAlignment="Right"/>
+                    </DockPanel>
+                    <Slider Minimum="60" Maximum="200" Value="{Binding ColumnWidthSize, Mode=TwoWay}"/>
+                  </StackPanel>
+
+                  <!-- Modified Date Width -->
+                  <StackPanel Grid.Row="1" Grid.Column="0" Spacing="2" Margin="0,0,8,6">
+                    <DockPanel>
+                      <TextBlock Text="Date Modified Width:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                      <TextBlock Text="{Binding ColumnWidthDateModified, StringFormat='{}{0:F0} px'}" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}" HorizontalAlignment="Right"/>
+                    </DockPanel>
+                    <Slider Minimum="100" Maximum="300" Value="{Binding ColumnWidthDateModified, Mode=TwoWay}"/>
+                  </StackPanel>
+
+                  <!-- Created Date Width -->
+                  <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2" Margin="8,0,0,6">
+                    <DockPanel>
+                      <TextBlock Text="Date Created Width:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                      <TextBlock Text="{Binding ColumnWidthDateCreated, StringFormat='{}{0:F0} px'}" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}" HorizontalAlignment="Right"/>
+                    </DockPanel>
+                    <Slider Minimum="100" Maximum="300" Value="{Binding ColumnWidthDateCreated, Mode=TwoWay}"/>
+                  </StackPanel>
+                </Grid>
               </Border>
             </StackPanel>
           </ScrollViewer>
