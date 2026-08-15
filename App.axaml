@@ -1,7 +1,7 @@
 <Application xmlns="https://github.com/avaloniaui"
-              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-              x:Class="ClankerExplorer.App"
-              RequestedThemeVariant="Dark">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ClankerExplorer.App"
+             RequestedThemeVariant="Dark">
   <Application.Resources>
     <!-- Default Dynamic Theme Resources (Live Modifiable by ThemeManager) -->
     <SolidColorBrush x:Key="AppBgBrush" Color="#080C14"/>
@@ -14,6 +14,11 @@
     <SolidColorBrush x:Key="AppSubTextBrush" Color="#94A3B8"/>
     <FontFamily x:Key="AppUiFont">Inter, Segoe UI, sans-serif</FontFamily>
     <FontFamily x:Key="AppMonoFont">Consolas, JetBrains Mono, monospace</FontFamily>
+
+    <!-- Global ScrollBar Resources (Force Thick Dimensions & No Hairline Slim) -->
+    <x:Double x:Key="ScrollBarSize">14</x:Double>
+    <x:Double x:Key="ScrollBarThumbThickness">10</x:Double>
+    <x:Double x:Key="ScrollBarButtonSize">14</x:Double>
   </Application.Resources>
 
   <Application.Styles>
@@ -26,6 +31,51 @@
       <Setter Property="Background" Value="{DynamicResource AppBgBrush}"/>
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
       <Setter Property="FontFamily" Value="{DynamicResource AppUiFont}"/>
+    </Style>
+
+    <!-- Always Thick Scrollbars (Never allow slim / auto-hide collapsing hairline) -->
+    <Style Selector="ScrollViewer">
+      <Setter Property="AllowAutoHide" Value="False"/>
+    </Style>
+
+    <Style Selector="ScrollBar">
+      <Setter Property="AllowAutoHide" Value="False"/>
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+    </Style>
+
+    <Style Selector="ScrollBar:vertical">
+      <Setter Property="Width" Value="14"/>
+      <Setter Property="MinWidth" Value="14"/>
+    </Style>
+
+    <Style Selector="ScrollBar:horizontal">
+      <Setter Property="Height" Value="14"/>
+      <Setter Property="MinHeight" Value="14"/>
+    </Style>
+
+    <Style Selector="ScrollBar /template/ Thumb">
+      <Setter Property="MinHeight" Value="28"/>
+      <Setter Property="MinWidth" Value="10"/>
+      <Setter Property="Background" Value="#334155"/>
+      <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+
+    <Style Selector="ScrollBar:vertical /template/ Thumb">
+      <Setter Property="Width" Value="10"/>
+      <Setter Property="Margin" Value="2,0"/>
+    </Style>
+
+    <Style Selector="ScrollBar:horizontal /template/ Thumb">
+      <Setter Property="Height" Value="10"/>
+      <Setter Property="Margin" Value="0,2"/>
+    </Style>
+
+    <Style Selector="ScrollBar /template/ Thumb:pointerover">
+      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}"/>
+    </Style>
+
+    <Style Selector="ScrollBar /template/ Thumb:pressed">
+      <Setter Property="Background" Value="{DynamicResource AppHighlightBrush}"/>
     </Style>
 
     <!-- DataGrid Dynamic Theme -->
