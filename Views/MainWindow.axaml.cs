@@ -306,7 +306,7 @@ public partial class MainWindow : Window
             var cur = e.GetPosition(this);
             var delta = cur - _qaPressPoint;
 
-            if (!_isQaDragging && (Math.Abs(delta.X) > 6 || Math.Abs(delta.Y) > 6))
+            if (!_isQaDragging && PointerGestureClassifier.ExceedsDragThreshold(delta.X, delta.Y, 6))
             {
                 _isQaDragging = true;
                 if (_capturedQaBorder != null)

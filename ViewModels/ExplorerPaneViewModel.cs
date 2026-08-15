@@ -427,6 +427,12 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void AddNewTab(string? path = null)
     {
+        var settings = SettingsService.Instance.CurrentSettings;
+        if (settings.MaxTabsAllowed > 0 && Tabs.Count >= settings.MaxTabsAllowed)
+        {
+            return;
+        }
+
         var targetPath = path ?? SelectedTab?.CurrentPath ?? FileSystemService.DefaultRootPath;
         var newTab = new ExplorerTabViewModel(targetPath);
         Tabs.Add(newTab);

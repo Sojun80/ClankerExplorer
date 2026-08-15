@@ -133,4 +133,26 @@ public sealed class CoreAndTabTests
         Assert.Equal(Path.GetFullPath(fs.FolderC), main.RightPane.SelectedTab.CurrentPath);
         Assert.Same(main.LeftPane, main.ActivePane);
     }
+
+    [Fact]
+    public void NewTabs_RespectConfiguredMaximum()
+    {
+        using var fs = new TemporaryFileSystem();
+        var settings = new ClankerExplorer.Models.AppSettings
+        {
+            DefaultPath = fs.FolderA,
+            StartupBehavior = "OpenDefaultPath",
+            MaxTabsAllowed = 2
+        };
+        SettingsService.Instance.SaveSettings(settings);
+
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderA);
+        pane.AddNewTab(fs.FolderB);
+        var selectedAtLimit = pane.SelectedTab;
+        pane.AddNewTab(fs.FolderC);
+
+        Assert.Equal(2, pane.Tabs.Count);
+        Assert.Same(selectedAtLimit, pane.SelectedTab);
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+    }
 }

@@ -227,7 +227,7 @@ public partial class ExplorerPaneView : UserControl
             var topLevel = TopLevel.GetTopLevel(this);
             var windowPos = topLevel != null ? e.GetPosition(topLevel) : cur;
 
-            if (!_isTabDragging && (Math.Abs(delta.X) > 6 || Math.Abs(delta.Y) > 6))
+            if (!_isTabDragging && PointerGestureClassifier.ExceedsDragThreshold(delta.X, delta.Y, 6))
             {
                 _isTabDragging = true;
                 if (_capturedTabBorder != null)
@@ -357,7 +357,9 @@ public partial class ExplorerPaneView : UserControl
                 source = source.GetVisualParent();
             }
 
-            if (!isRowOrCell)
+            var interaction = PointerGestureClassifier.ClassifyPress(
+                isRowOrCell ? PointerSurface.FileRow : PointerSurface.FileBackground);
+            if (interaction == PointerInteraction.MarqueeSelection)
             {
                 _isMouseDownForMarquee = true;
                 _isMarqueeActive = false;
@@ -377,7 +379,7 @@ public partial class ExplorerPaneView : UserControl
         var cur = e.GetPosition(FileGridContainer);
         var delta = cur - _marqueeStartPos;
 
-        if (!_isMarqueeActive && (Math.Abs(delta.X) > 4 || Math.Abs(delta.Y) > 4))
+        if (!_isMarqueeActive && PointerGestureClassifier.ExceedsDragThreshold(delta.X, delta.Y, 4))
         {
             _isMarqueeActive = true;
             vm.IsSuppressingPreview = true;
@@ -475,37 +477,74 @@ public partial class ExplorerPaneView : UserControl
 
     private void UpdateMarqueeSelection(bool isCtrl)
     {
-        if (FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+        if (FileDataGrid == null || FileGridContainer == null || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
         var items = vm.SelectedTab.FilteredItems;
         if (items.Count == 0) return;
 
-        var sv = FileDataGrid.FindDescendantOfType<ScrollViewer>();
-        double scrollOffset = sv?.Offset.Y ?? 0;
-        double headerHeight = 32.0;
-        double rowHeight = 28.0;
+        double minY = Math.Min(_marqueeStartPos.Y, _lastMarqueePos.Y);
+        double maxY = Math.Max(_marqueeStartPos.Y, _lastMarqueePos.Y);
 
-        double marqueeMinY = Math.Min(_marqueeStartPos.Y, _lastMarqueePos.Y);
-        double marqueeMaxY = Math.Max(_marqueeStartPos.Y, _lastMarqueePos.Y);
+        var visibleRows = FileDataGrid.GetVisualDescendants()
+            .OfType<DataGridRow>()
+            .Where(r => r.IsVisible && r.DataContext is FileItem)
+            .Select(r =>
+            {
+                var pt = r.TranslatePoint(new Point(0, 0), FileGridContainer);
+                return new { Row = r, Top = pt?.Y ?? -1, Height = r.Bounds.Height, Item = (FileItem)r.DataContext };
+            })
+            .Where(x => x.Top >= 0 && x.Height > 0)
+            .OrderBy(x => x.Top)
+            .ToList();
 
-        int startIdx = Math.Max(0, (int)Math.Floor((marqueeMinY - headerHeight + scrollOffset) / rowHeight));
-        int endIdx = Math.Min(items.Count - 1, (int)Math.Floor((marqueeMaxY - headerHeight + scrollOffset) / rowHeight));
+        HashSet<int> targetIndexes = new();
 
-        var targetItems = new HashSet<FileItem>();
-        if (isCtrl)
+        var baseIndexes = _marqueeBaseSelection
+            .Select(items.IndexOf)
+            .Where(index => index >= 0);
+
+        if (visibleRows.Count > 0)
         {
-            foreach (var item in _marqueeBaseSelection) targetItems.Add(item);
+            var firstRow = visibleRows[0];
+            double rowHeight = firstRow.Height;
+            double firstRowTop = firstRow.Top;
+            int firstVisibleIndex = items.IndexOf(firstRow.Item);
+
+            if (firstVisibleIndex >= 0 && rowHeight > 0)
+            {
+                targetIndexes = MarqueeSelectionCalculator.CalculateFromVisibleRow(
+                    minY,
+                    maxY,
+                    firstVisibleIndex,
+                    firstRowTop,
+                    rowHeight,
+                    items.Count,
+                    baseIndexes,
+                    isCtrl);
+            }
         }
 
-        if (startIdx <= endIdx && startIdx < items.Count && endIdx >= 0)
+        if (targetIndexes.Count == 0)
         {
-            for (int i = startIdx; i <= endIdx; i++)
+            if (isCtrl)
             {
-                if (i >= 0 && i < items.Count)
+                foreach (var idx in baseIndexes) targetIndexes.Add(idx);
+            }
+
+            foreach (var vr in visibleRows)
+            {
+                double bottom = vr.Top + vr.Height;
+                if (bottom >= minY && vr.Top <= maxY)
                 {
-                    targetItems.Add(items[i]);
+                    int idx = items.IndexOf(vr.Item);
+                    if (idx >= 0) targetIndexes.Add(idx);
                 }
             }
         }
+
+        var targetItems = targetIndexes
+            .Where(index => index >= 0 && index < items.Count)
+            .Select(index => items[index])
+            .ToHashSet();
 
         // Synchronize with FileDataGrid
         FileDataGrid.SelectedItems.Clear();

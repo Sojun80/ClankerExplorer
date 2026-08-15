@@ -1,6 +1,7 @@
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
 using ClankerExplorer.Tests.TestInfrastructure;
+using ClankerExplorer.ViewModels;
 
 namespace ClankerExplorer.Tests;
 
@@ -118,5 +119,47 @@ public sealed class PersistenceTests
         Assert.Equal(fs.FolderA, item.Path);
         Assert.Equal(7, item.VisitCount);
         Assert.Equal(timestamp, item.LastVisited, TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public void MainModel_RestoresTabOrderActivePanePathsAndInspectorWidth()
+    {
+        using var fs = new TemporaryFileSystem();
+        SettingsService.Instance.SaveSettings(new AppSettings
+        {
+            DefaultPath = fs.FolderA,
+            StartupBehavior = "RestoreSession",
+            MaxTabsRestoredOnStartup = 8
+        });
+        SessionService.Instance.SaveSession(new AppSessionState
+        {
+            IsDualPane = true,
+            ActivePaneId = "right",
+            InspectorWidth = 455,
+            LeftPane = new PaneSessionState
+            {
+                ActiveTabPath = fs.FolderB,
+                Tabs = new List<TabSessionItem>
+                {
+                    new() { Path = fs.FolderA, IsPinned = true },
+                    new() { Path = fs.FolderB }
+                }
+            },
+            RightPane = new PaneSessionState
+            {
+                ActiveTabPath = fs.FolderC,
+                Tabs = new List<TabSessionItem> { new() { Path = fs.FolderC } }
+            }
+        });
+
+        using var main = new MainViewModel(loadSidebarData: false);
+
+        Assert.True(main.IsDualPane);
+        Assert.Same(main.RightPane, main.ActivePane);
+        Assert.Equal(455, main.InspectorWidth);
+        Assert.Equal(new[] { fs.FolderA, fs.FolderB }, main.LeftPane.Tabs.Select(tab => tab.CurrentPath));
+        Assert.Equal(fs.FolderB, main.LeftPane.SelectedTab!.CurrentPath);
+        Assert.Equal(fs.FolderC, main.RightPane.SelectedTab!.CurrentPath);
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
     }
 }
