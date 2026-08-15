@@ -158,5 +158,16 @@
       <Setter Property="MinHeight" Value="20"/>
       <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
+
+    <!-- File Size Logarithmic Progress Bar (Zero-allocation, No Animation / Virtualization Optimized) -->
+    <Style Selector="ProgressBar.size-bar">
+      <Setter Property="Height" Value="18"/>
+      <Setter Property="CornerRadius" Value="3"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Transitions" Value="{x:Null}"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+    </Style>
   </Application.Styles>
 </Application>

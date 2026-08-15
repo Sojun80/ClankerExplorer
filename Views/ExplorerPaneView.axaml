@@ -446,11 +446,30 @@
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
 
-        <!-- Size Column (Cascadia Mono, Byte Size Sort) -->
-        <DataGridTextColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="65"
-                            Binding="{Binding SizeDisplay}" SortMemberPath="SizeBytes"
-                            IsVisible="{Binding ShowColumnSize}"
-                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
+        <!-- Size Column with Logarithmic Size Bar Visualizer -->
+        <DataGridTemplateColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="70"
+                                SortMemberPath="SizeBytes" IsVisible="{Binding ShowColumnSize}">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate DataType="models:FileItem">
+              <Panel HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="2,0,6,0" Opacity="{Binding RowOpacity}">
+                <!-- Subtle Logarithmic Size Fill Bar -->
+                <ProgressBar Classes="size-bar"
+                             Value="{Binding SizeBarFillPercent}"
+                             Minimum="0" Maximum="100"
+                             Foreground="{Binding SizeBarBrush}"
+                             IsVisible="{Binding HasSizeBar}"
+                             IsHitTestVisible="False"/>
+
+                <!-- Human Readable Size Text (Right-aligned, Mono) -->
+                <TextBlock Text="{Binding SizeDisplay}"
+                           FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"
+                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppTextBrush}"
+                           Margin="0,0,4,0"/>
+              </Panel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
 
         <!-- Date Modified Column (Cascadia Mono, Chronological Sort) -->
         <DataGridTextColumn Header="Date Modified" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="130"

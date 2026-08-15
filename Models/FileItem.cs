@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using Avalonia.Media;
+using ClankerExplorer.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace ClankerExplorer.Models;
@@ -10,9 +12,60 @@ public partial class FileItem : ObservableObject
     public string Extension { get; set; } = string.Empty;
     public string FullPath { get; set; } = string.Empty;
     public string ParentPath { get; set; } = string.Empty;
-    public bool IsDirectory { get; set; }
+
+    private bool _isDirectory;
+    public bool IsDirectory
+    {
+        get => _isDirectory;
+        set
+        {
+            _isDirectory = value;
+            _sizeBarFill = -1;
+            _sizeBarBrush = null;
+        }
+    }
+
     public bool IsSymbolicLink { get; set; }
-    public long SizeBytes { get; set; }
+
+    private long _sizeBytes;
+    public long SizeBytes
+    {
+        get => _sizeBytes;
+        set
+        {
+            _sizeBytes = value;
+            _sizeBarFill = -1;
+            _sizeBarBrush = null;
+        }
+    }
+
+    // Size Visualization Bar (Logarithmic Fill + Pre-allocated Shared SolidColorBrush)
+    private double _sizeBarFill = -1;
+    public double SizeBarFill
+    {
+        get
+        {
+            if (_sizeBarFill < 0)
+            {
+                _sizeBarFill = FileSizeVisualizerHelper.CalculateFill(_sizeBytes, _isDirectory);
+            }
+            return _sizeBarFill;
+        }
+    }
+
+    public double SizeBarFillPercent => SizeBarFill * 100.0;
+    public bool HasSizeBar => !_isDirectory && _sizeBytes > 0 && SizeBarFillPercent > 0.001;
+
+    private IBrush? _sizeBarBrush;
+    public IBrush SizeBarBrush
+    {
+        get
+        {
+            _sizeBarBrush ??= FileSizeVisualizerHelper.GetBrush(SizeBarFill);
+            return _sizeBarBrush;
+        }
+    }
+
     public string FormattedSize { get; set; } = string.Empty;
     public DateTime ModifiedTime { get; set; }
     public DateTime CreatedTime { get; set; }
