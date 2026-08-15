@@ -17,9 +17,31 @@ public partial class FileItem : ObservableObject
     public DateTime ModifiedTime { get; set; }
     public DateTime CreatedTime { get; set; }
     public DateTime AccessedTime { get; set; }
-    public string FormattedModifiedTime => ModifiedTime == DateTime.MinValue ? "—" : ModifiedTime.ToString("yyyy-MM-dd HH:mm:ss");
-    public string FormattedCreatedTime => CreatedTime == DateTime.MinValue ? "—" : CreatedTime.ToString("yyyy-MM-dd HH:mm:ss");
-    public string FormattedAccessedTime => AccessedTime == DateTime.MinValue ? "—" : AccessedTime.ToString("yyyy-MM-dd HH:mm:ss");
+    public string FormattedModifiedTime => FormatSmartDateTime(ModifiedTime);
+    public string FormattedCreatedTime => FormatSmartDateTime(CreatedTime);
+    public string FormattedAccessedTime => FormatSmartDateTime(AccessedTime);
+
+    public static string FormatSmartDateTime(DateTime dt)
+    {
+        if (dt == DateTime.MinValue || dt == default) return "—";
+
+        var today = DateTime.Today;
+        var date = dt.Date;
+        string timeStr = dt.ToString("h:mm tt"); // e.g. "8:31 AM", "4:15 PM"
+
+        if (date == today)
+        {
+            return $"Today at {timeStr}";
+        }
+
+        if (date == today.AddDays(-1))
+        {
+            return $"Yesterday at {timeStr}";
+        }
+
+        // Beyond yesterday: "8/7/26 at 4:40 PM"
+        return $"{dt.Month}/{dt.Day}/{dt:yy} at {timeStr}";
+    }
     
     // Windows Attributes & Linux Permissions
     public bool IsHidden { get; set; }

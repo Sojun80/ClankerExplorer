@@ -309,23 +309,27 @@
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
 
-        <!-- Size Column (Cascadia Mono, Folders display subtle dim dash) -->
-        <DataGridTextColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="65" Binding="{Binding SizeDisplay}"
+        <!-- Size Column (Cascadia Mono, Byte Size Sort) -->
+        <DataGridTextColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="65"
+                            Binding="{Binding SizeDisplay}" SortMemberPath="SizeBytes"
                             IsVisible="{Binding ShowColumnSize}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
-        <!-- Date Modified Column (Cascadia Mono) -->
-        <DataGridTextColumn Header="Date Modified" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="110" Binding="{Binding FormattedModifiedTime}"
+        <!-- Date Modified Column (Cascadia Mono, Chronological Sort) -->
+        <DataGridTextColumn Header="Date Modified" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="130"
+                            Binding="{Binding FormattedModifiedTime}" SortMemberPath="ModifiedTime"
                             IsVisible="{Binding ShowColumnDateModified}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
-        <!-- Date Created Column (Cascadia Mono) -->
-        <DataGridTextColumn Header="Date Created" Width="{Binding CreatedColumnWidthDisplay}" MinWidth="110" Binding="{Binding FormattedCreatedTime}"
+        <!-- Date Created Column (Cascadia Mono, Chronological Sort) -->
+        <DataGridTextColumn Header="Date Created" Width="{Binding CreatedColumnWidthDisplay}" MinWidth="130"
+                            Binding="{Binding FormattedCreatedTime}" SortMemberPath="CreatedTime"
                             IsVisible="{Binding ShowColumnDateCreated}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
-        <!-- Date Accessed Column (Cascadia Mono) -->
-        <DataGridTextColumn Header="Date Accessed" Width="{Binding AccessedColumnWidthDisplay}" MinWidth="110" Binding="{Binding FormattedAccessedTime}"
+        <!-- Date Accessed Column (Cascadia Mono, Chronological Sort) -->
+        <DataGridTextColumn Header="Date Accessed" Width="{Binding AccessedColumnWidthDisplay}" MinWidth="130"
+                            Binding="{Binding FormattedAccessedTime}" SortMemberPath="AccessedTime"
                             IsVisible="{Binding ShowColumnDateAccessed}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
