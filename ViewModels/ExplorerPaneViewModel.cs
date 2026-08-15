@@ -340,6 +340,16 @@ public partial class ExplorerPaneViewModel : ObservableObject
         SettingsService.Instance.SaveSettings(s);
     }
 
+    public bool IsSuppressingPreview { get; set; }
+
+    public void TriggerPreviewForSelectedItem()
+    {
+        if (SelectedTab != null)
+        {
+            FileSelectedForPreview?.Invoke(SelectedTab.SelectedItem);
+        }
+    }
+
     public void WireTabEvents(ExplorerTabViewModel tab)
     {
         tab.PropertyChanged += (s, e) =>
@@ -351,7 +361,10 @@ public partial class ExplorerPaneViewModel : ObservableObject
             else if (e.PropertyName == nameof(ExplorerTabViewModel.SelectedItem) && tab == SelectedTab)
             {
                 NotifyContextMenuProperties();
-                FileSelectedForPreview?.Invoke(tab.SelectedItem);
+                if (!IsSuppressingPreview)
+                {
+                    FileSelectedForPreview?.Invoke(tab.SelectedItem);
+                }
             }
         };
     }

@@ -379,6 +379,7 @@ public partial class ExplorerPaneView : UserControl
         if (!_isMarqueeActive && (Math.Abs(delta.X) > 4 || Math.Abs(delta.Y) > 4))
         {
             _isMarqueeActive = true;
+            vm.IsSuppressingPreview = true;
             e.Pointer.Capture(FileGridContainer);
             if (MarqueeBox != null) MarqueeBox.IsVisible = true;
             _autoScrollTimer.Start();
@@ -386,6 +387,7 @@ public partial class ExplorerPaneView : UserControl
 
         if (_isMarqueeActive)
         {
+            vm.IsSuppressingPreview = true;
             _lastMarqueePos = cur;
 
             if (MarqueeBox != null)
@@ -425,10 +427,19 @@ public partial class ExplorerPaneView : UserControl
         _autoScrollVelocity = 0;
         if (MarqueeBox != null) MarqueeBox.IsVisible = false;
 
+        if (DataContext is ExplorerPaneViewModel vm)
+        {
+            vm.IsSuppressingPreview = false;
+        }
+
         if (_isMarqueeActive)
         {
             e.Pointer.Capture(null);
             _isMarqueeActive = false;
+            if (DataContext is ExplorerPaneViewModel vmPane)
+            {
+                vmPane.TriggerPreviewForSelectedItem();
+            }
         }
         else if (_isMouseDownForMarquee)
         {
@@ -436,10 +447,11 @@ public partial class ExplorerPaneView : UserControl
             if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && FileDataGrid != null)
             {
                 FileDataGrid.SelectedItems.Clear();
-                if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null)
+                if (DataContext is ExplorerPaneViewModel vmEmpty && vmEmpty.SelectedTab != null)
                 {
-                    vm.SelectedTab.SelectedItem = null;
-                    vm.NotifyContextMenuProperties();
+                    vmEmpty.SelectedTab.SelectedItem = null;
+                    vmEmpty.NotifyContextMenuProperties();
+                    vmEmpty.TriggerPreviewForSelectedItem();
                 }
             }
         }
@@ -454,6 +466,10 @@ public partial class ExplorerPaneView : UserControl
         if (MarqueeBox != null) MarqueeBox.IsVisible = false;
         _isMarqueeActive = false;
         _isMouseDownForMarquee = false;
+        if (DataContext is ExplorerPaneViewModel vm)
+        {
+            vm.IsSuppressingPreview = false;
+        }
     }
 
     private void UpdateMarqueeSelection(bool isCtrl)
