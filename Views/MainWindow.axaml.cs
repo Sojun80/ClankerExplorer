@@ -29,6 +29,7 @@ public partial class MainWindow : Window
         {
             if (DataContext is MainViewModel vm)
             {
+                SyncPreviewColumn(vm);
                 vm.RequestCreateItem += async (type, parent) =>
                 {
                     try
@@ -197,44 +198,44 @@ public partial class MainWindow : Window
                 vm.RefreshAll();
                 e.Handled = true;
             }
+        };
 
-            if (PreviewColumnDefinition != null)
+        void SyncPreviewColumn(MainViewModel? vm)
+        {
+            if (vm == null || PreviewColumnDefinition == null) return;
+            if (!vm.ShowInspector)
             {
-                if (!vm.ShowInspector)
-                {
-                    PreviewColumnDefinition.MinWidth = 0;
-                    PreviewColumnDefinition.Width = new GridLength(0);
-                }
-                else
-                {
-                    double safeWidth = Math.Clamp(vm.InspectorWidth, 240, Math.Max(240, Bounds.Width - 660));
-                    PreviewColumnDefinition.MinWidth = 240;
-                    PreviewColumnDefinition.Width = new GridLength(safeWidth);
-                }
+                PreviewColumnDefinition.MinWidth = 0;
+                PreviewColumnDefinition.MaxWidth = 0;
+                PreviewColumnDefinition.Width = new GridLength(0);
             }
-
-            vm.PropertyChanged += (s, args) =>
+            else
             {
-                if (args.PropertyName == nameof(MainViewModel.ShowInspector) && PreviewColumnDefinition != null)
+                double maxAllowed = Math.Max(240, Bounds.Width - 660);
+                double safeWidth = Math.Clamp(vm.InspectorWidth, 240, maxAllowed);
+                PreviewColumnDefinition.MinWidth = 240;
+                PreviewColumnDefinition.MaxWidth = maxAllowed;
+                PreviewColumnDefinition.Width = new GridLength(safeWidth);
+            }
+        }
+
+        DataContextChanged += (s, e) =>
+        {
+            if (DataContext is MainViewModel vm)
+            {
+                SyncPreviewColumn(vm);
+                vm.PropertyChanged += (sender, args) =>
                 {
-                    if (!vm.ShowInspector)
+                    if (args.PropertyName == nameof(MainViewModel.ShowInspector))
                     {
-                        PreviewColumnDefinition.MinWidth = 0;
-                        PreviewColumnDefinition.Width = new GridLength(0);
+                        SyncPreviewColumn(vm);
                     }
-                    else
+                    else if (args.PropertyName == nameof(MainViewModel.InspectorWidth) && vm.ShowInspector)
                     {
-                        double safeWidth = Math.Clamp(vm.InspectorWidth, 240, Math.Max(240, Bounds.Width - 660));
-                        PreviewColumnDefinition.MinWidth = 240;
-                        PreviewColumnDefinition.Width = new GridLength(safeWidth);
+                        SyncPreviewColumn(vm);
                     }
-                }
-                else if (args.PropertyName == nameof(MainViewModel.InspectorWidth) && PreviewColumnDefinition != null && vm.ShowInspector)
-                {
-                    double safeWidth = Math.Clamp(vm.InspectorWidth, 240, Math.Max(240, Bounds.Width - 660));
-                    PreviewColumnDefinition.Width = new GridLength(safeWidth);
-                }
-            };
+                };
+            }
         };
 
         TabDragCoordinator.Instance.TabDragMoved += OnTabDragMoved;
