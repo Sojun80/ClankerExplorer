@@ -137,6 +137,16 @@ public partial class FileItem : ObservableObject
 
     public double RowOpacity => IsCut ? 0.45 : 1.0;
 
+    // Thumbnail State
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasThumbnail))]
+    private IImage? _thumbnailImage;
+
+    public bool HasThumbnail => ThumbnailImage != null;
+
+    [ObservableProperty]
+    private bool _isThumbnailLoading;
+
     // Visual Helpers
     public string IconKind => IsDirectory ? "Folder" : GetFileIconKind(Extension);
     public string SizeDisplay => IsDirectory ? "—" : FormattedSize;

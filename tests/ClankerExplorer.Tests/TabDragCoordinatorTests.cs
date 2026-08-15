@@ -31,6 +31,42 @@ public sealed class TabDragCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void SamePaneDrop_MovingForwardUsesInsertionIndexWithoutOffByOne()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderA);
+        var first = pane.SelectedTab!;
+        pane.AddNewTab(fs.FolderB);
+        var second = pane.SelectedTab!;
+        pane.AddNewTab(fs.FolderC);
+        var third = pane.SelectedTab!;
+
+        _coordinator.StartDrag(first, pane, isCtrl: false, new Point(0, 0));
+        _coordinator.CompleteDrop(pane, targetIndex: 3, isCtrl: false);
+
+        Assert.Equal(new[] { second, third, first }, pane.Tabs);
+        Assert.Same(first, pane.SelectedTab);
+    }
+
+    [Fact]
+    public void CrossPaneDrop_BeyondLastIndexAppendsSafely()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var left = new ExplorerPaneViewModel("left", fs.FolderA);
+        using var right = new ExplorerPaneViewModel("right", fs.FolderB);
+        right.AddNewTab(fs.FolderC);
+        var moved = left.SelectedTab!;
+
+        _coordinator.StartDrag(moved, left, isCtrl: false, new Point(0, 0));
+        _coordinator.CompleteDrop(right, targetIndex: int.MaxValue, isCtrl: false);
+
+        Assert.Same(moved, right.Tabs[^1]);
+        Assert.Same(moved, right.SelectedTab);
+        Assert.Single(left.Tabs);
+        Assert.NotSame(moved, left.SelectedTab);
+    }
+
+    [Fact]
     public void CrossPaneMove_PreservesHistoryAndLeavesValidSourceSelection()
     {
         using var fs = new TemporaryFileSystem();
@@ -73,6 +109,33 @@ public sealed class TabDragCoordinatorTests : IDisposable
         Assert.NotSame(original, clone);
         Assert.Equal(original.CurrentPath, clone.CurrentPath);
         Assert.Equal(original.History, clone.History);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CrossPaneDrop_RespectsTargetPaneTabLimit(bool copy)
+    {
+        using var fs = new TemporaryFileSystem();
+        SettingsService.Instance.SaveSettings(new ClankerExplorer.Models.AppSettings
+        {
+            DefaultPath = fs.FolderA,
+            StartupBehavior = "OpenDefaultPath",
+            MaxTabsAllowed = 1
+        });
+        using var left = new ExplorerPaneViewModel("left", fs.FolderA);
+        using var right = new ExplorerPaneViewModel("right", fs.FolderB);
+        var source = left.SelectedTab!;
+        var existingTarget = right.SelectedTab!;
+
+        _coordinator.StartDrag(source, left, isCtrl: copy, new Point(0, 0));
+        _coordinator.CompleteDrop(right, 0, isCtrl: copy);
+
+        Assert.Equal(new[] { source }, left.Tabs);
+        Assert.Equal(new[] { existingTarget }, right.Tabs);
+        Assert.Same(source, left.SelectedTab);
+        Assert.Same(existingTarget, right.SelectedTab);
+        Assert.False(_coordinator.IsDragging);
     }
 
     [Fact]

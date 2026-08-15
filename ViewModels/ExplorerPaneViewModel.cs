@@ -35,6 +35,81 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     private double _tabWidth = 150.0;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDetailsView))]
+    [NotifyPropertyChangedFor(nameof(IsThumbnailView))]
+    private string _viewMode = "Details";
+
+    public bool IsDetailsView => ViewMode == "Details";
+    public bool IsThumbnailView => ViewMode == "Thumbnails";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ThumbnailCellWidth))]
+    [NotifyPropertyChangedFor(nameof(ThumbnailCellHeight))]
+    [NotifyPropertyChangedFor(nameof(ThumbnailImageWidth))]
+    [NotifyPropertyChangedFor(nameof(ThumbnailImageHeight))]
+    private double _thumbnailSize = 144.0;
+
+    public double ThumbnailCellWidth => ThumbnailSize + 28.0;
+    public double ThumbnailCellHeight => ThumbnailSize + 54.0;
+    public double ThumbnailImageWidth => ThumbnailSize;
+    public double ThumbnailImageHeight => ThumbnailSize;
+
+    partial void OnViewModeChanged(string value)
+    {
+        if (value == "Thumbnails")
+        {
+            SelectedTab?.LoadThumbnails((int)ThumbnailSize);
+        }
+        else
+        {
+            SelectedTab?.CancelThumbnailLoading();
+        }
+    }
+
+    partial void OnThumbnailSizeChanged(double value)
+    {
+        if (IsThumbnailView)
+        {
+            SelectedTab?.LoadThumbnails((int)value);
+        }
+
+        if (double.IsFinite(value) && value >= 64 && value <= 320)
+        {
+            var settings = SettingsService.Instance.CurrentSettings;
+            if (settings.ThumbnailSize != value)
+            {
+                settings.ThumbnailSize = value;
+                SettingsService.Instance.SaveSettings(settings);
+            }
+        }
+    }
+
+    [RelayCommand]
+    public void SetDetailsView()
+    {
+        ViewMode = "Details";
+        var s = SettingsService.Instance.CurrentSettings;
+        s.ViewMode = ViewMode;
+        SettingsService.Instance.SaveSettings(s);
+    }
+
+    [RelayCommand]
+    public void SetThumbnailView()
+    {
+        ViewMode = "Thumbnails";
+        var s = SettingsService.Instance.CurrentSettings;
+        s.ViewMode = ViewMode;
+        SettingsService.Instance.SaveSettings(s);
+    }
+
+    [RelayCommand]
+    public void ToggleViewMode()
+    {
+        if (IsDetailsView) SetThumbnailView();
+        else SetDetailsView();
+    }
+
+    [ObservableProperty]
     private bool _isActive;
 
     // Reactive Context Menu State
@@ -258,7 +333,11 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         ColumnWidthAttributes = s.ColumnWidthAttributes > 0 ? s.ColumnWidthAttributes : 90;
         ColumnWidthPermissions = s.ColumnWidthPermissions > 0 ? s.ColumnWidthPermissions : 110;
         ColumnWidthOwnerGroup = s.ColumnWidthOwnerGroup > 0 ? s.ColumnWidthOwnerGroup : 110;
-        TabWidth = s.TabWidth >= 80 ? s.TabWidth : 150.0;
+        TabWidth = double.IsFinite(s.TabWidth) && s.TabWidth >= 80 && s.TabWidth <= 280
+            ? s.TabWidth
+            : 150.0;
+        ViewMode = s.ViewMode == "Thumbnails" ? "Thumbnails" : "Details";
+        ThumbnailSize = s.ThumbnailSize >= 64 && s.ThumbnailSize <= 320 ? s.ThumbnailSize : 144.0;
     }
 
     [RelayCommand]
@@ -383,6 +462,13 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
                     FileSelectedForPreview?.Invoke(tab.SelectedItem);
                 }
             }
+            else if (e.PropertyName == nameof(ExplorerTabViewModel.FilteredItems) && tab == SelectedTab)
+            {
+                if (IsThumbnailView)
+                {
+                    tab.LoadThumbnails((int)ThumbnailSize);
+                }
+            }
         };
 
         _tabPropertyHandlers[tab] = handler;
@@ -425,6 +511,10 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             RawAddressInput = value.CurrentPath;
             NotifyContextMenuProperties();
             FileSelectedForPreview?.Invoke(value.SelectedItem);
+            if (IsThumbnailView)
+            {
+                value.LoadThumbnails((int)ThumbnailSize);
+            }
         }
     }
 

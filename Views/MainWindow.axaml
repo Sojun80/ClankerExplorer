@@ -534,6 +534,7 @@
         <GridSplitter Grid.Column="2" Width="8" Background="Transparent"
                       IsVisible="{Binding ShowInspector}"
                       Cursor="SizeWestEast"
+                      DragCompleted="OnInspectorSplitterDragCompleted"
                       DoubleTapped="OnInspectorSplitterDoubleTapped"
                       Margin="-4,0,-4,0" ZIndex="10">
           <GridSplitter.Template>

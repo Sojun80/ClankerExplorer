@@ -16,6 +16,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 {
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _filterDebounceCts;
+    private CancellationTokenSource? _thumbnailCts;
     private long _loadGeneration = 0;
     private bool _isDisposed;
 
@@ -357,6 +358,26 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         return cloned;
     }
 
+    public void LoadThumbnails(int targetSize)
+    {
+        if (_isDisposed || FilteredItems == null || FilteredItems.Count == 0) return;
+
+        _thumbnailCts?.Cancel();
+        _thumbnailCts = new CancellationTokenSource();
+        var token = _thumbnailCts.Token;
+
+        _ = ThumbnailService.Instance.LoadThumbnailsAsync(FilteredItems, targetSize, token);
+    }
+
+    public void CancelThumbnailLoading()
+    {
+        try
+        {
+            _thumbnailCts?.Cancel();
+        }
+        catch { }
+    }
+
     public void Dispose()
     {
         if (_isDisposed) return;
@@ -375,6 +396,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         {
             _filterDebounceCts?.Cancel();
             _filterDebounceCts?.Dispose();
+        }
+        catch { }
+
+        try
+        {
+            _thumbnailCts?.Cancel();
+            _thumbnailCts?.Dispose();
         }
         catch { }
     }

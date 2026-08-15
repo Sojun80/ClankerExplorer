@@ -584,6 +584,61 @@ public partial class ExplorerPaneView : UserControl
         }
     }
 
+    private void OnThumbnailKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+
+        // Enter: Open
+        if (e.Key == Key.Enter)
+        {
+            if (vm.SelectedTab.SelectedItem != null)
+            {
+                vm.OpenItem(vm.SelectedTab.SelectedItem);
+                e.Handled = true;
+            }
+        }
+        // F2: Rename
+        else if (e.Key == Key.F2)
+        {
+            if (vm.SelectedTab.SelectedItem != null)
+            {
+                vm.TriggerRename();
+                e.Handled = true;
+            }
+        }
+        // Delete / Shift+Delete
+        else if (e.Key == Key.Delete)
+        {
+            bool isPermanent = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            vm.DeleteSelected(isPermanent);
+            e.Handled = true;
+        }
+        // Ctrl+C: Copy
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.C)
+        {
+            vm.CopyFiles();
+            e.Handled = true;
+        }
+        // Ctrl+X: Cut
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.X)
+        {
+            vm.CutFiles();
+            e.Handled = true;
+        }
+        // Ctrl+V: Paste
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.V)
+        {
+            _ = vm.PasteFilesAsync();
+            e.Handled = true;
+        }
+        // F5: Refresh
+        else if (e.Key == Key.F5)
+        {
+            vm.Refresh();
+            e.Handled = true;
+        }
+    }
+
     private void OnRowDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab?.SelectedItem != null)

@@ -255,18 +255,6 @@ public partial class MainWindow : Window
             }
         };
 
-        if (InspectorPanel != null)
-        {
-            InspectorPanel.SizeChanged += (s, e) =>
-            {
-                if (DataContext is MainViewModel vm && vm.ShowInspector && e.NewSize.Width >= 200)
-                {
-                    double maxAllowed = Math.Max(240, Bounds.Width - 660);
-                    double clampedWidth = Math.Clamp(e.NewSize.Width, 240, maxAllowed);
-                    vm.InspectorWidth = clampedWidth;
-                }
-            };
-        }
     }
 
     private void OnTabDragMoved(ExplorerTabViewModel tab, Point winPos, bool isCtrl)
@@ -707,6 +695,18 @@ public partial class MainWindow : Window
                 PreviewColumnDefinition.MinWidth = 240;
                 PreviewColumnDefinition.Width = new GridLength(320);
             }
+        }
+    }
+
+    private void OnInspectorSplitterDragCompleted(object? sender, Avalonia.Input.VectorEventArgs e)
+    {
+        if (DataContext is MainViewModel vm &&
+            vm.ShowInspector &&
+            PreviewColumnDefinition != null &&
+            PreviewColumnDefinition.ActualWidth >= 240)
+        {
+            double maxAllowed = Math.Max(240, Bounds.Width - 660);
+            vm.InspectorWidth = Math.Clamp(PreviewColumnDefinition.ActualWidth, 240, maxAllowed);
         }
     }
 }

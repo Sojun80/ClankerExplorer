@@ -18,6 +18,9 @@ public sealed class PersistenceTests
             StartupBehavior = "RestoreSession",
             StartInDualPane = true,
             InspectorWidth = 444,
+            TabWidth = 212,
+            ViewMode = "Thumbnails",
+            ThumbnailSize = 196,
             SmartColumnSizing = false,
             ColumnWidthName = 411,
             ColumnWidthSize = 123,
@@ -31,11 +34,32 @@ public sealed class PersistenceTests
         Assert.Equal("RestoreSession", reloaded.CurrentSettings.StartupBehavior);
         Assert.True(reloaded.CurrentSettings.StartInDualPane);
         Assert.Equal(444, reloaded.CurrentSettings.InspectorWidth);
+        Assert.Equal(212, reloaded.CurrentSettings.TabWidth);
+        Assert.Equal("Thumbnails", reloaded.CurrentSettings.ViewMode);
+        Assert.Equal(196, reloaded.CurrentSettings.ThumbnailSize);
         Assert.False(reloaded.CurrentSettings.SmartColumnSizing);
         Assert.Equal(411, reloaded.CurrentSettings.ColumnWidthName);
         Assert.Equal(123, reloaded.CurrentSettings.ColumnWidthSize);
         Assert.True(reloaded.CurrentSettings.ShowColumnPermissions);
         Assert.StartsWith(fs.Config, reloaded.SettingsFilePath);
+    }
+
+    [Fact]
+    public void AppSettingsClone_PreservesTabAndThumbnailViewPreferences()
+    {
+        var original = new AppSettings
+        {
+            TabWidth = 205,
+            ViewMode = "Thumbnails",
+            ThumbnailSize = 224
+        };
+
+        var clone = original.Clone();
+
+        Assert.NotSame(original, clone);
+        Assert.Equal(205, clone.TabWidth);
+        Assert.Equal("Thumbnails", clone.ViewMode);
+        Assert.Equal(224, clone.ThumbnailSize);
     }
 
     [Fact]

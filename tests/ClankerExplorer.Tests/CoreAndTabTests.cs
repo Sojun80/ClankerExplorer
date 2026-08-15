@@ -158,6 +158,58 @@ public sealed class CoreAndTabTests
     }
 
     [Fact]
+    public void MainModel_TogglesPreviewDualPaneAndAlwaysOnTopState()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+        using var main = new MainViewModel(loadSidebarData: false);
+
+        bool initialPreview = main.ShowInspector;
+        main.ToggleInspector();
+        main.ToggleDualPane();
+        main.ToggleAlwaysOnTop();
+
+        Assert.Equal(!initialPreview, main.ShowInspector);
+        Assert.True(main.IsDualPane);
+        Assert.True(main.IsAlwaysOnTop);
+
+        main.ToggleAlwaysOnTop();
+        Assert.False(main.IsAlwaysOnTop);
+    }
+
+    [Fact]
+    public void PaneLoadsAndReactsToConfiguredTabAndThumbnailViewSettings()
+    {
+        using var fs = new TemporaryFileSystem();
+        SettingsService.Instance.SaveSettings(new ClankerExplorer.Models.AppSettings
+        {
+            DefaultPath = fs.FolderB,
+            StartupBehavior = "OpenDefaultPath",
+            TabWidth = 208,
+            ViewMode = "Details",
+            ThumbnailSize = 192
+        });
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderB);
+
+        Assert.Equal(208, pane.TabWidth);
+        Assert.True(pane.IsDetailsView);
+        Assert.Equal(192, pane.ThumbnailSize);
+        Assert.Equal(220, pane.ThumbnailCellWidth);
+        Assert.Equal(246, pane.ThumbnailCellHeight);
+
+        pane.SetThumbnailView();
+        Assert.True(pane.IsThumbnailView);
+        Assert.Equal("Thumbnails", SettingsService.Instance.CurrentSettings.ViewMode);
+
+        pane.ThumbnailSize = 224;
+        Assert.Equal(224, SettingsService.Instance.CurrentSettings.ThumbnailSize);
+
+        pane.SetDetailsView();
+        Assert.True(pane.IsDetailsView);
+        Assert.Equal("Details", SettingsService.Instance.CurrentSettings.ViewMode);
+    }
+
+    [Fact]
     public void NewTabs_RespectConfiguredMaximum()
     {
         using var fs = new TemporaryFileSystem();
