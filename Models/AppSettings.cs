@@ -29,6 +29,7 @@ public class AppSettings
     public int MaxTabsRestoredOnStartup { get; set; } = 8;
     public int MaxTabsAllowed { get; set; } = 30;
     public double InspectorWidth { get; set; } = 320.0;
+    public double TabWidth { get; set; } = 150.0;
     public bool StartInDualPane { get; set; } = false;
     public bool ShowInspectorOnStartup { get; set; } = true;
     public bool ConfirmBeforeDelete { get; set; } = true;
@@ -78,6 +79,7 @@ public class AppSettings
             MaxTabsRestoredOnStartup = this.MaxTabsRestoredOnStartup,
             MaxTabsAllowed = this.MaxTabsAllowed,
             InspectorWidth = this.InspectorWidth,
+            TabWidth = this.TabWidth,
             StartInDualPane = this.StartInDualPane,
             ShowInspectorOnStartup = this.ShowInspectorOnStartup,
             ConfirmBeforeDelete = this.ConfirmBeforeDelete,

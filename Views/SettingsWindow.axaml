@@ -167,6 +167,16 @@
                 </DockPanel>
                 <Slider Minimum="22" Maximum="40" Value="{Binding DataGridRowHeight, Mode=TwoWay}"/>
               </StackPanel>
+
+              <!-- Tab Width Slider -->
+              <StackPanel Spacing="4">
+                <DockPanel>
+                  <TextBlock Text="Explorer Tab Width:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" DockPanel.Dock="Left"/>
+                  <TextBlock Text="{Binding TabWidth, StringFormat='{}{0:F0} px'}" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"
+                             FontFamily="{DynamicResource AppMonoFont}" DockPanel.Dock="Right"/>
+                </DockPanel>
+                <Slider Minimum="80" Maximum="280" Value="{Binding TabWidth, Mode=TwoWay}"/>
+              </StackPanel>
             </StackPanel>
           </ScrollViewer>
         </TabItem>

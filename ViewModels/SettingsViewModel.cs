@@ -169,6 +169,9 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [ObservableProperty]
+    private double _tabWidth = 150.0;
+
+    [ObservableProperty]
     private int _maxTabsRestoredOnStartup = 8;
 
     [ObservableProperty]
@@ -276,6 +279,7 @@ public partial class SettingsViewModel : ObservableObject
         DataGridRowHeight = s.DataGridRowHeight;
         DefaultPath = s.DefaultPath;
         StartupBehavior = string.IsNullOrWhiteSpace(s.StartupBehavior) ? "RestoreSession" : s.StartupBehavior;
+        TabWidth = s.TabWidth >= 80 ? s.TabWidth : 150.0;
         MaxTabsRestoredOnStartup = s.MaxTabsRestoredOnStartup > 0 ? s.MaxTabsRestoredOnStartup : 8;
         MaxTabsAllowed = s.MaxTabsAllowed > 0 ? s.MaxTabsAllowed : 30;
         StartInDualPane = s.StartInDualPane;
@@ -349,6 +353,7 @@ public partial class SettingsViewModel : ObservableObject
             DataGridRowHeight = DataGridRowHeight,
             DefaultPath = DefaultPath,
             StartupBehavior = StartupBehavior,
+            TabWidth = TabWidth,
             MaxTabsRestoredOnStartup = MaxTabsRestoredOnStartup,
             MaxTabsAllowed = MaxTabsAllowed,
             StartInDualPane = StartInDualPane,

@@ -32,6 +32,9 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     private string _rawAddressInput = string.Empty;
 
     [ObservableProperty]
+    private double _tabWidth = 150.0;
+
+    [ObservableProperty]
     private bool _isActive;
 
     // Reactive Context Menu State
@@ -255,6 +258,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         ColumnWidthAttributes = s.ColumnWidthAttributes > 0 ? s.ColumnWidthAttributes : 90;
         ColumnWidthPermissions = s.ColumnWidthPermissions > 0 ? s.ColumnWidthPermissions : 110;
         ColumnWidthOwnerGroup = s.ColumnWidthOwnerGroup > 0 ? s.ColumnWidthOwnerGroup : 110;
+        TabWidth = s.TabWidth >= 80 ? s.TabWidth : 150.0;
     }
 
     [RelayCommand]

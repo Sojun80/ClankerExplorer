@@ -43,6 +43,25 @@ public partial class ExplorerPaneView : UserControl
                         await topLevel.Clipboard.SetTextAsync(text);
                     }
                 };
+
+                vm.Tabs.CollectionChanged += (s2, e2) =>
+                {
+                    Dispatcher.UIThread.Post(UpdateTabScrollButtonsVisibility, DispatcherPriority.Loaded);
+                };
+
+                vm.PropertyChanged += (s2, e2) =>
+                {
+                    if (e2.PropertyName == nameof(ExplorerPaneViewModel.TabWidth))
+                    {
+                        Dispatcher.UIThread.Post(UpdateTabScrollButtonsVisibility, DispatcherPriority.Loaded);
+                    }
+                };
+            }
+
+            if (TabsScrollViewer != null)
+            {
+                TabsScrollViewer.SizeChanged += (s2, e2) => UpdateTabScrollButtonsVisibility();
+                TabsScrollViewer.LayoutUpdated += (s2, e2) => UpdateTabScrollButtonsVisibility();
             }
 
             if (FileDataGrid != null)
@@ -62,6 +81,8 @@ public partial class ExplorerPaneView : UserControl
                     }
                 };
             }
+
+            Dispatcher.UIThread.Post(UpdateTabScrollButtonsVisibility, DispatcherPriority.Loaded);
         };
     }
 
@@ -245,6 +266,15 @@ public partial class ExplorerPaneView : UserControl
         _isTabDragging = false;
     }
 
+    private void UpdateTabScrollButtonsVisibility()
+    {
+        if (TabsScrollViewer != null && TabScrollButtonsPanel != null)
+        {
+            bool canScroll = TabsScrollViewer.Extent.Width > TabsScrollViewer.Viewport.Width + 4;
+            TabScrollButtonsPanel.IsVisible = canScroll;
+        }
+    }
+
     private void OnTabsPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
         if (TabsScrollViewer != null)
@@ -253,6 +283,7 @@ public partial class ExplorerPaneView : UserControl
             double maxOffset = Math.Max(0, TabsScrollViewer.Extent.Width - TabsScrollViewer.Viewport.Width);
             double targetOffset = Math.Clamp(TabsScrollViewer.Offset.X + scrollDelta, 0, maxOffset);
             TabsScrollViewer.Offset = new Vector(targetOffset, TabsScrollViewer.Offset.Y);
+            UpdateTabScrollButtonsVisibility();
             e.Handled = true;
         }
     }
@@ -263,6 +294,7 @@ public partial class ExplorerPaneView : UserControl
         {
             double targetOffset = Math.Max(0, TabsScrollViewer.Offset.X - 120);
             TabsScrollViewer.Offset = new Vector(targetOffset, TabsScrollViewer.Offset.Y);
+            UpdateTabScrollButtonsVisibility();
         }
     }
 
@@ -273,6 +305,7 @@ public partial class ExplorerPaneView : UserControl
             double maxOffset = Math.Max(0, TabsScrollViewer.Extent.Width - TabsScrollViewer.Viewport.Width);
             double targetOffset = Math.Min(maxOffset, TabsScrollViewer.Offset.X + 120);
             TabsScrollViewer.Offset = new Vector(targetOffset, TabsScrollViewer.Offset.Y);
+            UpdateTabScrollButtonsVisibility();
         }
     }
 
