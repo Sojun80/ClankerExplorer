@@ -128,7 +128,13 @@
       </Border>
 
       <!-- Row 1: Main Area (Sidebar + Center Panes + Inspector) -->
-      <Grid Grid.Row="1" ColumnDefinitions="240,*,Auto,Auto">
+      <Grid Grid.Row="1">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="240" MinWidth="180" MaxWidth="360"/>
+          <ColumnDefinition Width="*" MinWidth="380"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
         <!-- Column 0: Left Sidebar -->
         <Border Grid.Column="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,1,0">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -512,9 +518,10 @@
         </GridSplitter>
 
         <!-- Column 3: Right Inspector Preview Panel -->
-        <views:InspectorPanelView Grid.Column="3" DataContext="{Binding Inspector}"
+        <views:InspectorPanelView x:Name="InspectorPanel" Grid.Column="3" DataContext="{Binding Inspector}"
                                   Width="{Binding $parent[Window].((vm:MainViewModel)DataContext).InspectorWidth}"
-                                  MinWidth="180" MaxWidth="800"
+                                  MinWidth="200" MaxWidth="800"
+                                  HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).ShowInspector}"/>
       </Grid>
 

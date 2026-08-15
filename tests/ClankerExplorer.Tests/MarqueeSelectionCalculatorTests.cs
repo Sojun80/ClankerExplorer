@@ -5,6 +5,64 @@ namespace ClankerExplorer.Tests;
 public sealed class MarqueeSelectionCalculatorTests
 {
     [Fact]
+    public void VisibleRowCalculation_AccountsForScrolledFirstItem()
+    {
+        var selected = MarqueeSelectionCalculator.CalculateFromVisibleRow(
+            firstY: 33,
+            secondY: 63,
+            firstVisibleIndex: 5,
+            firstRowTop: 32,
+            rowHeight: 32,
+            itemCount: 20);
+
+        Assert.Equal(new[] { 5 }, selected.OrderBy(index => index));
+    }
+
+    [Fact]
+    public void VisibleRowCalculation_DoesNotSelectAnOffscreenRowAboveTheList()
+    {
+        var selected = MarqueeSelectionCalculator.CalculateFromVisibleRow(
+            firstY: 0,
+            secondY: 20,
+            firstVisibleIndex: 10,
+            firstRowTop: 32,
+            rowHeight: 32,
+            itemCount: 20);
+
+        Assert.Empty(selected);
+    }
+
+    [Fact]
+    public void VisibleRowCalculation_DoesNotClampBlankSpaceBelowListToLastItem()
+    {
+        var selected = MarqueeSelectionCalculator.CalculateFromVisibleRow(
+            firstY: 200,
+            secondY: 240,
+            firstVisibleIndex: 0,
+            firstRowTop: 32,
+            rowHeight: 32,
+            itemCount: 3);
+
+        Assert.Empty(selected);
+    }
+
+    [Fact]
+    public void VisibleRowCalculation_PreservesCtrlSelectionWhenRangeMissesRows()
+    {
+        var selected = MarqueeSelectionCalculator.CalculateFromVisibleRow(
+            firstY: 200,
+            secondY: 240,
+            firstVisibleIndex: 0,
+            firstRowTop: 32,
+            rowHeight: 32,
+            itemCount: 3,
+            baseSelection: new[] { 1 },
+            preserveBaseSelection: true);
+
+        Assert.Equal(new[] { 1 }, selected);
+    }
+
+    [Fact]
     public void BackgroundDrag_SelectsRowsIntersectingVerticalRange()
     {
         var selected = MarqueeSelectionCalculator.CalculateSelectedIndexes(

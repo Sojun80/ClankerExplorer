@@ -81,6 +81,16 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
 dotnet run
 ```
 
+### Tests
+
+Run the fast regression suite from the repository root:
+
+```bash
+dotnet test
+```
+
+The suite uses disposable filesystem and configuration directories. See [tests/README.md](tests/README.md) for its structure and current UI/integration boundaries.
+
 ### Build Single-File Windows Executable (`.exe`)
 ```bash
 dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true

@@ -58,6 +58,36 @@ public sealed class ClipboardFileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CutFile_PastedIntoItsCurrentDirectoryIsASuccessfulNoOp()
+    {
+        using var fs = new TemporaryFileSystem();
+        var source = Path.Combine(fs.FolderA, "alpha.txt");
+        ClipboardFileService.Cut(new[] { source });
+
+        var result = await ClipboardFileService.PasteAsync(fs.FolderA);
+
+        Assert.Equal(1, result.successCount);
+        Assert.Empty(result.failedPaths);
+        Assert.Equal("alpha", File.ReadAllText(source));
+        Assert.False(ClipboardFileService.CanPaste);
+    }
+
+    [Fact]
+    public async Task CutFolder_MovesItsNestedContents()
+    {
+        using var fs = new TemporaryFileSystem();
+        ClipboardFileService.Cut(new[] { fs.FolderC });
+
+        var result = await ClipboardFileService.PasteAsync(fs.FolderB);
+
+        Assert.Equal(1, result.successCount);
+        Assert.False(Directory.Exists(fs.FolderC));
+        Assert.Equal(
+            "nested",
+            File.ReadAllText(Path.Combine(fs.FolderB, "FolderC", "Nested", "nested.txt")));
+    }
+
+    [Fact]
     public async Task MissingSource_IsReportedAndRetainedWhenCut()
     {
         using var fs = new TemporaryFileSystem();

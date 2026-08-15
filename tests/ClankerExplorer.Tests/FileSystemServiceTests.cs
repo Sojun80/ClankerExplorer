@@ -1,5 +1,6 @@
 using ClankerExplorer.Services;
 using ClankerExplorer.Tests.TestInfrastructure;
+using ClankerExplorer.ViewModels;
 
 namespace ClankerExplorer.Tests;
 
@@ -18,6 +19,23 @@ public sealed class FileSystemServiceTests
         Assert.Contains(items, item => item.Name == "FolderA" && item.IsDirectory);
         Assert.Contains(items, item => item.Name == "FolderB" && item.IsDirectory);
         Assert.Contains(items, item => item.Name == "FolderC" && item.IsDirectory);
+    }
+
+    [Fact]
+    public async Task TabRefresh_ReflectsFilesCreatedAndRemovedAfterInitialLoad()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var tab = new ExplorerTabViewModel(fs.FolderB);
+        await tab.RefreshAsync();
+        Assert.Empty(tab.Items);
+
+        var created = Path.GetFullPath(fs.CreateFile("FolderB/appeared.txt", "new"));
+        await tab.RefreshAsync();
+        Assert.Contains(tab.Items, item => string.Equals(Path.GetFullPath(item.FullPath), created, StringComparison.OrdinalIgnoreCase));
+
+        File.Delete(created);
+        await tab.RefreshAsync();
+        Assert.DoesNotContain(tab.Items, item => string.Equals(Path.GetFullPath(item.FullPath), created, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

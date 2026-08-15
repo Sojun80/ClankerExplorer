@@ -116,6 +116,29 @@ public sealed class CoreAndTabTests
     }
 
     [Fact]
+    public void DuplicateTabCommand_PreservesPathHistoryAndFilterState()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderA);
+        var source = pane.SelectedTab!;
+        source.NavigateTo(fs.FolderB);
+        source.FilterText = "*.txt";
+        source.IsFilterWildcard = true;
+
+        pane.DuplicateTab(source);
+
+        var clone = pane.SelectedTab!;
+        Assert.Equal(2, pane.Tabs.Count);
+        Assert.NotSame(source, clone);
+        Assert.Equal(source.CurrentPath, clone.CurrentPath);
+        Assert.Equal(source.History, clone.History);
+        Assert.Equal(source.HistoryIndex, clone.HistoryIndex);
+        Assert.Equal(source.FilterText, clone.FilterText);
+        Assert.Equal(source.IsFilterWildcard, clone.IsFilterWildcard);
+    }
+
+    [Fact]
     public void MainModel_CreatesIndependentLeftAndRightPaneState()
     {
         using var fs = new TemporaryFileSystem();

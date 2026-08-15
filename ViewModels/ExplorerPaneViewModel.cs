@@ -472,9 +472,14 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public void DuplicateTab(ExplorerTabViewModel? tab)
     {
         var target = tab ?? SelectedTab;
-        if (target != null)
+        var settings = SettingsService.Instance.CurrentSettings;
+        if (target != null &&
+            (settings.MaxTabsAllowed <= 0 || Tabs.Count < settings.MaxTabsAllowed))
         {
-            AddNewTab(target.CurrentPath);
+            var clone = target.CloneTab();
+            Tabs.Add(clone);
+            SelectedTab = clone;
+            WireTabEvents(clone);
         }
     }
 

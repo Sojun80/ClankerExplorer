@@ -7,7 +7,7 @@
              x:Class="ClankerExplorer.Views.InspectorPanelView"
              x:DataType="vm:InspectorViewModel"
              mc:Ignorable="d" d:DesignWidth="360" d:DesignHeight="600"
-             Width="360">
+             HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
 
   <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1,0,0,0">
     <Grid RowDefinitions="Auto,*,Auto">

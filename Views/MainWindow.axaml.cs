@@ -199,6 +199,17 @@ public partial class MainWindow : Window
 
         TabDragCoordinator.Instance.TabDragMoved += OnTabDragMoved;
         TabDragCoordinator.Instance.TabDragEnded += OnTabDragEnded;
+
+        if (InspectorPanel != null)
+        {
+            InspectorPanel.SizeChanged += (s, e) =>
+            {
+                if (DataContext is MainViewModel vm && vm.ShowInspector && e.NewSize.Width >= 180)
+                {
+                    vm.InspectorWidth = e.NewSize.Width;
+                }
+            };
+        }
     }
 
     private void OnTabDragMoved(ExplorerTabViewModel tab, Point winPos, bool isCtrl)
