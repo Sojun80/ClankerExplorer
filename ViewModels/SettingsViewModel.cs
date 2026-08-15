@@ -426,7 +426,43 @@ public partial class SettingsViewModel : ObservableObject
         var dir = Path.GetDirectoryName(SettingsLocationText);
         if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
         {
-            FileSystemService.Instance.OpenItem(dir);
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = dir,
+                    UseShellExecute = true
+                });
+            }
+            catch { }
         }
+    }
+
+    [RelayCommand]
+    public void OpenGitHub()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://github.com/Sojun80/ClankerExplorer",
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    }
+
+    [RelayCommand]
+    public void OpenGitHubIssues()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://github.com/Sojun80/ClankerExplorer/issues",
+                UseShellExecute = true
+            });
+        }
+        catch { }
     }
 }
