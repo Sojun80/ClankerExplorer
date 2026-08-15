@@ -555,17 +555,76 @@ public class FileSystemService
         }
     }
 
-    public void Delete(IEnumerable<string> paths, bool permanent)
+    public void Delete(IEnumerable<string> paths, bool permanent = false)
     {
         foreach (var path in paths)
         {
-            if (File.Exists(path))
+            if (string.IsNullOrWhiteSpace(path)) continue;
+
+            try
             {
-                File.Delete(path);
+                if (permanent)
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                    }
+                    else if (Directory.Exists(path))
+                    {
+                        Directory.Delete(path, true);
+                    }
+                }
+                else
+                {
+                    // Move to Recycle Bin / Trash
+                    if (OperatingSystem.IsWindows())
+                    {
+                        if (File.Exists(path))
+                        {
+                            Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
+                                path,
+                                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin
+                            );
+                        }
+                        else if (Directory.Exists(path))
+                        {
+                            Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
+                                path,
+                                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin
+                            );
+                        }
+                    }
+                    else
+                    {
+                        // Linux / POSIX Trash fallback
+                        bool trashed = false;
+                        try
+                        {
+                            var proc = Process.Start(new ProcessStartInfo
+                            {
+                                FileName = "gio",
+                                Arguments = $"trash \"{path}\"",
+                                CreateNoWindow = true,
+                                UseShellExecute = false
+                            });
+                            proc?.WaitForExit(3000);
+                            trashed = proc?.ExitCode == 0;
+                        }
+                        catch { }
+
+                        if (!trashed)
+                        {
+                            if (File.Exists(path)) File.Delete(path);
+                            else if (Directory.Exists(path)) Directory.Delete(path, true);
+                        }
+                    }
+                }
             }
-            else if (Directory.Exists(path))
+            catch (Exception ex)
             {
-                Directory.Delete(path, true);
+                Debug.WriteLine($"Failed to delete {path}: {ex.Message}");
             }
         }
     }
@@ -586,12 +645,14 @@ public class FileSystemService
     {
         try
         {
+            var workingDir = Directory.Exists(path) ? path : (File.Exists(path) ? Path.GetDirectoryName(path) : path) ?? @"C:\";
             if (OperatingSystem.IsWindows())
             {
                 var psi = new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    Arguments = $"-NoExit -Command \"Set-Location -LiteralPath '{path}'\"",
+                    Arguments = "-NoExit",
+                    WorkingDirectory = workingDir,
                     UseShellExecute = true
                 };
                 if (asAdmin)
@@ -605,7 +666,7 @@ public class FileSystemService
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "x-terminal-emulator",
-                    WorkingDirectory = path,
+                    WorkingDirectory = workingDir,
                     UseShellExecute = true
                 });
             }
@@ -620,13 +681,14 @@ public class FileSystemService
     {
         try
         {
+            var workingDir = Directory.Exists(path) ? path : (File.Exists(path) ? Path.GetDirectoryName(path) : path) ?? @"C:\";
             if (OperatingSystem.IsWindows())
             {
                 var psi = new ProcessStartInfo
                 {
                     FileName = "cmd.exe",
-                    Arguments = $"/k \"cd /d \"\"{path}\"\"\"",
-                    WorkingDirectory = path,
+                    Arguments = "/k",
+                    WorkingDirectory = workingDir,
                     UseShellExecute = true
                 };
                 if (asAdmin)

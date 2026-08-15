@@ -85,13 +85,16 @@ public partial class MainWindow : Window
                 vm.RequestDeleteWithConfirmation += async (item, perm) =>
                 {
                     if (item == null) return;
-                    var dlg = new ConfirmDeleteWindow(item.Name, item.FullPath);
-                    var res = await dlg.ShowDialog<bool>(this);
-                    if (res)
+                    var settings = SettingsService.Instance.CurrentSettings;
+                    if (settings.ConfirmBeforeDelete)
                     {
-                        FileSystemService.Instance.Delete(new[] { item.FullPath }, perm);
-                        vm.ActivePane.Refresh();
+                        var dlg = new ConfirmDeleteWindow(item.Name, item.FullPath, perm);
+                        var res = await dlg.ShowDialog<bool>(this);
+                        if (!res) return;
                     }
+
+                    FileSystemService.Instance.Delete(new[] { item.FullPath }, perm);
+                    vm.ActivePane.Refresh();
                 };
             }
         };
@@ -101,12 +104,13 @@ public partial class MainWindow : Window
         {
             if (DataContext is not MainViewModel vm) return;
 
-            // Delete Key: Confirm Delete
+            // Delete / Shift+Delete Key: Delete Selected
             if (e.Key == Key.Delete)
             {
                 if (e.Source is not TextBox)
                 {
-                    vm.ActivePane.DeleteSelected();
+                    bool isPermanent = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+                    vm.ActivePane.DeleteSelected(isPermanent);
                     e.Handled = true;
                     return;
                 }

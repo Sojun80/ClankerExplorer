@@ -12,10 +12,25 @@ public partial class ConfirmDeleteWindow : Window
         InitializeComponent();
     }
 
-    public ConfirmDeleteWindow(string itemName, string fullPath) : this()
+    public ConfirmDeleteWindow(string itemName, string fullPath, bool permanent = false) : this()
     {
         TxtItemName.Text = $"📁 {itemName}";
         TxtItemPath.Text = fullPath;
+
+        if (permanent)
+        {
+            TxtTitle.Text = "Permanently Delete Item";
+            TxtHeader.Text = "Are you sure you want to permanently delete this item?";
+            TxtWarning.IsVisible = true;
+            BtnDelete.Content = "Permanently Delete";
+        }
+        else
+        {
+            TxtTitle.Text = "Move to Recycle Bin";
+            TxtHeader.Text = "Are you sure you want to move this item to the Recycle Bin?";
+            TxtWarning.IsVisible = false;
+            BtnDelete.Content = "Move to Recycle Bin";
+        }
 
         Loaded += (s, e) =>
         {
