@@ -1,0 +1,333 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:ClankerExplorer.ViewModels"
+        x:Class="ClankerExplorer.Views.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
+        Title="Settings &amp; Customization - C-Explorer"
+        Icon="/Assets/app-icon.png"
+        Width="700" Height="620"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppBgBrush}" Foreground="{DynamicResource AppTextBrush}"
+        FontFamily="{DynamicResource AppUiFont}"
+        CanResize="False"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="36"
+        ExtendClientAreaChromeHints="Default">
+
+  <!-- Outer Window Border -->
+  <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppBgBrush}">
+    <Grid RowDefinitions="Auto,*,Auto">
+
+      <!-- Row 0: Seamless Dark TitleBar with Window Dragging -->
+      <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1"
+              Height="36" Padding="12,0" PointerPressed="OnTitleBarPointerPressed">
+        <DockPanel LastChildFill="True">
+          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Image Source="/Assets/app-icon.png" Width="18" Height="18" VerticalAlignment="Center"/>
+            <TextBlock Text="Settings &amp; Theme Customization" FontSize="12.5" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <!-- Row 1: Main Content Tabs -->
+      <TabControl Grid.Row="1" Background="Transparent" Margin="14,10,14,4">
+
+        <!-- TAB 1: APPEARANCE & COLORS -->
+        <TabItem Header="🎨 Colors &amp; Themes">
+          <ScrollViewer Margin="0,10">
+            <StackPanel Spacing="12">
+              <!-- Preset Selection with Live Preview Hint -->
+              <StackPanel Spacing="4">
+                <DockPanel>
+                  <TextBlock Text="THEME PRESET (LIVE PREVIEW)" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"
+                             FontFamily="{DynamicResource AppMonoFont}" DockPanel.Dock="Left"/>
+                  <TextBlock Text="⚡ Live Preview Active" FontSize="9.5" Foreground="{DynamicResource AppHighlightBrush}"
+                             FontFamily="{DynamicResource AppMonoFont}" DockPanel.Dock="Right"/>
+                </DockPanel>
+                <ComboBox ItemsSource="{Binding AvailablePresets}" SelectedItem="{Binding ThemePreset}"
+                          HorizontalAlignment="Stretch" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                          BorderBrush="{DynamicResource AppBorderBrush}"/>
+              </StackPanel>
+
+              <!-- Color Pickers Grid with Interactive Palette Buttons -->
+              <TextBlock Text="CUSTOM COLOR PALETTE &amp; COLOR PICKERS" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"
+                         FontFamily="{DynamicResource AppMonoFont}" Margin="0,6,0,0"/>
+
+              <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" Margin="0,4">
+                <!-- Background Color -->
+                <StackPanel Grid.Row="0" Grid.Column="0" Spacing="3" Margin="0,0,8,8">
+                  <TextBlock Text="Background Color:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding BackgroundColor, Mode=TwoWay}" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                             BorderBrush="{DynamicResource AppBorderBrush}" FontFamily="{DynamicResource AppMonoFont}" VerticalAlignment="Center"/>
+                    <ColorPicker Grid.Column="1" Color="{Binding BackgroundColorPicker, Mode=TwoWay}"
+                                 Margin="6,0,0,0" VerticalAlignment="Center"
+                                 ToolTip.Tip="Pick Background Color"/>
+                  </Grid>
+                </StackPanel>
+
+                <!-- Surface Color -->
+                <StackPanel Grid.Row="0" Grid.Column="1" Spacing="3" Margin="8,0,0,8">
+                  <TextBlock Text="Surface / Panels:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding SurfaceColor, Mode=TwoWay}" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                             BorderBrush="{DynamicResource AppBorderBrush}" FontFamily="{DynamicResource AppMonoFont}" VerticalAlignment="Center"/>
+                    <ColorPicker Grid.Column="1" Color="{Binding SurfaceColorPicker, Mode=TwoWay}"
+                                 Margin="6,0,0,0" VerticalAlignment="Center"
+                                 ToolTip.Tip="Pick Surface / Panels Color"/>
+                  </Grid>
+                </StackPanel>
+
+                <!-- Accent Color -->
+                <StackPanel Grid.Row="1" Grid.Column="0" Spacing="3" Margin="0,0,8,8">
+                  <TextBlock Text="Primary Accent (Active/Buttons):" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding AccentColor, Mode=TwoWay}" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                             BorderBrush="{DynamicResource AppBorderBrush}" FontFamily="{DynamicResource AppMonoFont}" VerticalAlignment="Center"/>
+                    <ColorPicker Grid.Column="1" Color="{Binding AccentColorPicker, Mode=TwoWay}"
+                                 Margin="6,0,0,0" VerticalAlignment="Center"
+                                 ToolTip.Tip="Pick Accent Color"/>
+                  </Grid>
+                </StackPanel>
+
+                <!-- Highlight Color -->
+                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="3" Margin="8,0,0,8">
+                  <TextBlock Text="Highlight / Glow:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding HighlightColor, Mode=TwoWay}" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                             BorderBrush="{DynamicResource AppBorderBrush}" FontFamily="{DynamicResource AppMonoFont}" VerticalAlignment="Center"/>
+                    <ColorPicker Grid.Column="1" Color="{Binding HighlightColorPicker, Mode=TwoWay}"
+                                 Margin="6,0,0,0" VerticalAlignment="Center"
+                                 ToolTip.Tip="Pick Highlight / Glow Color"/>
+                  </Grid>
+                </StackPanel>
+
+                <!-- Border Color -->
+                <StackPanel Grid.Row="2" Grid.Column="0" Spacing="3" Margin="0,0,8,0">
+                  <TextBlock Text="Borders &amp; Dividers:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding BorderColor, Mode=TwoWay}" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                             BorderBrush="{DynamicResource AppBorderBrush}" FontFamily="{DynamicResource AppMonoFont}" VerticalAlignment="Center"/>
+                    <ColorPicker Grid.Column="1" Color="{Binding BorderColorPicker, Mode=TwoWay}"
+                                 Margin="6,0,0,0" VerticalAlignment="Center"
+                                 ToolTip.Tip="Pick Borders &amp; Dividers Color"/>
+                  </Grid>
+                </StackPanel>
+
+                <!-- Text Color -->
+                <StackPanel Grid.Row="2" Grid.Column="1" Spacing="3" Margin="8,0,0,0">
+                  <TextBlock Text="Primary Text Color:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding TextColor, Mode=TwoWay}" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                             BorderBrush="{DynamicResource AppBorderBrush}" FontFamily="{DynamicResource AppMonoFont}" VerticalAlignment="Center"/>
+                    <ColorPicker Grid.Column="1" Color="{Binding TextColorPicker, Mode=TwoWay}"
+                                 Margin="6,0,0,0" VerticalAlignment="Center"
+                                 ToolTip.Tip="Pick Primary Text Color"/>
+                  </Grid>
+                </StackPanel>
+              </Grid>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- TAB 2: TYPOGRAPHY & SIZING -->
+        <TabItem Header="🔤 Typography &amp; Fonts">
+          <ScrollViewer Margin="0,10">
+            <StackPanel Spacing="14">
+              <!-- UI Font -->
+              <StackPanel Spacing="4">
+                <TextBlock Text="UI FONT FAMILY" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                <ComboBox ItemsSource="{Binding AvailableFonts}" SelectedItem="{Binding UiFontFamily}"
+                          HorizontalAlignment="Stretch" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}" BorderBrush="{DynamicResource AppBorderBrush}"/>
+              </StackPanel>
+
+              <!-- Monospace Font -->
+              <StackPanel Spacing="4">
+                <TextBlock Text="CODE &amp; MONOSPACE FONT (Inspector, Hex, Details)" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                <ComboBox ItemsSource="{Binding AvailableMonoFonts}" SelectedItem="{Binding MonoFontFamily}"
+                          HorizontalAlignment="Stretch" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}" BorderBrush="{DynamicResource AppBorderBrush}"/>
+              </StackPanel>
+
+              <!-- Base Font Size Slider -->
+              <StackPanel Spacing="4">
+                <DockPanel>
+                  <TextBlock Text="Base UI Font Size:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" DockPanel.Dock="Left"/>
+                  <TextBlock Text="{Binding BaseFontSize, StringFormat='{}{0:F0} px'}" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"
+                             FontFamily="{DynamicResource AppMonoFont}" DockPanel.Dock="Right"/>
+                </DockPanel>
+                <Slider Minimum="10" Maximum="18" Value="{Binding BaseFontSize, Mode=TwoWay}"/>
+              </StackPanel>
+
+              <!-- Row Height Slider -->
+              <StackPanel Spacing="4">
+                <DockPanel>
+                  <TextBlock Text="File List Row Height / Density:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" DockPanel.Dock="Left"/>
+                  <TextBlock Text="{Binding DataGridRowHeight, StringFormat='{}{0:F0} px'}" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"
+                             FontFamily="{DynamicResource AppMonoFont}" DockPanel.Dock="Right"/>
+                </DockPanel>
+                <Slider Minimum="22" Maximum="40" Value="{Binding DataGridRowHeight, Mode=TwoWay}"/>
+              </StackPanel>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- TAB 3: COLUMNS & DISPLAY -->
+        <TabItem Header="📊 Columns &amp; Display">
+          <ScrollViewer Margin="0,10">
+            <StackPanel Spacing="14">
+              <TextBlock Text="VISIBLE COLUMNS IN FILE LIST" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+              <TextBlock Text="Choose which details and metadata columns to display in the main file browser table."
+                         FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" TextWrapping="Wrap"/>
+
+              <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12,8">
+                <StackPanel Spacing="10">
+                  <CheckBox IsChecked="True" IsEnabled="False">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="Name (File / Folder Name)" Foreground="{DynamicResource AppTextBrush}" FontSize="12" FontWeight="SemiBold"/>
+                      <TextBlock Text="(Always Required)" Foreground="{DynamicResource AppSubTextBrush}" FontSize="10.5"/>
+                    </StackPanel>
+                  </CheckBox>
+
+                  <CheckBox IsChecked="{Binding ShowColumnExt, Mode=TwoWay}">
+                    <TextBlock Text="Ext (File Extension badge)" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
+
+                  <CheckBox IsChecked="{Binding ShowColumnSize, Mode=TwoWay}">
+                    <TextBlock Text="Size (File Size / &lt;DIR&gt;)" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
+
+                  <CheckBox IsChecked="{Binding ShowColumnDateModified, Mode=TwoWay}">
+                    <TextBlock Text="Date Modified (Last modified timestamp)" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
+
+                  <CheckBox IsChecked="{Binding ShowColumnDateCreated, Mode=TwoWay}">
+                    <TextBlock Text="Date Created (Creation timestamp)" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
+
+                  <CheckBox IsChecked="{Binding ShowColumnDateAccessed, Mode=TwoWay}">
+                    <TextBlock Text="Date Accessed (Last read/accessed timestamp)" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
+
+                  <CheckBox IsChecked="{Binding ShowColumnItemType, Mode=TwoWay}">
+                    <TextBlock Text="Type (File Type description, e.g. C# Source File)" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
+
+                  <CheckBox IsChecked="{Binding ShowColumnAttributes, Mode=TwoWay}">
+                    <TextBlock Text="Attributes (Read-only, Hidden, Archive attributes)" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
+
+                  <CheckBox IsChecked="{Binding ShowColumnPermissions, Mode=TwoWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="Permissions (POSIX drwxr-xr-x / 0755)" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                      <Border Background="{DynamicResource AppBorderBrush}" CornerRadius="3" Padding="4,1">
+                        <TextBlock Text="Linux / POSIX" FontSize="9" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                      </Border>
+                    </StackPanel>
+                  </CheckBox>
+
+                  <CheckBox IsChecked="{Binding ShowColumnOwnerGroup, Mode=TwoWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="Owner &amp; Group (user:group)" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                      <Border Background="{DynamicResource AppBorderBrush}" CornerRadius="3" Padding="4,1">
+                        <TextBlock Text="Linux / POSIX" FontSize="9" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                      </Border>
+                    </StackPanel>
+                  </CheckBox>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- TAB 4: BEHAVIOR & STARTUP -->
+        <TabItem Header="⚙️ General &amp; Startup">
+          <ScrollViewer Margin="0,10">
+            <StackPanel Spacing="14">
+              <!-- Default Startup Path -->
+              <StackPanel Spacing="4">
+                <TextBlock Text="DEFAULT STARTUP DIRECTORY" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                <TextBox Text="{Binding DefaultPath, Mode=TwoWay}" Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                         BorderBrush="{DynamicResource AppBorderBrush}" FontFamily="{DynamicResource AppMonoFont}" Padding="6,4"/>
+              </StackPanel>
+
+              <!-- Dual Pane Startup -->
+              <CheckBox IsChecked="{Binding StartInDualPane, Mode=TwoWay}" Margin="0,4">
+                <TextBlock Text="Start in Dual-Pane mode on launch" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+              </CheckBox>
+
+              <!-- Inspector Startup -->
+              <CheckBox IsChecked="{Binding ShowInspectorOnStartup, Mode=TwoWay}" Margin="0,4">
+                <TextBlock Text="Open File Inspector panel on launch" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+              </CheckBox>
+
+              <!-- Confirm Delete -->
+              <CheckBox IsChecked="{Binding ConfirmBeforeDelete, Mode=TwoWay}" Margin="0,4">
+                <TextBlock Text="Confirm before deleting files" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+              </CheckBox>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- TAB 5: BACKUP & PORTABILITY -->
+        <TabItem Header="💾 Portability &amp; Backup">
+          <ScrollViewer Margin="0,10">
+            <StackPanel Spacing="14">
+              <TextBlock Text="PORTABLE CONFIGURATION" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+              <TextBlock Text="All settings are stored in standard JSON format and can be freely copied or imported on any Windows or Linux machine."
+                         FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" TextWrapping="Wrap"/>
+
+              <!-- Active File Location -->
+              <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="5" Padding="8,6">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="Active Configuration File:" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <TextBox Text="{Binding SettingsLocationText}" IsReadOnly="True" Background="{DynamicResource AppBgBrush}" Foreground="{DynamicResource AppHighlightBrush}"
+                           FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5" BorderThickness="0"/>
+                </StackPanel>
+              </Border>
+
+              <!-- Portability Buttons -->
+              <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                <Button Command="{Binding TriggerExportCommand}" Classes="power-btn">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="📤" FontSize="11"/>
+                    <TextBlock Text="Export Settings (JSON)..."/>
+                  </StackPanel>
+                </Button>
+
+                <Button Command="{Binding TriggerImportCommand}" Classes="power-btn">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="📥" FontSize="11"/>
+                    <TextBlock Text="Import Settings (JSON)..."/>
+                  </StackPanel>
+                </Button>
+
+                <Button Command="{Binding OpenSettingsFolderCommand}" Classes="power-btn">
+                  <TextBlock Text="Open Folder in Explorer"/>
+                </Button>
+              </StackPanel>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+      </TabControl>
+
+      <!-- Row 2: Footer Buttons -->
+      <Border Grid.Row="2" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,1,0,0" Padding="14,10">
+        <DockPanel LastChildFill="True">
+          <!-- Status Message -->
+          <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource AppHighlightBrush}" FontSize="11"
+                     VerticalAlignment="Center" DockPanel.Dock="Left"/>
+
+          <!-- Action Buttons -->
+          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" DockPanel.Dock="Right">
+            <Button Command="{Binding ResetDefaultsCommand}" Content="Reset Defaults" Classes="power-btn"/>
+            <Button Command="{Binding CancelCommand}" Content="Cancel" Classes="power-btn"/>
+            <Button Command="{Binding SaveCommand}" Content="Save &amp; Apply Settings"
+                    Background="{DynamicResource AppAccentBrush}" Foreground="#FFFFFF" FontWeight="Bold" Padding="14,6"/>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+    </Grid>
+  </Border>
+</Window>

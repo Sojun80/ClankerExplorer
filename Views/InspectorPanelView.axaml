@@ -1,0 +1,114 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:ClankerExplorer.ViewModels"
+             xmlns:models="clr-namespace:ClankerExplorer.Models"
+             x:Class="ClankerExplorer.Views.InspectorPanelView"
+             x:DataType="vm:InspectorViewModel"
+             mc:Ignorable="d" d:DesignWidth="360" d:DesignHeight="600"
+             Width="360">
+
+  <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1,0,0,0">
+    <Grid RowDefinitions="Auto,*,Auto">
+      <!-- Header -->
+      <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1"
+              Height="36" Padding="10,0">
+        <DockPanel LastChildFill="True">
+          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock Text="🔍" FontSize="12"/>
+            <TextBlock Text="Inspector Preview" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}"/>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <!-- Content Area -->
+      <Grid Grid.Row="1" Margin="8">
+        <!-- Empty State -->
+        <TextBlock Text="Select a file to inspect code, hex, or hashes"
+                   IsVisible="{Binding PreviewData, Converter={x:Static ObjectConverters.IsNull}}"
+                   Foreground="{DynamicResource AppSubTextBrush}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"
+                   TextWrapping="Wrap" TextAlignment="Center" Margin="20"/>
+
+        <!-- Populated Inspector Content -->
+        <Grid RowDefinitions="*,Auto" IsVisible="{Binding PreviewData, Converter={x:Static ObjectConverters.IsNotNull}}">
+
+          <!-- Text Preview -->
+          <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Padding="6" Margin="0,0,0,8"
+                  IsVisible="{Binding IsTextPreview}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+              <TextBox Text="{Binding PreviewData.TextContent}" IsReadOnly="True"
+                       Background="Transparent" BorderThickness="0"
+                       Foreground="{DynamicResource AppTextBrush}" FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+            </ScrollViewer>
+          </Border>
+
+          <!-- Hex Dump Preview -->
+          <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Padding="6" Margin="0,0,0,8"
+                  IsVisible="{Binding IsBinaryPreview}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+              <ItemsControl ItemsSource="{Binding HexRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="models:HexRow">
+                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,1">
+                      <TextBlock Grid.Column="0" Text="{Binding Offset}" Foreground="{DynamicResource AppSubTextBrush}"
+                                 FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5" Margin="0,0,8,0"/>
+                      <TextBlock Grid.Column="1" Text="{Binding HexBytes}" Foreground="{DynamicResource AppHighlightBrush}"
+                                 FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5" Margin="0,0,8,0"/>
+                      <TextBlock Grid.Column="2" Text="{Binding AsciiText}" Foreground="{DynamicResource AppTextBrush}"
+                                 FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5"/>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Border>
+
+          <!-- Metadata Summary Card -->
+          <Border Grid.Row="1" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Padding="8,6">
+            <StackPanel Spacing="4">
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Name:" Foreground="{DynamicResource AppSubTextBrush}" FontSize="10.5" Width="55"/>
+                <TextBlock Grid.Column="1" Text="{Binding PreviewData.Name}" Foreground="{DynamicResource AppTextBrush}"
+                           FontSize="10.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+              </Grid>
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Size:" Foreground="{DynamicResource AppSubTextBrush}" FontSize="10.5" Width="55"/>
+                <TextBlock Grid.Column="1" Text="{Binding PreviewData.FormattedSize}" Foreground="{DynamicResource AppHighlightBrush}"
+                           FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}"/>
+              </Grid>
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Modified:" Foreground="{DynamicResource AppSubTextBrush}" FontSize="10.5" Width="55"/>
+                <TextBlock Grid.Column="1" Text="{Binding PreviewData.ModifiedTime}" Foreground="{DynamicResource AppTextBrush}"
+                           FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}"/>
+              </Grid>
+            </StackPanel>
+          </Border>
+        </Grid>
+      </Grid>
+
+      <!-- Footer: Checksums Calculator -->
+      <Border Grid.Row="2" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,1,0,0" Padding="8,6">
+        <StackPanel Spacing="4">
+          <DockPanel>
+            <TextBlock Text="File Checksums" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+            <Button Command="{Binding ComputeHashesCommand}" Content="Compute Hashes"
+                    Classes="power-btn" FontSize="10" Padding="6,2" HorizontalAlignment="Right"/>
+          </DockPanel>
+
+          <StackPanel Spacing="2" IsVisible="{Binding HasHashes}">
+            <TextBlock Text="{Binding Sha256Hash, StringFormat='{}SHA256: {0}'}"
+                       FontSize="9.5" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"
+                       TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Sha256Hash}"/>
+            <TextBlock Text="{Binding Md5Hash, StringFormat='{}MD5:    {0}'}"
+                       FontSize="9.5" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"
+                       TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Md5Hash}"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Border>
+</UserControl>

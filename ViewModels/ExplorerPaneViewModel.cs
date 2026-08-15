@@ -1,0 +1,543 @@
+using System;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using ClankerExplorer.Models;
+using ClankerExplorer.Services;
+
+namespace ClankerExplorer.ViewModels;
+
+public partial class ExplorerPaneViewModel : ObservableObject
+{
+    public string PaneId { get; }
+    public string PaneLabel { get; }
+
+    [ObservableProperty]
+    private ObservableCollection<ExplorerTabViewModel> _tabs = new();
+
+    [ObservableProperty]
+    private ExplorerTabViewModel? _selectedTab;
+
+    [ObservableProperty]
+    private string _rawAddressInput = string.Empty;
+
+    [ObservableProperty]
+    private bool _isActive;
+
+    // Reactive Context Menu State
+    public bool IsItemSelected => SelectedTab?.SelectedItem != null;
+    public bool IsFolderSelected => SelectedTab?.SelectedItem?.IsDirectory == true;
+    public bool IsArchiveSelected => SelectedTab?.SelectedItem != null && !SelectedTab.SelectedItem.IsDirectory && ArchiveService.Instance.IsArchive(SelectedTab.SelectedItem.FullPath);
+    public bool IsNormalFileSelected => SelectedTab?.SelectedItem != null && !SelectedTab.SelectedItem.IsDirectory && !ArchiveService.Instance.IsArchive(SelectedTab.SelectedItem.FullPath);
+    public bool IsTextFileSelected => SelectedTab?.SelectedItem != null && !SelectedTab.SelectedItem.IsDirectory && FileSystemService.Instance.IsTextLikeFile(SelectedTab.SelectedItem.FullPath);
+
+    public string OpenArchiveLabel => "7-Zip: Open Archive";
+    public string ExtractHereLabel => "7-Zip: Extract Here";
+    public string ExtractToLabel => "7-Zip: Extract To...";
+    public string AddArchiveDialogLabel => "7-Zip: Add to archive...";
+
+    public string ExtractSubfolderLabel
+    {
+        get
+        {
+            var item = SelectedTab?.SelectedItem;
+            if (item == null) return "7-Zip: Extract to folder\\";
+            var name = Path.GetFileNameWithoutExtension(item.Name);
+            if (name.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
+            {
+                name = Path.GetFileNameWithoutExtension(name);
+            }
+            return $"7-Zip: Extract to \"{name}\\\"";
+        }
+    }
+
+    public string AddZipLabel
+    {
+        get
+        {
+            var item = SelectedTab?.SelectedItem;
+            if (item == null) return "7-Zip: Add to zip";
+            var name = item.IsDirectory ? item.Name : Path.GetFileNameWithoutExtension(item.Name);
+            return $"7-Zip: Add to \"{name}.zip\"";
+        }
+    }
+
+    // Configurable Column Visibility
+    [ObservableProperty]
+    private bool _showColumnExt = true;
+
+    [ObservableProperty]
+    private bool _showColumnSize = true;
+
+    [ObservableProperty]
+    private bool _showColumnDateModified = true;
+
+    [ObservableProperty]
+    private bool _showColumnDateCreated = true;
+
+    [ObservableProperty]
+    private bool _showColumnDateAccessed = false;
+
+    [ObservableProperty]
+    private bool _showColumnAttributes = true;
+
+    [ObservableProperty]
+    private bool _showColumnItemType = false;
+
+    [ObservableProperty]
+    private bool _showColumnPermissions = false;
+
+    [ObservableProperty]
+    private bool _showColumnOwnerGroup = false;
+
+    public string EditActionLabel => FileSystemService.Instance.GetEditMenuLabel();
+
+    public event Action<FileItem?>? FileSelectedForPreview;
+    public event Action<string, string>? RequestCreateItem; // "folder" / "file", parentPath
+    public event Action<string>? RequestOpenInOtherPane;
+    public event Action<string>? RequestPinFolder;
+    public event Action<FileItem>? RequestRename;
+    public event Action<FileItem?>? RequestProperties;
+    public event Action<string>? RequestSetClipboardText;
+
+    public ExplorerPaneViewModel(string paneId, string initialPath = @"C:\", string label = "")
+    {
+        PaneId = paneId;
+        PaneLabel = label;
+
+        LoadColumnSettings();
+
+        var tab = new ExplorerTabViewModel(initialPath);
+        Tabs.Add(tab);
+        SelectedTab = tab;
+        RawAddressInput = initialPath;
+
+        WireTabEvents(tab);
+    }
+
+    public void LoadColumnSettings()
+    {
+        var s = SettingsService.Instance.CurrentSettings;
+        ShowColumnExt = s.ShowColumnExt;
+        ShowColumnSize = s.ShowColumnSize;
+        ShowColumnDateModified = s.ShowColumnDateModified;
+        ShowColumnDateCreated = s.ShowColumnDateCreated;
+        ShowColumnDateAccessed = s.ShowColumnDateAccessed;
+        ShowColumnAttributes = s.ShowColumnAttributes;
+        ShowColumnItemType = s.ShowColumnItemType;
+        ShowColumnPermissions = s.ShowColumnPermissions;
+        ShowColumnOwnerGroup = s.ShowColumnOwnerGroup;
+    }
+
+    [RelayCommand]
+    public void ToggleColumn(string col)
+    {
+        var s = SettingsService.Instance.CurrentSettings;
+        switch (col.ToLowerInvariant())
+        {
+            case "ext":
+                ShowColumnExt = !ShowColumnExt;
+                s.ShowColumnExt = ShowColumnExt;
+                break;
+            case "size":
+                ShowColumnSize = !ShowColumnSize;
+                s.ShowColumnSize = ShowColumnSize;
+                break;
+            case "datemodified":
+            case "modified":
+                ShowColumnDateModified = !ShowColumnDateModified;
+                s.ShowColumnDateModified = ShowColumnDateModified;
+                break;
+            case "datecreated":
+            case "created":
+                ShowColumnDateCreated = !ShowColumnDateCreated;
+                s.ShowColumnDateCreated = ShowColumnDateCreated;
+                break;
+            case "dateaccessed":
+            case "accessed":
+                ShowColumnDateAccessed = !ShowColumnDateAccessed;
+                s.ShowColumnDateAccessed = ShowColumnDateAccessed;
+                break;
+            case "attributes":
+            case "attr":
+                ShowColumnAttributes = !ShowColumnAttributes;
+                s.ShowColumnAttributes = ShowColumnAttributes;
+                break;
+            case "itemtype":
+            case "type":
+                ShowColumnItemType = !ShowColumnItemType;
+                s.ShowColumnItemType = ShowColumnItemType;
+                break;
+            case "permissions":
+            case "perm":
+                ShowColumnPermissions = !ShowColumnPermissions;
+                s.ShowColumnPermissions = ShowColumnPermissions;
+                break;
+            case "ownergroup":
+            case "owner":
+                ShowColumnOwnerGroup = !ShowColumnOwnerGroup;
+                s.ShowColumnOwnerGroup = ShowColumnOwnerGroup;
+                break;
+        }
+        SettingsService.Instance.SaveSettings(s);
+    }
+
+    private void WireTabEvents(ExplorerTabViewModel tab)
+    {
+        tab.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(ExplorerTabViewModel.CurrentPath) && tab == SelectedTab)
+            {
+                RawAddressInput = tab.CurrentPath;
+            }
+            else if (e.PropertyName == nameof(ExplorerTabViewModel.SelectedItem) && tab == SelectedTab)
+            {
+                NotifyContextMenuProperties();
+                FileSelectedForPreview?.Invoke(tab.SelectedItem);
+            }
+        };
+    }
+
+    public void NotifyContextMenuProperties()
+    {
+        OnPropertyChanged(nameof(IsItemSelected));
+        OnPropertyChanged(nameof(IsFolderSelected));
+        OnPropertyChanged(nameof(IsArchiveSelected));
+        OnPropertyChanged(nameof(IsNormalFileSelected));
+        OnPropertyChanged(nameof(IsTextFileSelected));
+        OnPropertyChanged(nameof(ExtractSubfolderLabel));
+        OnPropertyChanged(nameof(AddZipLabel));
+        OnPropertyChanged(nameof(EditActionLabel));
+    }
+
+    partial void OnSelectedTabChanged(ExplorerTabViewModel? value)
+    {
+        if (value != null)
+        {
+            RawAddressInput = value.CurrentPath;
+            NotifyContextMenuProperties();
+            FileSelectedForPreview?.Invoke(value.SelectedItem);
+        }
+    }
+
+    [RelayCommand]
+    public void AddNewTab(string? path = null)
+    {
+        var targetPath = path ?? SelectedTab?.CurrentPath ?? @"C:\";
+        var newTab = new ExplorerTabViewModel(targetPath);
+        Tabs.Add(newTab);
+        SelectedTab = newTab;
+        WireTabEvents(newTab);
+    }
+
+    [RelayCommand]
+    public void CloseTab(ExplorerTabViewModel? tab)
+    {
+        var target = tab ?? SelectedTab;
+        if (target == null || Tabs.Count <= 1) return;
+
+        int idx = Tabs.IndexOf(target);
+        Tabs.Remove(target);
+
+        if (SelectedTab == target)
+        {
+            int nextIdx = Math.Min(idx, Tabs.Count - 1);
+            SelectedTab = Tabs[nextIdx];
+        }
+    }
+
+    [RelayCommand]
+    public void GoBack() => SelectedTab?.GoBack();
+
+    [RelayCommand]
+    public void GoForward() => SelectedTab?.GoForward();
+
+    [RelayCommand]
+    public void GoUp() => SelectedTab?.GoUp();
+
+    [RelayCommand]
+    public void Refresh() => SelectedTab?.Refresh();
+
+    [RelayCommand]
+    public void SubmitAddress()
+    {
+        if (!string.IsNullOrWhiteSpace(RawAddressInput) && SelectedTab != null)
+        {
+            SelectedTab.NavigateTo(RawAddressInput);
+        }
+    }
+
+    [RelayCommand]
+    public void TriggerNewFolder()
+    {
+        if (SelectedTab != null)
+        {
+            RequestCreateItem?.Invoke("folder", SelectedTab.CurrentPath);
+        }
+    }
+
+    [RelayCommand]
+    public void TriggerNewFile()
+    {
+        if (SelectedTab != null)
+        {
+            RequestCreateItem?.Invoke("file", SelectedTab.CurrentPath);
+        }
+    }
+
+    [RelayCommand]
+    public void OpenItem(FileItem? item = null)
+    {
+        var target = item ?? SelectedTab?.SelectedItem;
+        if (target == null) return;
+
+        if (target.IsDirectory)
+        {
+            SelectedTab?.NavigateTo(target.FullPath);
+        }
+        else if (ArchiveService.Instance.IsArchive(target.FullPath))
+        {
+            ArchiveService.Instance.OpenArchive(target.FullPath);
+        }
+        else
+        {
+            FileSystemService.Instance.OpenItem(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void EditItem()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null && !target.IsDirectory)
+        {
+            FileSystemService.Instance.EditFile(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void OpenWith()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null && !target.IsDirectory)
+        {
+            FileSystemService.Instance.OpenWith(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void CopyFiles()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            ClipboardFileService.Copy(new[] { target.FullPath });
+            RequestSetClipboardText?.Invoke(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void CutFiles()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            ClipboardFileService.Cut(new[] { target.FullPath });
+            RequestSetClipboardText?.Invoke(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void PasteFiles()
+    {
+        if (SelectedTab != null)
+        {
+            ClipboardFileService.Paste(SelectedTab.CurrentPath);
+            Refresh();
+        }
+    }
+
+    [RelayCommand]
+    public void CopyPath()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            RequestSetClipboardText?.Invoke(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void CopyCurrentPath()
+    {
+        if (SelectedTab != null)
+        {
+            RequestSetClipboardText?.Invoke(SelectedTab.CurrentPath);
+        }
+    }
+
+    [RelayCommand]
+    public void OpenArchive()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            ArchiveService.Instance.OpenArchive(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void ExtractHere()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            ArchiveService.Instance.ExtractHere(target.FullPath);
+            Refresh();
+        }
+    }
+
+    [RelayCommand]
+    public void ExtractToSubfolder()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            ArchiveService.Instance.ExtractToSubfolder(target.FullPath);
+            Refresh();
+        }
+    }
+
+    [RelayCommand]
+    public void ExtractToCustom()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            ArchiveService.Instance.OpenExtractDialog(target.FullPath);
+            Refresh();
+        }
+    }
+
+    [RelayCommand]
+    public void AddToZip()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            ArchiveService.Instance.CreateZip(target.FullPath);
+            Refresh();
+        }
+    }
+
+    [RelayCommand]
+    public void AddToArchiveDialog()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            ArchiveService.Instance.OpenAddToArchiveDialog(target.FullPath);
+            Refresh();
+        }
+    }
+
+    [RelayCommand]
+    public void OpenFolderInNewTab()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null && target.IsDirectory)
+        {
+            AddNewTab(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void OpenFolderInOtherPane()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null && target.IsDirectory)
+        {
+            RequestOpenInOtherPane?.Invoke(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void PinFolder()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null && target.IsDirectory)
+        {
+            RequestPinFolder?.Invoke(target.FullPath);
+        }
+    }
+
+    [RelayCommand]
+    public void TriggerRename()
+    {
+        var target = SelectedTab?.SelectedItem;
+        if (target != null)
+        {
+            RequestRename?.Invoke(target);
+        }
+    }
+
+    [RelayCommand]
+    public void TriggerProperties()
+    {
+        var target = SelectedTab?.SelectedItem;
+        RequestProperties?.Invoke(target);
+    }
+
+    [RelayCommand]
+    public void OpenTerminal()
+    {
+        var path = SelectedTab?.SelectedItem?.FullPath ?? SelectedTab?.CurrentPath ?? @"C:\";
+        if (File.Exists(path)) path = Path.GetDirectoryName(path) ?? path;
+        FileSystemService.Instance.OpenTerminal(path, false);
+    }
+
+    [RelayCommand]
+    public void OpenTerminalAdmin()
+    {
+        var path = SelectedTab?.SelectedItem?.FullPath ?? SelectedTab?.CurrentPath ?? @"C:\";
+        if (File.Exists(path)) path = Path.GetDirectoryName(path) ?? path;
+        FileSystemService.Instance.OpenTerminal(path, true);
+    }
+
+    [RelayCommand]
+    public void OpenCmd()
+    {
+        var path = SelectedTab?.SelectedItem?.FullPath ?? SelectedTab?.CurrentPath ?? @"C:\";
+        if (File.Exists(path)) path = Path.GetDirectoryName(path) ?? path;
+        FileSystemService.Instance.OpenCmd(path, false);
+    }
+
+    [RelayCommand]
+    public void OpenCmdAdmin()
+    {
+        var path = SelectedTab?.SelectedItem?.FullPath ?? SelectedTab?.CurrentPath ?? @"C:\";
+        if (File.Exists(path)) path = Path.GetDirectoryName(path) ?? path;
+        FileSystemService.Instance.OpenCmd(path, true);
+    }
+
+    [RelayCommand]
+    public void OpenVSCode()
+    {
+        var path = SelectedTab?.SelectedItem?.FullPath ?? SelectedTab?.CurrentPath ?? @"C:\";
+        FileSystemService.Instance.OpenEditor(path);
+    }
+
+    public event Action<FileItem, bool>? RequestDeleteWithConfirmation;
+
+    [RelayCommand]
+    public void DeleteSelected(bool permanent = false)
+    {
+        var item = SelectedTab?.SelectedItem;
+        if (item != null)
+        {
+            RequestDeleteWithConfirmation?.Invoke(item, permanent);
+        }
+    }
+}

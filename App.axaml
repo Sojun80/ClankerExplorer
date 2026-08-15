@@ -1,0 +1,104 @@
+<Application xmlns="https://github.com/avaloniaui"
+              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+              x:Class="ClankerExplorer.App"
+              RequestedThemeVariant="Dark">
+  <Application.Resources>
+    <!-- Default Dynamic Theme Resources (Live Modifiable by ThemeManager) -->
+    <SolidColorBrush x:Key="AppBgBrush" Color="#080C14"/>
+    <SolidColorBrush x:Key="AppSurfaceBrush" Color="#0F1626"/>
+    <SolidColorBrush x:Key="AppSurfaceHoverBrush" Color="#1E293B"/>
+    <SolidColorBrush x:Key="AppBorderBrush" Color="#1E293B"/>
+    <SolidColorBrush x:Key="AppAccentBrush" Color="#0284C7"/>
+    <SolidColorBrush x:Key="AppHighlightBrush" Color="#38BDF8"/>
+    <SolidColorBrush x:Key="AppTextBrush" Color="#F8FAFC"/>
+    <SolidColorBrush x:Key="AppSubTextBrush" Color="#94A3B8"/>
+    <FontFamily x:Key="AppUiFont">Inter, Segoe UI, sans-serif</FontFamily>
+    <FontFamily x:Key="AppMonoFont">Consolas, JetBrains Mono, monospace</FontFamily>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+    <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml"/>
+
+    <!-- Custom Power User Dynamic Dark Styling -->
+    <Style Selector="Window">
+      <Setter Property="Background" Value="{DynamicResource AppBgBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
+      <Setter Property="FontFamily" Value="{DynamicResource AppUiFont}"/>
+    </Style>
+
+    <!-- DataGrid Dynamic Theme -->
+    <Style Selector="DataGrid">
+      <Setter Property="Background" Value="{DynamicResource AppBgBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+      <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource AppBorderBrush}"/>
+      <Setter Property="RowBackground" Value="{DynamicResource AppBgBrush}"/>
+    </Style>
+
+    <Style Selector="DataGridColumnHeader">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource AppSubTextBrush}"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="Padding" Value="8,6"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+      <Setter Property="BorderThickness" Value="0,0,0,1"/>
+    </Style>
+
+    <Style Selector="DataGridRow">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Height" Value="28"/>
+    </Style>
+
+    <Style Selector="DataGridRow:pointerover /template/ Rectangle#BackgroundRectangle">
+      <Setter Property="Fill" Value="{DynamicResource AppSurfaceHoverBrush}"/>
+    </Style>
+
+    <Style Selector="DataGridRow:selected /template/ Rectangle#BackgroundRectangle">
+      <Setter Property="Fill" Value="{DynamicResource AppAccentBrush}"/>
+      <Setter Property="Opacity" Value="0.4"/>
+    </Style>
+
+    <!-- Power Buttons -->
+    <Style Selector="Button.power-btn">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource AppHighlightBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="8,4"/>
+      <Setter Property="FontSize" Value="11"/>
+    </Style>
+    <Style Selector="Button.power-btn:pointerover">
+      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+
+    <!-- Toggle Buttons -->
+    <Style Selector="ToggleButton.power-btn">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource AppSubTextBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="8,4"/>
+      <Setter Property="FontSize" Value="11"/>
+    </Style>
+    <Style Selector="ToggleButton.power-btn:checked">
+      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+
+    <!-- Extension Badges -->
+    <Style Selector="Border.badge-ext">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppHighlightBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="3"/>
+      <Setter Property="Padding" Value="4,1"/>
+    </Style>
+  </Application.Styles>
+</Application>

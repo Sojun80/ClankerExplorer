@@ -1,0 +1,450 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ClankerExplorer.ViewModels"
+        xmlns:views="clr-namespace:ClankerExplorer.Views"
+        xmlns:models="clr-namespace:ClankerExplorer.Models"
+        x:Class="ClankerExplorer.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="C-Explorer"
+        Icon="/Assets/app-icon.png"
+        Width="1360" Height="860"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource AppBgBrush}" Foreground="{DynamicResource AppTextBrush}"
+        FontFamily="{DynamicResource AppUiFont}"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="40"
+        ExtendClientAreaChromeHints="Default"
+        PointerPressed="OnWindowPointerPressed">
+
+  <!-- Outer Boundary Border for Clear Window Edges & Resize Grabbing -->
+  <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppBgBrush}">
+    <Grid RowDefinitions="Auto,*,Auto">
+      <!-- Row 0: Seamless Dark TitleBar -->
+      <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1"
+              Height="40" Padding="12,0" PointerPressed="OnTitleBarPointerPressed">
+        <DockPanel LastChildFill="True">
+          <!-- App Brand & Blue Folder Icon -->
+          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Image Source="/Assets/app-icon.png" Width="22" Height="22" VerticalAlignment="Center"/>
+            <TextBlock Text="C-Explorer" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+          </StackPanel>
+
+          <!-- Right Side Global Power Tools -->
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                      Margin="0,0,140,0">
+            <!-- Dual Pane Switcher -->
+            <ToggleButton IsChecked="{Binding IsDualPane, Mode=TwoWay}" Classes="power-btn"
+                          ToolTip.Tip="Toggle Dual-Pane Split View [Ctrl+Shift+D]">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="⫿" FontSize="12"/>
+                <TextBlock Text="Dual Pane"/>
+              </StackPanel>
+            </ToggleButton>
+
+            <!-- Inspector Toggle -->
+            <ToggleButton IsChecked="{Binding ShowInspector, Mode=TwoWay}" Classes="power-btn"
+                          ToolTip.Tip="Toggle Inspector Panel [F3]">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="🔍" FontSize="11"/>
+                <TextBlock Text="Inspector"/>
+              </StackPanel>
+            </ToggleButton>
+
+            <!-- PowerShell Launcher (Left click normal, Right click Admin) -->
+            <Button Command="{Binding OpenTerminalCommand}" Classes="power-btn"
+                    ToolTip.Tip="Open PowerShell (Right-click for Admin)">
+              <Button.ContextMenu>
+                <ContextMenu Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                             BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                  <MenuItem Header="🛡️ Open PowerShell as Administrator"
+                            Command="{Binding OpenTerminalAdminCommand}"/>
+                </ContextMenu>
+              </Button.ContextMenu>
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text=">_" FontFamily="{DynamicResource AppMonoFont}" FontWeight="Bold"/>
+                <TextBlock Text="PowerShell"/>
+              </StackPanel>
+            </Button>
+
+            <!-- CMD Launcher (Left click normal, Right click Admin) -->
+            <Button Command="{Binding OpenCmdCommand}" Classes="power-btn"
+                    ToolTip.Tip="Open Command Prompt (Right-click for Admin)">
+              <Button.ContextMenu>
+                <ContextMenu Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                             BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                  <MenuItem Header="🛡️ Open Command Prompt as Administrator"
+                            Command="{Binding OpenCmdAdminCommand}"/>
+                </ContextMenu>
+              </Button.ContextMenu>
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="C:\" FontFamily="{DynamicResource AppMonoFont}" FontWeight="Bold" FontSize="10.5"/>
+                <TextBlock Text="CMD"/>
+              </StackPanel>
+            </Button>
+
+            <!-- VS Code Launcher -->
+            <Button Command="{Binding OpenVSCodeCommand}" Classes="power-btn" ToolTip.Tip="Open in VS Code">
+              <TextBlock Text="VS Code"/>
+            </Button>
+
+            <!-- Refresh All -->
+            <Button Command="{Binding RefreshAllCommand}" Classes="power-btn" ToolTip.Tip="Refresh All (F5)">
+              <TextBlock Text="⟳" FontWeight="Bold"/>
+            </Button>
+
+            <!-- Settings & Themes Button -->
+            <Button Command="{Binding OpenSettingsCommand}" Classes="power-btn" ToolTip.Tip="Settings, Colors, Fonts &amp; Portability">
+              <TextBlock Text="⚙️" FontSize="12"/>
+            </Button>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <!-- Row 1: Main Area (Sidebar + Center Panes + Inspector) -->
+      <Grid Grid.Row="1" ColumnDefinitions="240,*,Auto">
+        <!-- Column 0: Left Sidebar -->
+        <Border Grid.Column="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,1,0">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="14" Margin="8,10">
+
+              <!-- 1. DRIVES (Local & Network Mapped) -->
+              <StackPanel Spacing="4">
+                <TextBlock Text="DRIVES" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"
+                           FontFamily="{DynamicResource AppMonoFont}" Margin="4,0,0,4"/>
+
+                <!-- Local Drives -->
+                <ItemsControl ItemsSource="{Binding LocalDrives}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="models:DriveModel">
+                      <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                              CornerRadius="6" Padding="8,6" Margin="0,2" Cursor="Hand"
+                              PointerPressed="OnDriveClicked">
+                        <StackPanel Spacing="4">
+                          <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                              <TextBlock Text="💾" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"/>
+                              <TextBlock Text="{Binding DisplayName}" FontSize="11.5" FontWeight="SemiBold"
+                                         Foreground="{DynamicResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding FormattedFree, StringFormat='{}{0} free'}"
+                                       FontSize="10" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                          </Grid>
+                          <ProgressBar Value="{Binding PercentUsed}" Minimum="0" Maximum="100" Height="4"
+                                       Foreground="{DynamicResource AppAccentBrush}" Background="{DynamicResource AppBorderBrush}" CornerRadius="2"/>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Mapped Network Drives (e.g. Z:) -->
+                <ItemsControl ItemsSource="{Binding NetworkDrives}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="models:DriveModel">
+                      <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                              CornerRadius="5" Padding="7,5" Margin="0,1" Cursor="Hand"
+                              PointerPressed="OnDriveClicked">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="🌐" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"/>
+                            <TextBlock Text="{Binding DisplayName}" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                          </StackPanel>
+                          <TextBlock Grid.Column="1" Text="{Binding FormattedFree, StringFormat='{}{0} free'}"
+                                     FontSize="9.5" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+
+              <!-- 2. QUICK ACCESS -->
+              <StackPanel Spacing="2">
+                <TextBlock Text="QUICK ACCESS" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"
+                           FontFamily="{DynamicResource AppMonoFont}" Margin="4,0,0,4"/>
+
+                <ItemsControl ItemsSource="{Binding QuickAccess}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="models:QuickAccessItem">
+                      <Border Background="Transparent" CornerRadius="4" Padding="6,4" Cursor="Hand"
+                              PointerPressed="OnQuickAccessClicked"
+                              ToolTip.Tip="{Binding Path}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="📁" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"/>
+                          <TextBlock Text="{Binding Name}" FontSize="11.5" Foreground="{DynamicResource AppTextBrush}"/>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+
+              <!-- History Undo Notification Banner -->
+              <Border Background="#1E293B" BorderBrush="{DynamicResource AppAccentBrush}" BorderThickness="1"
+                      CornerRadius="4" Padding="6,4" Margin="0,2" IsVisible="{Binding ShowHistoryUndoBanner}">
+                <DockPanel LastChildFill="True">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                    <Button Command="{Binding UndoResetHistoryCommand}" Background="Transparent" BorderThickness="0"
+                            Padding="3,0" ToolTip.Tip="Undo removal">
+                      <TextBlock Text="↩ Undo" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}"/>
+                    </Button>
+                    <Button Command="{Binding DismissHistoryUndoCommand}" Background="Transparent" BorderThickness="0"
+                            Padding="3,0" ToolTip.Tip="Dismiss">
+                      <TextBlock Text="×" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                    </Button>
+                  </StackPanel>
+                  <TextBlock Text="{Binding HistoryUndoMessage}" FontSize="9.5" Foreground="{DynamicResource AppTextBrush}"
+                             TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                </DockPanel>
+              </Border>
+
+              <!-- 3. FREQUENT LOCATIONS -->
+              <StackPanel Spacing="2" IsVisible="{Binding FrequentFolders.Count}">
+                <TextBlock Text="FREQUENT LOCATIONS" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}"
+                           FontFamily="{DynamicResource AppMonoFont}" Margin="4,0,0,4"/>
+
+                <ItemsControl ItemsSource="{Binding FrequentFolders}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="models:FrequentFolderItem">
+                      <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                              CornerRadius="5" Padding="6,3" Margin="0,1">
+                        <Grid ColumnDefinitions="*,Auto,Auto">
+                          <!-- Clickable Navigation Target -->
+                          <Border Grid.Column="0" Background="Transparent" Cursor="Hand"
+                                  PointerPressed="OnFrequentFolderClicked" ToolTip.Tip="{Binding Path}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <TextBlock Text="⏱️" FontSize="10.5" VerticalAlignment="Center"/>
+                              <TextBlock Text="{Binding DisplayName}" FontSize="11" Foreground="{DynamicResource AppTextBrush}"
+                                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                            </StackPanel>
+                          </Border>
+
+                          <!-- Count Badge -->
+                          <Border Grid.Column="1" Background="{DynamicResource AppBorderBrush}" CornerRadius="3" Padding="4,1" Margin="4,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding VisitCount, StringFormat='{}{0}x'}"
+                                       FontSize="9" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                          </Border>
+
+                          <!-- Reset/Remove 'X' Button -->
+                          <Button Grid.Column="2"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ResetFolderHistoryCommand}"
+                                  CommandParameter="{Binding}"
+                                  Background="Transparent" BorderThickness="0" Padding="3,0"
+                                  ToolTip.Tip="Reset this folder's history" VerticalAlignment="Center">
+                            <TextBlock Text="×" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}"/>
+                          </Button>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+
+              <!-- 4. RECENT HISTORY (LAST 5) -->
+              <StackPanel Spacing="2" IsVisible="{Binding RecentFolders.Count}">
+                <TextBlock Text="RECENT (LAST 5)" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"
+                           FontFamily="{DynamicResource AppMonoFont}" Margin="4,0,0,4"/>
+
+                <ItemsControl ItemsSource="{Binding RecentFolders}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="models:FrequentFolderItem">
+                      <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                              CornerRadius="5" Padding="6,3" Margin="0,1">
+                        <Grid ColumnDefinitions="*,Auto,Auto">
+                          <!-- Clickable Navigation Target -->
+                          <Border Grid.Column="0" Background="Transparent" Cursor="Hand"
+                                  PointerPressed="OnFrequentFolderClicked" ToolTip.Tip="{Binding Path}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <TextBlock Text="🕒" FontSize="10.5" VerticalAlignment="Center"/>
+                              <TextBlock Text="{Binding DisplayName}" FontSize="11" Foreground="{DynamicResource AppTextBrush}"
+                                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                            </StackPanel>
+                          </Border>
+
+                          <!-- Time Badge -->
+                          <TextBlock Grid.Column="1" Text="{Binding FormattedTime}"
+                                     FontSize="9" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"
+                                     VerticalAlignment="Center" Margin="4,0"/>
+
+                          <!-- Reset/Remove 'X' Button -->
+                          <Button Grid.Column="2"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ResetFolderHistoryCommand}"
+                                  CommandParameter="{Binding}"
+                                  Background="Transparent" BorderThickness="0" Padding="3,0"
+                                  ToolTip.Tip="Reset this folder's history" VerticalAlignment="Center">
+                            <TextBlock Text="×" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}"/>
+                          </Button>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+
+              <!-- 5. LINUX (WSL) - Below Quick Access & Frequent Locations -->
+              <StackPanel Spacing="4" IsVisible="{Binding WslDistros.Count}">
+                <TextBlock Text="LINUX (WSL)" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}"
+                           FontFamily="{DynamicResource AppMonoFont}" Margin="4,0,0,4"/>
+
+                <ItemsControl ItemsSource="{Binding WslDistros}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="models:WslDistroItem">
+                      <StackPanel Spacing="2">
+                        <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                                CornerRadius="5" Padding="6,5" Margin="0,1" Cursor="Hand"
+                                PointerPressed="OnWslRootClicked">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="🐧" FontSize="12"/>
+                            <TextBlock Text="{Binding Name}" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AppTextBrush}"/>
+                          </StackPanel>
+                        </Border>
+                        <Border Background="{DynamicResource AppBgBrush}" CornerRadius="4" Padding="6,3" Margin="14,0,0,2" Cursor="Hand"
+                                PointerPressed="OnWslHomeClicked">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="↳ /home" FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                          </StackPanel>
+                        </Border>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+
+              <!-- 6. NETWORK (Clean Collapsible Button at Bottom) -->
+              <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                      CornerRadius="6" Padding="6,4">
+                <StackPanel Spacing="4">
+                  <!-- Expandable Header Button -->
+                  <DockPanel LastChildFill="True">
+                    <!-- Action buttons (Add Server + & Scan ⟳) -->
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                      <Button Command="{Binding PromptNetworkShareCommand}"
+                              Background="Transparent" BorderThickness="0" Padding="4,0" ToolTip.Tip="Connect Server / IP (+)">
+                        <TextBlock Text="+" FontSize="13" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+                      </Button>
+                      <Button Command="{Binding ScanNetworkCommand}"
+                              Background="Transparent" BorderThickness="0" Padding="4,0" ToolTip.Tip="Scan Network">
+                        <TextBlock Text="⟳" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                      </Button>
+                    </StackPanel>
+
+                    <!-- Toggle Button -->
+                    <Border Cursor="Hand" Background="Transparent" PointerPressed="OnToggleNetworkPressed">
+                      <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding NetworkExpandArrow}" FontSize="10" Foreground="{DynamicResource AppSubTextBrush}"/>
+                        <TextBlock Text="🌐" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"/>
+                        <TextBlock Text="Network" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}"/>
+                        <TextBlock Text="(scanning...)" FontSize="9" Foreground="{DynamicResource AppSubTextBrush}" IsVisible="{Binding IsScanningNetwork}"/>
+                      </StackPanel>
+                    </Border>
+                  </DockPanel>
+
+                  <!-- Network Computers Tree (Visible only when expanded) -->
+                  <StackPanel Spacing="2" IsVisible="{Binding IsNetworkExpanded}" Margin="0,4,0,2">
+                    <TextBlock Text="No computers discovered yet. Click + to add or ⟳ to scan."
+                               IsVisible="{Binding !NetworkComputers.Count}"
+                               FontSize="10" Foreground="{DynamicResource AppSubTextBrush}" TextWrapping="Wrap" Margin="4,2"/>
+
+                    <ItemsControl ItemsSource="{Binding NetworkComputers}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="models:NetworkNode">
+                          <StackPanel Spacing="1">
+                            <!-- Computer Node Row -->
+                            <Border Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                                    CornerRadius="4" Padding="4,4" Margin="0,1">
+                              <DockPanel LastChildFill="True">
+                                <Button DockPanel.Dock="Left"
+                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleExpandNodeCommand}"
+                                        CommandParameter="{Binding}"
+                                        Background="Transparent" BorderThickness="0" Padding="4,0" Margin="0,0,2,0">
+                                  <TextBlock Text="{Binding ExpandSymbol}" FontSize="10" Foreground="{DynamicResource AppSubTextBrush}"/>
+                                </Button>
+
+                                <Border Cursor="Hand" Background="Transparent" PointerPressed="OnNetworkNodeClicked">
+                                  <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding IconSymbol}" FontSize="11"/>
+                                    <TextBlock Text="{Binding Name}" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AppTextBrush}"/>
+                                    <TextBlock Text="(loading...)" FontSize="9" Foreground="{DynamicResource AppSubTextBrush}" IsVisible="{Binding IsLoading}"/>
+                                  </StackPanel>
+                                </Border>
+                              </DockPanel>
+                            </Border>
+
+                            <!-- Child Shares (When Expanded) -->
+                            <ItemsControl ItemsSource="{Binding Children}" IsVisible="{Binding IsExpanded}" Margin="16,0,0,2">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="models:NetworkNode">
+                                  <Border Background="{DynamicResource AppSurfaceBrush}" CornerRadius="3" Padding="6,3" Margin="0,1" Cursor="Hand"
+                                          PointerPressed="OnNetworkNodeClicked">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                      <TextBlock Text="↳ 📁" FontSize="10.5" Foreground="{DynamicResource AppHighlightBrush}"/>
+                                      <TextBlock Text="{Binding Name}" FontSize="11" Foreground="{DynamicResource AppTextBrush}"/>
+                                    </StackPanel>
+                                  </Border>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+
+            </StackPanel>
+          </ScrollViewer>
+        </Border>
+
+        <!-- Column 1: Center Panes (Single 100% or Dual Split 50%/50%) -->
+        <Grid Grid.Column="1" ColumnDefinitions="*,Auto,*">
+          <!-- Left / Primary Pane -->
+          <views:ExplorerPaneView Grid.Column="0"
+                                  Grid.ColumnSpan="{Binding $parent[Window].((vm:MainViewModel)DataContext).LeftPaneColumnSpan}"
+                                  DataContext="{Binding LeftPane}"
+                                  PointerPressed="OnLeftPanePointerPressed"/>
+
+          <!-- Grid Splitter (for dual pane) -->
+          <GridSplitter Grid.Column="1" Width="4" Background="{DynamicResource AppBorderBrush}"
+                        IsVisible="{Binding IsDualPane}"/>
+
+          <!-- Right / Secondary Pane -->
+          <views:ExplorerPaneView Grid.Column="2" DataContext="{Binding RightPane}"
+                                  IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsDualPane}"
+                                  PointerPressed="OnRightPanePointerPressed"/>
+        </Grid>
+
+        <!-- Column 2: Right Inspector Preview Panel -->
+        <views:InspectorPanelView Grid.Column="2" DataContext="{Binding Inspector}"
+                                  IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).ShowInspector}"/>
+      </Grid>
+
+      <!-- Row 2: Bottom Status Bar -->
+      <Border Grid.Row="2" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,1,0,0" Height="26" Padding="10,0">
+        <DockPanel LastChildFill="True">
+          <!-- Left: Status counters -->
+          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+            <TextBlock Text="{Binding ActivePane.SelectedTab.FilteredItems.Count, StringFormat='{}{0} items'}"
+                       Foreground="{DynamicResource AppTextBrush}" FontSize="11" FontFamily="{DynamicResource AppMonoFont}" FontWeight="Bold"/>
+          </StackPanel>
+
+          <!-- Middle: Shortcuts Helper -->
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <!-- Drive telemetry -->
+            <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding CurrentDrive, Converter={x:Static ObjectConverters.IsNotNull}}">
+              <TextBlock Text="{Binding CurrentDrive.DisplayName}" Foreground="{DynamicResource AppSubTextBrush}" FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}"/>
+              <TextBlock Text="{Binding CurrentDrive.FormattedFree, StringFormat='{}{0} free'}" Foreground="{DynamicResource AppHighlightBrush}" FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}"/>
+            </StackPanel>
+
+            <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}"/>
+            <TextBlock Text="Mouse Back: Go Back  |  Ctrl+Shift+C: Copy Path  |  F3: Inspector  |  Ctrl+F: Filter"
+                       Foreground="{DynamicResource AppSubTextBrush}" FontSize="10" FontFamily="{DynamicResource AppMonoFont}"/>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+    </Grid>
+  </Border>
+</Window>

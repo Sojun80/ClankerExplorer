@@ -1,0 +1,350 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:ClankerExplorer.ViewModels"
+             xmlns:models="clr-namespace:ClankerExplorer.Models"
+             x:Class="ClankerExplorer.Views.ExplorerPaneView"
+             x:DataType="vm:ExplorerPaneViewModel"
+             PointerPressed="OnPanePointerPressed"
+             PointerReleased="OnPanePointerReleased"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600">
+
+  <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <!-- Row 0: Tab Bar -->
+    <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1" Height="36">
+      <DockPanel>
+        <!-- Pane Label (if dual pane) -->
+        <Border DockPanel.Dock="Left" IsVisible="{Binding PaneLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppAccentBrush}" BorderThickness="1" CornerRadius="3"
+                Padding="6,2" Margin="6,4,4,4" VerticalAlignment="Center">
+          <TextBlock Text="{Binding PaneLabel}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+        </Border>
+
+        <!-- New Tab Button -->
+        <Button DockPanel.Dock="Right" Command="{Binding AddNewTabCommand}"
+                Background="Transparent" BorderThickness="0" Padding="8,4" Margin="4,2"
+                ToolTip.Tip="New Tab (Ctrl+T)" VerticalAlignment="Center">
+          <TextBlock Text="+" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"/>
+        </Button>
+
+        <!-- Tabs List -->
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding Tabs}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="2"/>
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:ExplorerTabViewModel">
+                <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppAccentBrush}" BorderThickness="1,1,1,0"
+                        CornerRadius="4,4,0,0" Padding="10,5" Margin="2,4,0,0" Cursor="Hand"
+                        PointerPressed="OnTabClicked">
+                  <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
+                          Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.6" Width="13" Height="11" Stretch="Uniform" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding Title}" FontSize="12" Foreground="{DynamicResource AppTextBrush}" MaxWidth="160" TextTrimming="CharacterEllipsis"/>
+                    <Button Command="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).CloseTabCommand}"
+                            CommandParameter="{Binding}"
+                            Background="Transparent" BorderThickness="0" Padding="3,0" Margin="4,0,0,0">
+                      <TextBlock Text="×" FontSize="13" Foreground="{DynamicResource AppSubTextBrush}"/>
+                    </Button>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- Row 1: Address Bar & Quick Actions -->
+    <Border Grid.Row="1" Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1" Padding="6,5">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+        <!-- Navigation Buttons -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2" Margin="0,0,6,0">
+          <Button Command="{Binding GoBackCommand}" IsEnabled="{Binding SelectedTab.CanGoBack, FallbackValue=False}"
+                  Classes="power-btn" Padding="6,4" ToolTip.Tip="Back (Alt+Left / Mouse Back)">
+            <TextBlock Text="←" FontWeight="Bold"/>
+          </Button>
+          <Button Command="{Binding GoForwardCommand}" IsEnabled="{Binding SelectedTab.CanGoForward, FallbackValue=False}"
+                  Classes="power-btn" Padding="6,4" ToolTip.Tip="Forward (Alt+Right / Mouse Forward)">
+            <TextBlock Text="→" FontWeight="Bold"/>
+          </Button>
+          <Button Command="{Binding GoUpCommand}"
+                  Classes="power-btn" Padding="6,4" ToolTip.Tip="Up (Alt+Up)">
+            <TextBlock Text="↑" FontWeight="Bold"/>
+          </Button>
+          <Button Command="{Binding RefreshCommand}"
+                  Classes="power-btn" Padding="6,4" ToolTip.Tip="Refresh (F5)">
+            <TextBlock Text="⟳" FontWeight="Bold"/>
+          </Button>
+        </StackPanel>
+
+        <!-- Always Visible Directory Path TextBox with KeyDown Submit -->
+        <TextBox Grid.Column="1" Text="{Binding RawAddressInput, Mode=TwoWay}"
+                 KeyDown="OnAddressKeyDown"
+                 Background="{DynamicResource AppBgBrush}" Foreground="{DynamicResource AppTextBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                 FontFamily="{DynamicResource AppMonoFont}" FontSize="12"
+                 Padding="8,4" VerticalAlignment="Center" Margin="0,0,6,0"/>
+
+        <!-- 1-Click Copy Path Button -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" Margin="0,0,6,0">
+          <Button Click="OnCopyPathClicked"
+                  Classes="power-btn" FontWeight="SemiBold"
+                  ToolTip.Tip="Copy Full Path to Clipboard (Ctrl+Shift+C)">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+              <TextBlock Text="📋" FontSize="11"/>
+              <TextBlock Text="Copy Path" FontFamily="{DynamicResource AppMonoFont}"/>
+            </StackPanel>
+          </Button>
+        </StackPanel>
+
+        <!-- New Items Quick Creation -->
+        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4">
+          <Button Command="{Binding TriggerNewFolderCommand}"
+                  Classes="power-btn" ToolTip.Tip="New Folder (Ctrl+Shift+N)">
+            <TextBlock Text="+ Folder"/>
+          </Button>
+          <Button Command="{Binding TriggerNewFileCommand}"
+                  Classes="power-btn" ToolTip.Tip="New File (Ctrl+N)">
+            <TextBlock Text="+ File"/>
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Row 2: File Grid (Clean, uncluttered, configurable columns, specialized context menu) -->
+    <DataGrid x:Name="FileDataGrid" Grid.Row="2"
+              ItemsSource="{Binding SelectedTab.FilteredItems}"
+              SelectedItem="{Binding SelectedTab.SelectedItem, Mode=TwoWay}"
+              AutoGenerateColumns="False"
+              IsReadOnly="True"
+              CanUserSortColumns="True"
+              DoubleTapped="OnRowDoubleTapped"
+              SelectionChanged="OnSelectionChanged"
+              FontFamily="{DynamicResource AppUiFont}">
+      <DataGrid.ContextMenu>
+        <ContextMenu x:Name="GridContextMenu"
+                     Background="{DynamicResource AppSurfaceBrush}"
+                     Foreground="{DynamicResource AppTextBrush}"
+                     BorderBrush="{DynamicResource AppBorderBrush}"
+                     BorderThickness="1">
+
+          <!-- ==================== 1. NORMAL FILES ==================== -->
+          <MenuItem Header="Open" Command="{Binding OpenItemCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="{Binding EditActionLabel}" Command="{Binding EditItemCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="Open With..." Command="{Binding OpenWithCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="Rename" Command="{Binding TriggerRenameCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="Delete" Command="{Binding DeleteSelectedCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="{Binding AddArchiveDialogLabel}" Command="{Binding AddToArchiveDialogCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="{Binding AddZipLabel}" Command="{Binding AddToZipCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="Properties" Command="{Binding TriggerPropertiesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+
+          <!-- ==================== 2. ARCHIVE FILES ==================== -->
+          <MenuItem Header="{Binding OpenArchiveLabel}" Command="{Binding OpenArchiveCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="{Binding ExtractHereLabel}" Command="{Binding ExtractHereCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="{Binding ExtractSubfolderLabel}" Command="{Binding ExtractToSubfolderCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="{Binding ExtractToLabel}" Command="{Binding ExtractToCustomCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="Rename" Command="{Binding TriggerRenameCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="Delete" Command="{Binding DeleteSelectedCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="Properties" Command="{Binding TriggerPropertiesCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+
+          <!-- ==================== 3. FOLDERS ==================== -->
+          <MenuItem Header="Open" Command="{Binding OpenItemCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Open in New Tab" Command="{Binding OpenFolderInNewTabCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Open in Other Pane" Command="{Binding OpenFolderInOtherPaneCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Pin Folder" Command="{Binding PinFolderCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Paste" Command="{Binding PasteFilesCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Rename" Command="{Binding TriggerRenameCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Delete" Command="{Binding DeleteSelectedCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Open PowerShell Here" Command="{Binding OpenTerminalCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="🛡️ Open PowerShell as Administrator" Command="{Binding OpenTerminalAdminCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Open Command Prompt (CMD) Here" Command="{Binding OpenCmdCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="🛡️ Open Command Prompt as Administrator" Command="{Binding OpenCmdAdminCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Open in VS Code" Command="{Binding OpenVSCodeCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="{Binding AddArchiveDialogLabel}" Command="{Binding AddToArchiveDialogCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="{Binding AddZipLabel}" Command="{Binding AddToZipCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Properties" Command="{Binding TriggerPropertiesCommand}" IsVisible="{Binding IsFolderSelected}"/>
+
+          <!-- ==================== 4. EMPTY FOLDER SPACE ==================== -->
+          <MenuItem Header="Paste" Command="{Binding PasteFilesCommand}" IsVisible="{Binding !IsItemSelected}"/>
+          <MenuItem Header="New Folder" Command="{Binding TriggerNewFolderCommand}" IsVisible="{Binding !IsItemSelected}"/>
+          <MenuItem Header="New File" Command="{Binding TriggerNewFileCommand}" IsVisible="{Binding !IsItemSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding !IsItemSelected}"/>
+          <MenuItem Header="Open PowerShell Here" Command="{Binding OpenTerminalCommand}" IsVisible="{Binding !IsItemSelected}"/>
+          <MenuItem Header="🛡️ Open PowerShell as Administrator" Command="{Binding OpenTerminalAdminCommand}" IsVisible="{Binding !IsItemSelected}"/>
+          <MenuItem Header="Open Command Prompt (CMD) Here" Command="{Binding OpenCmdCommand}" IsVisible="{Binding !IsItemSelected}"/>
+          <MenuItem Header="🛡️ Open Command Prompt as Administrator" Command="{Binding OpenCmdAdminCommand}" IsVisible="{Binding !IsItemSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding !IsItemSelected}"/>
+          <MenuItem Header="Refresh" Command="{Binding RefreshCommand}" IsVisible="{Binding !IsItemSelected}"/>
+          <MenuItem Header="Copy Current Path" Command="{Binding CopyCurrentPathCommand}" IsVisible="{Binding !IsItemSelected}"/>
+          <MenuItem Header="Properties" Command="{Binding TriggerPropertiesCommand}" IsVisible="{Binding !IsItemSelected}"/>
+
+          <!-- ==================== 5. COLUMNS TOGGLE SUBMENU ==================== -->
+          <Separator Background="{DynamicResource AppBorderBrush}"/>
+          <MenuItem Header="⚙️ Columns">
+            <MenuItem Header="Ext (.ext badge)" Command="{Binding ToggleColumnCommand}" CommandParameter="ext">
+              <MenuItem.Icon>
+                <TextBlock Text="✓" IsVisible="{Binding ShowColumnExt}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+              </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Size" Command="{Binding ToggleColumnCommand}" CommandParameter="size">
+              <MenuItem.Icon>
+                <TextBlock Text="✓" IsVisible="{Binding ShowColumnSize}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+              </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Date Modified" Command="{Binding ToggleColumnCommand}" CommandParameter="modified">
+              <MenuItem.Icon>
+                <TextBlock Text="✓" IsVisible="{Binding ShowColumnDateModified}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+              </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Date Created" Command="{Binding ToggleColumnCommand}" CommandParameter="created">
+              <MenuItem.Icon>
+                <TextBlock Text="✓" IsVisible="{Binding ShowColumnDateCreated}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+              </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Date Accessed" Command="{Binding ToggleColumnCommand}" CommandParameter="accessed">
+              <MenuItem.Icon>
+                <TextBlock Text="✓" IsVisible="{Binding ShowColumnDateAccessed}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+              </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Item Type" Command="{Binding ToggleColumnCommand}" CommandParameter="type">
+              <MenuItem.Icon>
+                <TextBlock Text="✓" IsVisible="{Binding ShowColumnItemType}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+              </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Attributes" Command="{Binding ToggleColumnCommand}" CommandParameter="attr">
+              <MenuItem.Icon>
+                <TextBlock Text="✓" IsVisible="{Binding ShowColumnAttributes}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+              </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Permissions (Linux/POSIX)" Command="{Binding ToggleColumnCommand}" CommandParameter="perm">
+              <MenuItem.Icon>
+                <TextBlock Text="✓" IsVisible="{Binding ShowColumnPermissions}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+              </MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Owner:Group (Linux/POSIX)" Command="{Binding ToggleColumnCommand}" CommandParameter="owner">
+              <MenuItem.Icon>
+                <TextBlock Text="✓" IsVisible="{Binding ShowColumnOwnerGroup}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+              </MenuItem.Icon>
+            </MenuItem>
+          </MenuItem>
+
+        </ContextMenu>
+      </DataGrid.ContextMenu>
+
+      <DataGrid.Columns>
+        <!-- Name Column (Always Visible) -->
+        <DataGridTemplateColumn Header="Name" Width="3*" SortMemberPath="Name">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate DataType="models:FileItem">
+              <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
+                <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
+                      Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.6" Width="13" Height="11" Stretch="Uniform"
+                      IsVisible="{Binding IsDirectory}" VerticalAlignment="Center"/>
+                <TextBlock Text="📄" IsVisible="{Binding !IsDirectory}" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}"/>
+                <TextBlock Text="{Binding Name}" FontSize="12" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+
+        <!-- Extension Column -->
+        <DataGridTemplateColumn Header="Ext" Width="0.8*" SortMemberPath="Extension"
+                                IsVisible="{Binding ShowColumnExt}">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate DataType="models:FileItem">
+              <Border Classes="badge-ext" IsVisible="{Binding !IsDirectory}" HorizontalAlignment="Left" Margin="6,2" Opacity="{Binding RowOpacity}">
+                <TextBlock Text="{Binding ExtensionDisplay}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+              </Border>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+
+        <!-- Size Column -->
+        <DataGridTextColumn Header="Size" Width="1*" Binding="{Binding SizeDisplay}"
+                            IsVisible="{Binding ShowColumnSize}"
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+
+        <!-- Date Modified Column -->
+        <DataGridTextColumn Header="Date Modified" Width="1.7*" Binding="{Binding FormattedModifiedTime}"
+                            IsVisible="{Binding ShowColumnDateModified}"
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+
+        <!-- Date Created Column -->
+        <DataGridTextColumn Header="Date Created" Width="1.7*" Binding="{Binding FormattedCreatedTime}"
+                            IsVisible="{Binding ShowColumnDateCreated}"
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+
+        <!-- Date Accessed Column -->
+        <DataGridTextColumn Header="Date Accessed" Width="1.7*" Binding="{Binding FormattedAccessedTime}"
+                            IsVisible="{Binding ShowColumnDateAccessed}"
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+
+        <!-- Item Type Column -->
+        <DataGridTextColumn Header="Type" Width="1.3*" Binding="{Binding ItemTypeDisplay}"
+                            IsVisible="{Binding ShowColumnItemType}"
+                            FontFamily="{DynamicResource AppUiFont}" FontSize="11"/>
+
+        <!-- Attributes (Windows) Column -->
+        <DataGridTextColumn Header="Attributes" Width="1*" Binding="{Binding AttributesString}"
+                            IsVisible="{Binding ShowColumnAttributes}"
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+
+        <!-- Permissions (Linux / POSIX) Column -->
+        <DataGridTextColumn Header="Permissions" Width="1.2*" Binding="{Binding PermissionsString}"
+                            IsVisible="{Binding ShowColumnPermissions}"
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5"/>
+
+        <!-- Owner / Group (Linux / POSIX) Column -->
+        <DataGridTextColumn Header="Owner:Group" Width="1.1*" Binding="{Binding OwnerGroupString}"
+                            IsVisible="{Binding ShowColumnOwnerGroup}"
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5"/>
+      </DataGrid.Columns>
+    </DataGrid>
+
+    <!-- Row 3: Bottom Live Filter Bar (Ctrl+F) -->
+    <Border Grid.Row="3" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,1,0,0" Padding="8,4">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+        <TextBlock Grid.Column="0" Text="⚡ Quick Filter:" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"
+                   FontFamily="{DynamicResource AppMonoFont}" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+        <TextBox Grid.Column="1" Text="{Binding SelectedTab.FilterText, Mode=TwoWay}"
+                 Watermark="Filter files (e.g. *.cs, test, build)..."
+                 Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                 FontFamily="{DynamicResource AppMonoFont}" FontSize="11" Padding="6,2" Margin="0,0,8,0"/>
+
+        <ToggleButton Grid.Column="2" IsChecked="{Binding SelectedTab.IsFilterRegex, Mode=TwoWay}"
+                      Classes="power-btn" Content=".* Regex" FontSize="10" FontFamily="{DynamicResource AppMonoFont}"
+                      Padding="6,2" Margin="0,0,4,0"/>
+
+        <ToggleButton Grid.Column="3" IsChecked="{Binding SelectedTab.IsFilterWildcard, Mode=TwoWay}"
+                      Classes="power-btn" Content="* Wildcard" FontSize="10" FontFamily="{DynamicResource AppMonoFont}"
+                      Padding="6,2" Margin="0,0,8,0"/>
+
+        <TextBlock Grid.Column="4" Text="{Binding SelectedTab.FilteredItems.Count, StringFormat='{}{0} items'}"
+                   Foreground="{DynamicResource AppSubTextBrush}" FontSize="11" FontFamily="{DynamicResource AppMonoFont}" VerticalAlignment="Center"/>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

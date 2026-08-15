@@ -1,0 +1,46 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ClankerExplorer.Views.RenameWindow"
+        Title="Rename"
+        Icon="/Assets/app-icon.png"
+        Width="440" Height="190"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppBgBrush}" Foreground="{DynamicResource AppTextBrush}"
+        FontFamily="{DynamicResource AppUiFont}"
+        CanResize="False"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="32"
+        ExtendClientAreaChromeHints="Default">
+
+  <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppBgBrush}">
+    <Grid RowDefinitions="Auto,*,Auto">
+      <!-- Title Bar -->
+      <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1"
+              Height="32" Padding="12,0">
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <TextBlock Text="✏️" FontSize="11"/>
+          <TextBlock Text="Rename Item" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}"/>
+        </StackPanel>
+      </Border>
+
+      <!-- Input Area -->
+      <StackPanel Grid.Row="1" Spacing="8" Margin="16,14,16,10">
+        <TextBlock Text="Enter new name:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+        <TextBox x:Name="TxtInput" KeyDown="OnInputKeyDown"
+                 Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                 BorderBrush="{DynamicResource AppBorderBrush}" FontFamily="{DynamicResource AppMonoFont}"
+                 FontSize="12" Padding="8,5"/>
+        <TextBlock x:Name="TxtError" Foreground="#EF4444" FontSize="10" IsVisible="False"/>
+      </StackPanel>
+
+      <!-- Footer Buttons -->
+      <Border Grid.Row="2" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,1,0,0" Padding="12,8">
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+          <Button Content="Cancel" Click="OnCancelClicked" Classes="power-btn"/>
+          <Button Content="Rename" Click="OnRenameClicked"
+                  Background="{DynamicResource AppAccentBrush}" Foreground="#FFFFFF" FontWeight="Bold" Padding="14,4"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Border>
+</Window>

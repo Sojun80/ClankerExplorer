@@ -1,0 +1,64 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:models="clr-namespace:ClankerExplorer.Models"
+        x:Class="ClankerExplorer.Views.PropertiesWindow"
+        Title="Properties - ClankerExplorer"
+        Width="460" Height="420"
+        WindowStartupLocation="CenterOwner"
+        Background="#0B101C" Foreground="#F8FAFC"
+        CanResize="False">
+
+  <Grid RowDefinitions="*,Auto" Margin="14">
+    <StackPanel Grid.Row="0" Spacing="10">
+      <TextBlock Text="📁 Item Properties" FontSize="14" FontWeight="Bold" Foreground="#38BDF8"/>
+
+      <Border Background="#0F1626" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="6" Padding="10">
+        <StackPanel Spacing="6" TextElement.FontFamily="Consolas,monospace" TextElement.FontSize="11">
+          <DockPanel>
+            <TextBlock Text="Name:" Foreground="#64748B" Width="80"/>
+            <TextBox x:Name="TxtName" IsReadOnly="True" Background="#090D16" Foreground="#F8FAFC" BorderThickness="0"/>
+          </DockPanel>
+          <DockPanel>
+            <TextBlock Text="Full Path:" Foreground="#64748B" Width="80"/>
+            <TextBox x:Name="TxtPath" IsReadOnly="True" Background="#090D16" Foreground="#38BDF8" BorderThickness="0"/>
+          </DockPanel>
+          <DockPanel>
+            <TextBlock Text="Size:" Foreground="#64748B" Width="80"/>
+            <TextBox x:Name="TxtSize" IsReadOnly="True" Background="#090D16" Foreground="#CBD5E1" BorderThickness="0"/>
+          </DockPanel>
+          <DockPanel>
+            <TextBlock Text="Modified:" Foreground="#64748B" Width="80"/>
+            <TextBox x:Name="TxtModified" IsReadOnly="True" Background="#090D16" Foreground="#CBD5E1" BorderThickness="0"/>
+          </DockPanel>
+          <DockPanel>
+            <TextBlock Text="Attributes:" Foreground="#64748B" Width="80"/>
+            <TextBox x:Name="TxtAttributes" IsReadOnly="True" Background="#090D16" Foreground="#CBD5E1" BorderThickness="0"/>
+          </DockPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- Checksum area -->
+      <Border Background="#0F1626" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="6" Padding="10">
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <TextBlock Text="File Checksums" FontWeight="Bold" Foreground="#38BDF8" FontSize="11" VerticalAlignment="Center"/>
+            <Button x:Name="BtnComputeHash" Content="Calculate Hashes" Click="OnComputeHashClicked"
+                    Classes="power-btn" HorizontalAlignment="Right"/>
+          </DockPanel>
+
+          <StackPanel x:Name="PanelHashes" IsVisible="False" Spacing="4" TextElement.FontFamily="Consolas,monospace" TextElement.FontSize="10">
+            <TextBlock Text="SHA-256:" Foreground="#10B981"/>
+            <TextBox x:Name="TxtSha256" IsReadOnly="True" Background="#090D16" Foreground="#CBD5E1" BorderThickness="0" FontSize="9"/>
+            <TextBlock Text="MD5:" Foreground="#F59E0B"/>
+            <TextBox x:Name="TxtMd5" IsReadOnly="True" Background="#090D16" Foreground="#CBD5E1" BorderThickness="0" FontSize="9"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <Button Grid.Row="1" Content="Close" Click="OnCloseClicked"
+            Background="#0284C7" Foreground="#FFFFFF" HorizontalAlignment="Right" Padding="16,4"/>
+  </Grid>
+</Window>

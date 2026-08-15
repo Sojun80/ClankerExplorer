@@ -1,0 +1,27 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ClankerExplorer.Views.NetworkShareWindow"
+        Title="Open Network Share - C-Explorer"
+        Width="460" Height="220"
+        WindowStartupLocation="CenterOwner"
+        Background="#0B101C" Foreground="#F8FAFC"
+        CanResize="False">
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="14">
+    <TextBlock Text="🌐 Connect to Network Share / UNC Path" FontSize="13" FontWeight="Bold" Foreground="#38BDF8" Margin="0,0,0,10"/>
+
+    <StackPanel Grid.Row="1" Spacing="6">
+      <TextBlock Text="Network Path or Server Share (e.g. \\192.168.1.58\Share or \\server\folder):"
+                 FontSize="11" Foreground="#94A3B8" FontFamily="Consolas,monospace"/>
+      <TextBox x:Name="TxtPath" Text="\\" Background="#090D16" Foreground="#F8FAFC" BorderBrush="#1E293B"
+               FontSize="12" FontFamily="Consolas,monospace" Padding="8,4" KeyDown="OnInputKeyDown"/>
+      <TextBlock x:Name="TxtError" Foreground="#EF4444" FontSize="10" IsVisible="False"/>
+    </StackPanel>
+
+    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+      <Button Content="Cancel" Click="OnCancelClicked" Classes="power-btn"/>
+      <Button Content="Open Share" Click="OnConnectClicked"
+              Background="#0284C7" Foreground="#FFFFFF" FontWeight="Bold" Padding="14,4"/>
+    </StackPanel>
+  </Grid>
+</Window>

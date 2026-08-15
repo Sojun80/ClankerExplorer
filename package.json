@@ -1,0 +1,48 @@
+{
+  "name": "clanker-explorer",
+  "version": "1.0.0",
+  "description": "A power-user Windows file explorer with tabs, dark mode, no-compromise visibility, and dual pane support.",
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build && tsc -p tsconfig.electron.json",
+    "preview": "vite preview",
+    "electron:compile": "tsc -p tsconfig.electron.json",
+    "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && npm run electron:compile && electron .\"",
+    "start": "npm run electron:dev"
+  },
+  "keywords": [
+    "file-explorer",
+    "windows-explorer",
+    "power-user",
+    "directory-opus",
+    "xyplorer",
+    "electron",
+    "react",
+    "tabs",
+    "dark-mode"
+  ],
+  "author": "Clanker Team",
+  "license": "MIT",
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.16.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^3.0.2",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^34.2.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0",
+    "wait-on": "^8.0.2"
+  }
+}
