@@ -12,8 +12,10 @@
     <SolidColorBrush x:Key="AppHighlightBrush" Color="#38BDF8"/>
     <SolidColorBrush x:Key="AppTextBrush" Color="#F8FAFC"/>
     <SolidColorBrush x:Key="AppSubTextBrush" Color="#94A3B8"/>
-    <FontFamily x:Key="AppUiFont">Inter, Segoe UI, sans-serif</FontFamily>
-    <FontFamily x:Key="AppMonoFont">Consolas, JetBrains Mono, monospace</FontFamily>
+    
+    <!-- Windows Native High Legibility Typography -->
+    <FontFamily x:Key="AppUiFont">Segoe UI Variable, Segoe UI, -apple-system, BlinkMacSystemFont, Roboto, sans-serif</FontFamily>
+    <FontFamily x:Key="AppMonoFont">Cascadia Mono, Cascadia Code, Consolas, JetBrains Mono, monospace</FontFamily>
 
     <!-- Global ScrollBar Resources (Force Thick Dimensions & No Hairline Slim) -->
     <x:Double x:Key="ScrollBarSize">14</x:Double>
@@ -78,7 +80,7 @@
       <Setter Property="Background" Value="{DynamicResource AppHighlightBrush}"/>
     </Style>
 
-    <!-- DataGrid Dynamic Theme -->
+    <!-- DataGrid Dynamic Theme with Comfortable Row Spacing -->
     <Style Selector="DataGrid">
       <Setter Property="Background" Value="{DynamicResource AppBgBrush}"/>
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
@@ -86,21 +88,23 @@
       <Setter Property="GridLinesVisibility" Value="Horizontal"/>
       <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource AppBorderBrush}"/>
       <Setter Property="RowBackground" Value="{DynamicResource AppBgBrush}"/>
+      <Setter Property="FontFamily" Value="{DynamicResource AppUiFont}"/>
     </Style>
 
     <Style Selector="DataGridColumnHeader">
       <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
       <Setter Property="Foreground" Value="{DynamicResource AppSubTextBrush}"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="FontSize" Value="11"/>
-      <Setter Property="Padding" Value="8,6"/>
+      <Setter Property="FontSize" Value="11.5"/>
+      <Setter Property="Padding" Value="10,7"/>
       <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
       <Setter Property="BorderThickness" Value="0,0,0,1"/>
+      <Setter Property="FontFamily" Value="{DynamicResource AppUiFont}"/>
     </Style>
 
     <Style Selector="DataGridRow">
-      <Setter Property="FontSize" Value="12"/>
-      <Setter Property="Height" Value="28"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="Height" Value="32"/>
     </Style>
 
     <Style Selector="DataGridRow:pointerover /template/ Rectangle#BackgroundRectangle">
@@ -120,7 +124,8 @@
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="CornerRadius" Value="4"/>
       <Setter Property="Padding" Value="8,4"/>
-      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontSize" Value="11.5"/>
+      <Setter Property="FontFamily" Value="{DynamicResource AppUiFont}"/>
     </Style>
     <Style Selector="Button.power-btn:pointerover">
       <Setter Property="Background" Value="{DynamicResource AppAccentBrush}"/>
@@ -135,20 +140,23 @@
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="CornerRadius" Value="4"/>
       <Setter Property="Padding" Value="8,4"/>
-      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontSize" Value="11.5"/>
+      <Setter Property="FontFamily" Value="{DynamicResource AppUiFont}"/>
     </Style>
     <Style Selector="ToggleButton.power-btn:checked">
       <Setter Property="Background" Value="{DynamicResource AppAccentBrush}"/>
       <Setter Property="Foreground" Value="#FFFFFF"/>
     </Style>
 
-    <!-- Extension Badges -->
+    <!-- Extension Tag Badges (Clear, Legible, Comfortable Tag Layout) -->
     <Style Selector="Border.badge-ext">
-      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+      <Setter Property="Background" Value="#121D30"/>
       <Setter Property="BorderBrush" Value="{DynamicResource AppHighlightBrush}"/>
       <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="CornerRadius" Value="3"/>
-      <Setter Property="Padding" Value="4,1"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="8,3"/>
+      <Setter Property="MinHeight" Value="20"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
   </Application.Styles>
 </Application>

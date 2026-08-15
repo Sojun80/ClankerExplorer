@@ -263,86 +263,91 @@
       </DataGrid.ContextMenu>
 
       <DataGrid.Columns>
-        <!-- Name Column (Always Visible, Can be resized, moved, dynamic star or default) -->
-        <DataGridTemplateColumn Header="Name" Width="{Binding NameColumnWidthDisplay}" MinWidth="150" SortMemberPath="Name">
+        <!-- Name Column (Segoe UI Variable, Semibold folders, Regular files) -->
+        <DataGridTemplateColumn Header="Name" Width="{Binding NameColumnWidthDisplay}" MinWidth="160" SortMemberPath="Name">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
-                <!-- Folder Icon: Bigger & bolder (17x14px vector) -->
-                <Border IsVisible="{Binding IsDirectory}" Width="20" Height="18" VerticalAlignment="Center">
+                <!-- Folder Icon: Slightly larger vector icon (16x13px) -->
+                <Border IsVisible="{Binding IsDirectory}" Width="20" Height="20" VerticalAlignment="Center">
                   <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
-                        Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.8" Width="17" Height="14" Stretch="Uniform"
-                        VerticalAlignment="Center"/>
+                        Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.8" Width="16" Height="13" Stretch="Uniform"
+                        VerticalAlignment="Center" HorizontalAlignment="Center"/>
                 </Border>
 
                 <!-- File Icon: Standard 12px file icon -->
-                <Border IsVisible="{Binding !IsDirectory}" Width="20" Height="18" VerticalAlignment="Center">
+                <Border IsVisible="{Binding !IsDirectory}" Width="20" Height="20" VerticalAlignment="Center">
                   <TextBlock Text="📄" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
 
-                <!-- Folder Name: Distinct Bold Weight & Prominent Size -->
+                <!-- Folder Name: Segoe UI Variable, Semibold, 13px -->
                 <TextBlock Text="{Binding Name}" IsVisible="{Binding IsDirectory}"
-                           FontWeight="Bold" FontSize="12.5" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+                           FontFamily="{DynamicResource AppUiFont}" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
 
-                <!-- File Name: Standard Regular Weight -->
+                <!-- File Name: Segoe UI Variable, Regular Weight, 12.5px -->
                 <TextBlock Text="{Binding Name}" IsVisible="{Binding !IsDirectory}"
-                           FontWeight="Normal" FontSize="12" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+                           FontFamily="{DynamicResource AppUiFont}" FontWeight="Normal" FontSize="12.5" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
               </StackPanel>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
 
-        <!-- Extension Column -->
-        <DataGridTemplateColumn Header="Ext" Width="{Binding ExtColumnWidthDisplay}" MinWidth="45" SortMemberPath="Extension"
+        <!-- Extension Tag Column (Clear tag pill, centered, comfortably sized) -->
+        <DataGridTemplateColumn Header="Ext" Width="{Binding ExtColumnWidthDisplay}" MinWidth="55" SortMemberPath="Extension"
                                 IsVisible="{Binding ShowColumnExt}">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
-              <Border Classes="badge-ext" IsVisible="{Binding !IsDirectory}" HorizontalAlignment="Left" Margin="6,2" Opacity="{Binding RowOpacity}">
-                <TextBlock Text="{Binding ExtensionDisplay}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
-              </Border>
+              <Panel HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="{Binding RowOpacity}">
+                <Border Classes="badge-ext" IsVisible="{Binding HasExtensionBadge}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,1">
+                  <TextBlock Text="{Binding ExtensionDisplay}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AppHighlightBrush}"
+                             FontFamily="{DynamicResource AppMonoFont}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="—" IsVisible="{Binding !HasExtensionBadge}" FontSize="11.5" Foreground="{DynamicResource AppSubTextBrush}" Opacity="0.35"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="{DynamicResource AppMonoFont}"/>
+              </Panel>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
 
-        <!-- Size Column -->
-        <DataGridTextColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="60" Binding="{Binding SizeDisplay}"
+        <!-- Size Column (Cascadia Mono, Folders display subtle dim dash) -->
+        <DataGridTextColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="65" Binding="{Binding SizeDisplay}"
                             IsVisible="{Binding ShowColumnSize}"
-                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
-        <!-- Date Modified Column -->
-        <DataGridTextColumn Header="Date Modified" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="100" Binding="{Binding FormattedModifiedTime}"
+        <!-- Date Modified Column (Cascadia Mono) -->
+        <DataGridTextColumn Header="Date Modified" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="110" Binding="{Binding FormattedModifiedTime}"
                             IsVisible="{Binding ShowColumnDateModified}"
-                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
-        <!-- Date Created Column -->
-        <DataGridTextColumn Header="Date Created" Width="{Binding CreatedColumnWidthDisplay}" MinWidth="100" Binding="{Binding FormattedCreatedTime}"
+        <!-- Date Created Column (Cascadia Mono) -->
+        <DataGridTextColumn Header="Date Created" Width="{Binding CreatedColumnWidthDisplay}" MinWidth="110" Binding="{Binding FormattedCreatedTime}"
                             IsVisible="{Binding ShowColumnDateCreated}"
-                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
-        <!-- Date Accessed Column -->
-        <DataGridTextColumn Header="Date Accessed" Width="{Binding AccessedColumnWidthDisplay}" MinWidth="100" Binding="{Binding FormattedAccessedTime}"
+        <!-- Date Accessed Column (Cascadia Mono) -->
+        <DataGridTextColumn Header="Date Accessed" Width="{Binding AccessedColumnWidthDisplay}" MinWidth="110" Binding="{Binding FormattedAccessedTime}"
                             IsVisible="{Binding ShowColumnDateAccessed}"
-                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
-        <!-- Item Type Column -->
-        <DataGridTextColumn Header="Type" Width="{Binding TypeColumnWidthDisplay}" MinWidth="70" Binding="{Binding ItemTypeDisplay}"
+        <!-- Item Type Column (Segoe UI Variable) -->
+        <DataGridTextColumn Header="Type" Width="{Binding TypeColumnWidthDisplay}" MinWidth="80" Binding="{Binding ItemTypeDisplay}"
                             IsVisible="{Binding ShowColumnItemType}"
-                            FontFamily="{DynamicResource AppUiFont}" FontSize="11"/>
+                            FontFamily="{DynamicResource AppUiFont}" FontSize="11.5"/>
 
-        <!-- Attributes (Windows) Column -->
-        <DataGridTextColumn Header="Attributes" Width="{Binding AttributesColumnWidthDisplay}" MinWidth="60" Binding="{Binding AttributesString}"
+        <!-- Attributes Column (Cascadia Mono) -->
+        <DataGridTextColumn Header="Attributes" Width="{Binding AttributesColumnWidthDisplay}" MinWidth="65" Binding="{Binding AttributesString}"
                             IsVisible="{Binding ShowColumnAttributes}"
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
+
+        <!-- Permissions (Linux / POSIX) Column (Cascadia Mono) -->
+        <DataGridTextColumn Header="Permissions" Width="{Binding PermissionsColumnWidthDisplay}" MinWidth="85" Binding="{Binding PermissionsString}"
+                            IsVisible="{Binding ShowColumnPermissions}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
 
-        <!-- Permissions (Linux / POSIX) Column -->
-        <DataGridTextColumn Header="Permissions" Width="{Binding PermissionsColumnWidthDisplay}" MinWidth="80" Binding="{Binding PermissionsString}"
-                            IsVisible="{Binding ShowColumnPermissions}"
-                            FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5"/>
-
-        <!-- Owner / Group (Linux / POSIX) Column -->
-        <DataGridTextColumn Header="Owner:Group" Width="{Binding OwnerGroupColumnWidthDisplay}" MinWidth="80" Binding="{Binding OwnerGroupString}"
+        <!-- Owner / Group (Linux / POSIX) Column (Cascadia Mono) -->
+        <DataGridTextColumn Header="Owner:Group" Width="{Binding OwnerGroupColumnWidthDisplay}" MinWidth="85" Binding="{Binding OwnerGroupString}"
                             IsVisible="{Binding ShowColumnOwnerGroup}"
-                            FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5"/>
+                            FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
       </DataGrid.Columns>
     </DataGrid>
 

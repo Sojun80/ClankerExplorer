@@ -39,8 +39,9 @@ public partial class FileItem : ObservableObject
 
     // Visual Helpers
     public string IconKind => IsDirectory ? "Folder" : GetFileIconKind(Extension);
-    public string SizeDisplay => IsDirectory ? "<DIR>" : FormattedSize;
-    public string ExtensionDisplay => IsDirectory ? "<DIR>" : (string.IsNullOrEmpty(Extension) ? "—" : Extension);
+    public string SizeDisplay => IsDirectory ? "—" : FormattedSize;
+    public string ExtensionDisplay => IsDirectory ? "" : (string.IsNullOrEmpty(Extension) ? "—" : Extension.TrimStart('.').ToUpperInvariant());
+    public bool HasExtensionBadge => !IsDirectory && !string.IsNullOrEmpty(Extension);
     public string ItemTypeDisplay => IsDirectory ? "File folder" : GetItemTypeDescription(Extension);
 
     private static string GetFileIconKind(string ext)
