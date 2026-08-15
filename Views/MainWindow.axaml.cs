@@ -1,6 +1,8 @@
 using System;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.VisualTree;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
 using ClankerExplorer.ViewModels;
@@ -249,12 +251,149 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnQuickAccessClicked(object? sender, PointerPressedEventArgs e)
+    private QuickAccessItem? _pressedQuickAccessItem;
+    private Point _qaPressPoint;
+    private bool _isQaDragging;
+    private IInputElement? _capturedQaBorder;
+    private QuickAccessItem? _hoveredQaTarget;
+    private bool _isQaDropTop;
+
+    private void OnQuickAccessPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (sender is Border border && border.DataContext is QuickAccessItem item && DataContext is MainViewModel vm)
+        if (sender is IInputElement inputElem && sender is Visual visual && visual.DataContext is QuickAccessItem item && DataContext is MainViewModel vm)
         {
-            vm.NavigateSidebar(item.Path);
+            if (e.GetCurrentPoint(visual).Properties.IsLeftButtonPressed)
+            {
+                _pressedQuickAccessItem = item;
+                _qaPressPoint = e.GetPosition(this);
+                _isQaDragging = false;
+                _capturedQaBorder = inputElem;
+                vm.NavigateSidebar(item.Path);
+            }
         }
+    }
+
+    private void OnQuickAccessPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_pressedQuickAccessItem != null && DataContext is MainViewModel vm)
+        {
+            var cur = e.GetPosition(this);
+            var delta = cur - _qaPressPoint;
+
+            if (!_isQaDragging && (Math.Abs(delta.X) > 6 || Math.Abs(delta.Y) > 6))
+            {
+                _isQaDragging = true;
+                if (_capturedQaBorder != null)
+                {
+                    e.Pointer.Capture(_capturedQaBorder);
+                }
+                _pressedQuickAccessItem.IsBeingDragged = true;
+            }
+
+            if (_isQaDragging)
+            {
+                var topLevel = TopLevel.GetTopLevel(this);
+                var hitVisual = topLevel?.InputHitTest(cur) as Visual;
+                QuickAccessItem? targetItem = null;
+                bool isTop = false;
+
+                while (hitVisual != null)
+                {
+                    if (hitVisual.DataContext is QuickAccessItem qai)
+                    {
+                        targetItem = qai;
+                        var itemPos = e.GetPosition(hitVisual);
+                        isTop = itemPos.Y < hitVisual.Bounds.Height / 2;
+                        break;
+                    }
+                    hitVisual = hitVisual.GetVisualParent();
+                }
+
+                // Update indicators
+                if (_hoveredQaTarget != null && _hoveredQaTarget != targetItem)
+                {
+                    _hoveredQaTarget.IsDropTargetTop = false;
+                    _hoveredQaTarget.IsDropTargetBottom = false;
+                }
+
+                _hoveredQaTarget = targetItem;
+                _isQaDropTop = isTop;
+
+                if (targetItem != null && targetItem != _pressedQuickAccessItem)
+                {
+                    targetItem.IsDropTargetTop = isTop;
+                    targetItem.IsDropTargetBottom = !isTop;
+                }
+            }
+        }
+    }
+
+    private void OnQuickAccessPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_isQaDragging && _pressedQuickAccessItem != null && DataContext is MainViewModel vm)
+        {
+            if (_hoveredQaTarget != null && _hoveredQaTarget != _pressedQuickAccessItem)
+            {
+                int fromIdx = vm.QuickAccess.IndexOf(_pressedQuickAccessItem);
+                int toIdx = vm.QuickAccess.IndexOf(_hoveredQaTarget);
+
+                if (fromIdx >= 0 && toIdx >= 0)
+                {
+                    if (!_isQaDropTop && fromIdx > toIdx)
+                    {
+                        toIdx++;
+                    }
+                    else if (_isQaDropTop && fromIdx < toIdx)
+                    {
+                        toIdx--;
+                    }
+
+                    toIdx = Math.Clamp(toIdx, 0, vm.QuickAccess.Count - 1);
+                    vm.ReorderQuickAccess(fromIdx, toIdx);
+                }
+            }
+
+            if (_capturedQaBorder != null)
+            {
+                e.Pointer.Capture(null);
+            }
+        }
+
+        ClearQuickAccessDragState();
+    }
+
+    private void OnQuickAccessPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        ClearQuickAccessDragState();
+    }
+
+    private void ClearQuickAccessDragState()
+    {
+        if (_pressedQuickAccessItem != null)
+        {
+            _pressedQuickAccessItem.IsBeingDragged = false;
+        }
+
+        if (_hoveredQaTarget != null)
+        {
+            _hoveredQaTarget.IsDropTargetTop = false;
+            _hoveredQaTarget.IsDropTargetBottom = false;
+        }
+
+        if (DataContext is MainViewModel vm)
+        {
+            foreach (var item in vm.QuickAccess)
+            {
+                item.IsBeingDragged = false;
+                item.IsDropTargetTop = false;
+                item.IsDropTargetBottom = false;
+            }
+        }
+
+        _pressedQuickAccessItem = null;
+        _hoveredQaTarget = null;
+        _isQaDragging = false;
+        _capturedQaBorder = null;
     }
 
     private void OnWslRootClicked(object? sender, PointerPressedEventArgs e)

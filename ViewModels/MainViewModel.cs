@@ -93,6 +93,8 @@ public partial class MainViewModel : ObservableObject
 
         InitializePanesFromStartupSettings(settings, startPath);
 
+        QuickAccessService.Instance.QuickAccessChanged += RefreshQuickAccess;
+
         LoadSidebarData();
     }
 
@@ -236,12 +238,7 @@ public partial class MainViewModel : ObservableObject
             var targetPane = pane == LeftPane ? RightPane : LeftPane;
             targetPane.AddNewTab(path);
         };
-        pane.RequestPinFolder += path =>
-        {
-            var name = Path.GetFileName(path);
-            if (string.IsNullOrEmpty(name)) name = path;
-            QuickAccess.Add(new QuickAccessItem { Name = name, Path = path, IconKind = "Folder", IsCustom = true });
-        };
+        pane.RequestPinFolder += path => QuickAccessService.Instance.PinFolder(path);
         pane.RequestRename += item => RequestRename?.Invoke(item);
         pane.RequestProperties += item => RequestProperties?.Invoke(item);
         pane.RequestDeleteWithConfirmation += (item, perm) => RequestDeleteWithConfirmation?.Invoke(item, perm);
@@ -271,14 +268,18 @@ public partial class MainViewModel : ObservableObject
         LocalDrives = new ObservableCollection<DriveModel>(driveList.Where(d => !d.IsNetworkDrive));
         NetworkDrives = new ObservableCollection<DriveModel>(driveList.Where(d => d.IsNetworkDrive));
 
-        var qaList = FileSystemService.Instance.GetStandardQuickAccess();
-        QuickAccess = new ObservableCollection<QuickAccessItem>(qaList);
+        RefreshQuickAccess();
 
         WslDistros = new ObservableCollection<WslDistroItem>();
         _ = LoadWslDistributionsAsync();
 
         RefreshHistoryData();
         UpdateCurrentDrive();
+    }
+
+    public void RefreshQuickAccess()
+    {
+        QuickAccess = new ObservableCollection<QuickAccessItem>(QuickAccessService.Instance.Items);
     }
 
     private async Task LoadWslDistributionsAsync()
@@ -477,5 +478,37 @@ public partial class MainViewModel : ObservableObject
     public void ResetInspectorWidth()
     {
         InspectorWidth = 320.0;
+    }
+
+    [RelayCommand]
+    public void PinToQuickAccess(string? path)
+    {
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            QuickAccessService.Instance.PinFolder(path);
+        }
+    }
+
+    [RelayCommand]
+    public void UnpinFromQuickAccess(string? path)
+    {
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            QuickAccessService.Instance.UnpinFolder(path);
+        }
+    }
+
+    [RelayCommand]
+    public void RemoveQuickAccessItem(QuickAccessItem? item)
+    {
+        if (item != null && !string.IsNullOrWhiteSpace(item.Path))
+        {
+            QuickAccessService.Instance.UnpinFolder(item.Path);
+        }
+    }
+
+    public void ReorderQuickAccess(int fromIndex, int toIndex)
+    {
+        QuickAccessService.Instance.MoveItem(fromIndex, toIndex);
     }
 }

@@ -18,6 +18,20 @@
         ExtendClientAreaChromeHints="Default"
         PointerPressed="OnWindowPointerPressed">
 
+  <Window.Styles>
+    <Style Selector="Button.quick-remove-btn">
+      <Setter Property="Opacity" Value="0"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <DoubleTransition Property="Opacity" Duration="0:0:0.15"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Border:pointerover Button.quick-remove-btn">
+      <Setter Property="Opacity" Value="1"/>
+    </Style>
+  </Window.Styles>
+
   <!-- Outer Boundary Border for Clear Window Edges & Resize Grabbing -->
   <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppBgBrush}">
     <Grid RowDefinitions="Auto,*,Auto">
@@ -161,7 +175,7 @@
                 </ItemsControl>
               </StackPanel>
 
-              <!-- 2. QUICK ACCESS -->
+              <!-- 2. QUICK ACCESS (Configurable, Reorderable, Pin/Unpin) -->
               <StackPanel Spacing="2">
                 <TextBlock Text="QUICK ACCESS" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"
                            FontFamily="{DynamicResource AppMonoFont}" Margin="4,0,0,4"/>
@@ -169,14 +183,51 @@
                 <ItemsControl ItemsSource="{Binding QuickAccess}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="models:QuickAccessItem">
-                      <Border Background="Transparent" CornerRadius="4" Padding="6,4" Cursor="Hand"
-                              PointerPressed="OnQuickAccessClicked"
-                              ToolTip.Tip="{Binding Path}">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                          <TextBlock Text="📁" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"/>
-                          <TextBlock Text="{Binding Name}" FontSize="11.5" Foreground="{DynamicResource AppTextBrush}"/>
-                        </StackPanel>
-                      </Border>
+                      <Grid Margin="0,1">
+                        <!-- Top Drop Insertion Indicator Line -->
+                        <Border Height="2" Background="{DynamicResource AppHighlightBrush}" VerticalAlignment="Top" Margin="2,-1,2,0"
+                                IsVisible="{Binding IsDropTargetTop}" ZIndex="10"/>
+
+                        <!-- Bottom Drop Insertion Indicator Line -->
+                        <Border Height="2" Background="{DynamicResource AppHighlightBrush}" VerticalAlignment="Bottom" Margin="2,0,2,-1"
+                                IsVisible="{Binding IsDropTargetBottom}" ZIndex="10"/>
+
+                        <!-- Quick Access Row Container -->
+                        <Border Background="Transparent" CornerRadius="4" Padding="6,4" Cursor="Hand"
+                                Opacity="{Binding IsBeingDragged, Converter={x:Null}, FallbackValue=1.0}"
+                                PointerPressed="OnQuickAccessPointerPressed"
+                                PointerMoved="OnQuickAccessPointerMoved"
+                                PointerReleased="OnQuickAccessPointerReleased"
+                                PointerCaptureLost="OnQuickAccessPointerCaptureLost"
+                                ToolTip.Tip="{Binding Path}">
+                          <Border.ContextMenu>
+                            <ContextMenu Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                                         BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                              <MenuItem Header="📌 Unpin from Quick Access"
+                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).UnpinFromQuickAccessCommand}"
+                                        CommandParameter="{Binding Path}"/>
+                            </ContextMenu>
+                          </Border.ContextMenu>
+
+                          <Grid ColumnDefinitions="*,Auto">
+                            <!-- Icon and Name -->
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                              <TextBlock Text="{Binding IconSymbol}" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"/>
+                              <TextBlock Text="{Binding DisplayName}" FontSize="11.5" Foreground="{DynamicResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+
+                            <!-- Subtle Hover Remove Button '–' -->
+                            <Button Grid.Column="1"
+                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RemoveQuickAccessItemCommand}"
+                                    CommandParameter="{Binding}"
+                                    Classes="quick-remove-btn"
+                                    Background="Transparent" BorderThickness="0" Padding="4,0"
+                                    ToolTip.Tip="Unpin from Quick Access" VerticalAlignment="Center">
+                              <TextBlock Text="–" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"/>
+                            </Button>
+                          </Grid>
+                        </Border>
+                      </Grid>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -211,6 +262,14 @@
                     <DataTemplate DataType="models:FrequentFolderItem">
                       <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
                               CornerRadius="5" Padding="6,3" Margin="0,1">
+                        <Border.ContextMenu>
+                          <ContextMenu Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                                       BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                            <MenuItem Header="📌 Pin to Quick Access"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PinToQuickAccessCommand}"
+                                      CommandParameter="{Binding Path}"/>
+                          </ContextMenu>
+                        </Border.ContextMenu>
                         <Grid ColumnDefinitions="*,Auto,Auto">
                           <!-- Clickable Navigation Target -->
                           <Border Grid.Column="0" Background="Transparent" Cursor="Hand"
@@ -253,6 +312,14 @@
                     <DataTemplate DataType="models:FrequentFolderItem">
                       <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
                               CornerRadius="5" Padding="6,3" Margin="0,1">
+                        <Border.ContextMenu>
+                          <ContextMenu Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
+                                       BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+                            <MenuItem Header="📌 Pin to Quick Access"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PinToQuickAccessCommand}"
+                                      CommandParameter="{Binding Path}"/>
+                          </ContextMenu>
+                        </Border.ContextMenu>
                         <Grid ColumnDefinitions="*,Auto,Auto">
                           <!-- Clickable Navigation Target -->
                           <Border Grid.Column="0" Background="Transparent" Cursor="Hand"

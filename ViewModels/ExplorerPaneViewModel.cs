@@ -33,6 +33,9 @@ public partial class ExplorerPaneViewModel : ObservableObject
     public bool IsNormalFileSelected => SelectedTab?.SelectedItem != null && !SelectedTab.SelectedItem.IsDirectory && !ArchiveService.Instance.IsArchive(SelectedTab.SelectedItem.FullPath);
     public bool IsTextFileSelected => SelectedTab?.SelectedItem != null && !SelectedTab.SelectedItem.IsDirectory && FileSystemService.Instance.IsTextLikeFile(SelectedTab.SelectedItem.FullPath);
 
+    public bool IsSelectedFolderPinned => SelectedTab?.SelectedItem?.IsDirectory == true && QuickAccessService.Instance.IsPinned(SelectedTab.SelectedItem.FullPath);
+    public string PinFolderLabel => IsSelectedFolderPinned ? "Unpin from Quick Access" : "📌 Pin to Quick Access";
+
     public string OpenArchiveLabel => "7-Zip: Open Archive";
     public string ExtractHereLabel => "7-Zip: Extract Here";
     public string ExtractToLabel => "7-Zip: Extract To...";
@@ -206,6 +209,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
         WireTabEvents(tab);
 
         ClipboardFileService.ClipboardChanged += () => OnPropertyChanged(nameof(CanPaste));
+        QuickAccessService.Instance.QuickAccessChanged += () => NotifyContextMenuProperties();
 
         SettingsService.Instance.SettingsChanged += s =>
         {
@@ -359,6 +363,8 @@ public partial class ExplorerPaneViewModel : ObservableObject
         OnPropertyChanged(nameof(IsArchiveSelected));
         OnPropertyChanged(nameof(IsNormalFileSelected));
         OnPropertyChanged(nameof(IsTextFileSelected));
+        OnPropertyChanged(nameof(IsSelectedFolderPinned));
+        OnPropertyChanged(nameof(PinFolderLabel));
         OnPropertyChanged(nameof(ExtractSubfolderLabel));
         OnPropertyChanged(nameof(AddZipLabel));
         OnPropertyChanged(nameof(EditActionLabel));
@@ -666,7 +672,15 @@ public partial class ExplorerPaneViewModel : ObservableObject
         var target = SelectedTab?.SelectedItem;
         if (target != null && target.IsDirectory)
         {
-            RequestPinFolder?.Invoke(target.FullPath);
+            if (QuickAccessService.Instance.IsPinned(target.FullPath))
+            {
+                QuickAccessService.Instance.UnpinFolder(target.FullPath);
+            }
+            else
+            {
+                QuickAccessService.Instance.PinFolder(target.FullPath, target.Name);
+            }
+            NotifyContextMenuProperties();
         }
     }
 

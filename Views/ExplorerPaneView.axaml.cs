@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
@@ -14,9 +16,20 @@ namespace ClankerExplorer.Views;
 
 public partial class ExplorerPaneView : UserControl
 {
+    private readonly DispatcherTimer _autoScrollTimer;
+    private bool _isMouseDownForMarquee;
+    private bool _isMarqueeActive;
+    private Point _marqueeStartPos;
+    private Point _lastMarqueePos;
+    private HashSet<FileItem> _marqueeBaseSelection = new();
+    private double _autoScrollVelocity;
+
     public ExplorerPaneView()
     {
         InitializeComponent();
+
+        _autoScrollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _autoScrollTimer.Tick += OnAutoScrollTick;
 
         Loaded += (s, e) =>
         {
@@ -300,12 +313,211 @@ public partial class ExplorerPaneView : UserControl
     {
         if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null)
         {
-            // Left click on background strip deselects file row without changing directory
+            // Left click on background strip begins marquee or deselects file row
             if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             {
-                vm.SelectedTab.SelectedItem = null;
-                vm.NotifyContextMenuProperties();
+                if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && FileDataGrid != null)
+                {
+                    FileDataGrid.SelectedItems.Clear();
+                    vm.SelectedTab.SelectedItem = null;
+                    vm.NotifyContextMenuProperties();
+                }
+
+                if (FileGridContainer != null)
+                {
+                    _isMouseDownForMarquee = true;
+                    _isMarqueeActive = false;
+                    _marqueeStartPos = e.GetPosition(FileGridContainer);
+                    _lastMarqueePos = _marqueeStartPos;
+                    _marqueeBaseSelection = e.KeyModifiers.HasFlag(KeyModifiers.Control) && FileDataGrid != null
+                        ? FileDataGrid.SelectedItems.Cast<FileItem>().ToHashSet()
+                        : new HashSet<FileItem>();
+                }
             }
+        }
+    }
+
+    private void OnFileGridPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (FileGridContainer == null || FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm) return;
+
+        var props = e.GetCurrentPoint(FileGridContainer).Properties;
+        if (props.IsLeftButtonPressed)
+        {
+            var source = e.Source as Visual;
+            bool isRowOrCell = false;
+            while (source != null && source != FileGridContainer)
+            {
+                if (source is DataGridRow || source is DataGridCell)
+                {
+                    isRowOrCell = true;
+                    break;
+                }
+                source = source.GetVisualParent();
+            }
+
+            if (!isRowOrCell)
+            {
+                _isMouseDownForMarquee = true;
+                _isMarqueeActive = false;
+                _marqueeStartPos = e.GetPosition(FileGridContainer);
+                _lastMarqueePos = _marqueeStartPos;
+                _marqueeBaseSelection = e.KeyModifiers.HasFlag(KeyModifiers.Control)
+                    ? FileDataGrid.SelectedItems.Cast<FileItem>().ToHashSet()
+                    : new HashSet<FileItem>();
+            }
+        }
+    }
+
+    private void OnFileGridPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!_isMouseDownForMarquee || FileGridContainer == null || FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm) return;
+
+        var cur = e.GetPosition(FileGridContainer);
+        var delta = cur - _marqueeStartPos;
+
+        if (!_isMarqueeActive && (Math.Abs(delta.X) > 4 || Math.Abs(delta.Y) > 4))
+        {
+            _isMarqueeActive = true;
+            e.Pointer.Capture(FileGridContainer);
+            if (MarqueeBox != null) MarqueeBox.IsVisible = true;
+            _autoScrollTimer.Start();
+        }
+
+        if (_isMarqueeActive)
+        {
+            _lastMarqueePos = cur;
+
+            if (MarqueeBox != null)
+            {
+                double minX = Math.Min(_marqueeStartPos.X, cur.X);
+                double minY = Math.Min(_marqueeStartPos.Y, cur.Y);
+                double width = Math.Abs(cur.X - _marqueeStartPos.X);
+                double height = Math.Abs(cur.Y - _marqueeStartPos.Y);
+
+                Canvas.SetLeft(MarqueeBox, minX);
+                Canvas.SetTop(MarqueeBox, minY);
+                MarqueeBox.Width = width;
+                MarqueeBox.Height = height;
+            }
+
+            UpdateMarqueeSelection(e.KeyModifiers.HasFlag(KeyModifiers.Control));
+
+            // Velocity-based auto-scroll calculation
+            if (cur.Y < 20)
+            {
+                _autoScrollVelocity = Math.Min(-2.0, (cur.Y - 20) * 0.8);
+            }
+            else if (cur.Y > FileGridContainer.Bounds.Height - 20)
+            {
+                _autoScrollVelocity = Math.Max(2.0, (cur.Y - (FileGridContainer.Bounds.Height - 20)) * 0.8);
+            }
+            else
+            {
+                _autoScrollVelocity = 0;
+            }
+        }
+    }
+
+    private void OnFileGridPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _autoScrollTimer.Stop();
+        _autoScrollVelocity = 0;
+        if (MarqueeBox != null) MarqueeBox.IsVisible = false;
+
+        if (_isMarqueeActive)
+        {
+            e.Pointer.Capture(null);
+            _isMarqueeActive = false;
+        }
+        else if (_isMouseDownForMarquee)
+        {
+            // Click on blank background space without dragging
+            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && FileDataGrid != null)
+            {
+                FileDataGrid.SelectedItems.Clear();
+                if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null)
+                {
+                    vm.SelectedTab.SelectedItem = null;
+                    vm.NotifyContextMenuProperties();
+                }
+            }
+        }
+
+        _isMouseDownForMarquee = false;
+    }
+
+    private void OnFileGridPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        _autoScrollTimer.Stop();
+        _autoScrollVelocity = 0;
+        if (MarqueeBox != null) MarqueeBox.IsVisible = false;
+        _isMarqueeActive = false;
+        _isMouseDownForMarquee = false;
+    }
+
+    private void UpdateMarqueeSelection(bool isCtrl)
+    {
+        if (FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+        var items = vm.SelectedTab.FilteredItems;
+        if (items.Count == 0) return;
+
+        var sv = FileDataGrid.FindDescendantOfType<ScrollViewer>();
+        double scrollOffset = sv?.Offset.Y ?? 0;
+        double headerHeight = 32.0;
+        double rowHeight = 28.0;
+
+        double marqueeMinY = Math.Min(_marqueeStartPos.Y, _lastMarqueePos.Y);
+        double marqueeMaxY = Math.Max(_marqueeStartPos.Y, _lastMarqueePos.Y);
+
+        int startIdx = Math.Max(0, (int)Math.Floor((marqueeMinY - headerHeight + scrollOffset) / rowHeight));
+        int endIdx = Math.Min(items.Count - 1, (int)Math.Floor((marqueeMaxY - headerHeight + scrollOffset) / rowHeight));
+
+        var targetItems = new HashSet<FileItem>();
+        if (isCtrl)
+        {
+            foreach (var item in _marqueeBaseSelection) targetItems.Add(item);
+        }
+
+        if (startIdx <= endIdx && startIdx < items.Count && endIdx >= 0)
+        {
+            for (int i = startIdx; i <= endIdx; i++)
+            {
+                if (i >= 0 && i < items.Count)
+                {
+                    targetItems.Add(items[i]);
+                }
+            }
+        }
+
+        // Synchronize with FileDataGrid
+        FileDataGrid.SelectedItems.Clear();
+        foreach (var item in targetItems)
+        {
+            FileDataGrid.SelectedItems.Add(item);
+        }
+
+        if (targetItems.Count > 0 && (vm.SelectedTab.SelectedItem == null || !targetItems.Contains(vm.SelectedTab.SelectedItem)))
+        {
+            vm.SelectedTab.SelectedItem = targetItems.Last();
+        }
+        else if (targetItems.Count == 0)
+        {
+            vm.SelectedTab.SelectedItem = null;
+        }
+        vm.NotifyContextMenuProperties();
+    }
+
+    private void OnAutoScrollTick(object? sender, EventArgs e)
+    {
+        if (_isMarqueeActive && _autoScrollVelocity != 0 && FileDataGrid != null)
+        {
+            var sv = FileDataGrid.FindDescendantOfType<ScrollViewer>();
+            if (sv != null)
+            {
+                sv.Offset = new Vector(sv.Offset.X, Math.Max(0, sv.Offset.Y + _autoScrollVelocity));
+            }
+            UpdateMarqueeSelection(false);
         }
     }
 

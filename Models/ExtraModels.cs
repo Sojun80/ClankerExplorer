@@ -3,14 +3,6 @@ using System.Collections.Generic;
 
 namespace ClankerExplorer.Models;
 
-public class QuickAccessItem
-{
-    public string Name { get; set; } = string.Empty;
-    public string Path { get; set; } = string.Empty;
-    public string IconKind { get; set; } = "Folder";
-    public bool IsCustom { get; set; }
-}
-
 public class WslDistroItem
 {
     public string Name { get; set; } = string.Empty;

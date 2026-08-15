@@ -176,25 +176,20 @@ public class FileSystemService
 
         var list = new (string name, string path, string icon)[]
         {
-            ("Home", userProfile, "Folder"),
-            ("Desktop", Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Folder"),
-            ("Downloads", Path.Combine(userProfile, "Downloads"), "Folder"),
-            ("Documents", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Folder"),
-            ("Pictures", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Folder"),
-            ("Music", Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "Folder"),
-            ("Videos", Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Folder")
+            ("Home", userProfile, "🏠"),
+            ("Desktop", Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "🖥️"),
+            ("Downloads", Path.Combine(userProfile, "Downloads"), "📥"),
+            ("Documents", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "📄"),
+            ("Pictures", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "🖼️"),
+            ("Music", Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "🎵"),
+            ("Videos", Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "🎬")
         };
 
         foreach (var (name, path, icon) in list)
         {
             if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
             {
-                items.Add(new QuickAccessItem
-                {
-                    Name = name,
-                    Path = path,
-                    IconKind = icon
-                });
+                items.Add(new QuickAccessItem(path, name, icon));
             }
         }
 
