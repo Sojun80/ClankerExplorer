@@ -342,4 +342,12 @@ public partial class MainWindow : Window
 
         await win.ShowDialog(this);
     }
+
+    private void OnInspectorSplitterDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+        {
+            vm.ResetInspectorWidth();
+        }
+    }
 }

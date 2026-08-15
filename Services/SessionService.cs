@@ -27,6 +27,7 @@ public class AppSessionState
 {
     public bool IsDualPane { get; set; }
     public string ActivePaneId { get; set; } = "left";
+    public double InspectorWidth { get; set; } = 320;
     public PaneSessionState LeftPane { get; set; } = new();
     public PaneSessionState RightPane { get; set; } = new();
 }
@@ -57,6 +58,7 @@ public class SessionService
             {
                 IsDualPane = vm.IsDualPane,
                 ActivePaneId = vm.ActivePane == vm.RightPane ? "right" : "left",
+                InspectorWidth = vm.InspectorWidth,
                 LeftPane = BuildPaneSession(vm.LeftPane),
                 RightPane = BuildPaneSession(vm.RightPane)
             };

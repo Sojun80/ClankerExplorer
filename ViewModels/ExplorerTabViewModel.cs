@@ -35,6 +35,15 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     private DateTime _lastActiveTime = DateTime.Now;
 
     [ObservableProperty]
+    private bool _isBeingDragged;
+
+    [ObservableProperty]
+    private bool _isDropTargetLeft;
+
+    [ObservableProperty]
+    private bool _isDropTargetRight;
+
+    [ObservableProperty]
     private bool _isLoading;
 
     [ObservableProperty]
@@ -318,6 +327,31 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             SortAscending = true;
         }
         ApplyFilter();
+    }
+
+    public ExplorerTabViewModel CloneTab()
+    {
+        var cloned = new ExplorerTabViewModel(CurrentPath)
+        {
+            Title = Title,
+            IsPinned = IsPinned,
+            FilterText = FilterText,
+            IsFilterRegex = IsFilterRegex,
+            IsFilterWildcard = IsFilterWildcard,
+            IsFilterBarOpen = IsFilterBarOpen,
+            SortColumn = SortColumn,
+            SortAscending = SortAscending,
+            LastActiveTime = DateTime.Now
+        };
+
+        cloned.History.Clear();
+        foreach (var h in History)
+        {
+            cloned.History.Add(h);
+        }
+        cloned.HistoryIndex = HistoryIndex;
+
+        return cloned;
     }
 
     public void Dispose()

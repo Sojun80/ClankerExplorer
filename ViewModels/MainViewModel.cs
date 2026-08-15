@@ -22,6 +22,9 @@ public partial class MainViewModel : ObservableObject
     private bool _showInspector = true;
 
     [ObservableProperty]
+    private double _inspectorWidth = 320.0;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(NetworkExpandArrow))]
     private bool _isNetworkExpanded = false;
 
@@ -99,6 +102,7 @@ public partial class MainViewModel : ObservableObject
         ShowInspector = settings.ShowInspectorOnStartup;
 
         var session = SessionService.Instance.LoadSession();
+        InspectorWidth = session != null && session.InspectorWidth > 150 ? session.InspectorWidth : (settings.InspectorWidth > 150 ? settings.InspectorWidth : 320.0);
 
         if (settings.StartupBehavior == "RestoreSession" && session != null)
         {
@@ -467,5 +471,11 @@ public partial class MainViewModel : ObservableObject
         NetworkDiscoveryService.Instance.AddCustomServer(serverName);
         IsNetworkExpanded = true;
         _ = ScanNetwork();
+    }
+
+    [RelayCommand]
+    public void ResetInspectorWidth()
+    {
+        InspectorWidth = 320.0;
     }
 }

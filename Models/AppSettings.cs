@@ -28,6 +28,7 @@ public class AppSettings
     public string StartupBehavior { get; set; } = "RestoreSession"; // "RestoreSession", "OpenPinned", "OpenDefaultPath"
     public int MaxTabsRestoredOnStartup { get; set; } = 8;
     public int MaxTabsAllowed { get; set; } = 30;
+    public double InspectorWidth { get; set; } = 320.0;
     public bool StartInDualPane { get; set; } = false;
     public bool ShowInspectorOnStartup { get; set; } = true;
     public bool ConfirmBeforeDelete { get; set; } = true;
@@ -76,6 +77,7 @@ public class AppSettings
             StartupBehavior = this.StartupBehavior,
             MaxTabsRestoredOnStartup = this.MaxTabsRestoredOnStartup,
             MaxTabsAllowed = this.MaxTabsAllowed,
+            InspectorWidth = this.InspectorWidth,
             StartInDualPane = this.StartInDualPane,
             ShowInspectorOnStartup = this.ShowInspectorOnStartup,
             ConfirmBeforeDelete = this.ConfirmBeforeDelete,

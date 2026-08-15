@@ -205,12 +205,16 @@ public partial class ExplorerPaneViewModel : ObservableObject
 
         WireTabEvents(tab);
 
+        ClipboardFileService.ClipboardChanged += () => OnPropertyChanged(nameof(CanPaste));
+
         SettingsService.Instance.SettingsChanged += s =>
         {
             LoadColumnSettings();
             NotifyColumnWidthsChanged();
         };
     }
+
+    public bool CanPaste => ClipboardFileService.CanPaste;
 
     public void LoadColumnSettings()
     {

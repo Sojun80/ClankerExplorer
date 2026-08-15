@@ -103,7 +103,7 @@
       </Border>
 
       <!-- Row 1: Main Area (Sidebar + Center Panes + Inspector) -->
-      <Grid Grid.Row="1" ColumnDefinitions="240,*,Auto">
+      <Grid Grid.Row="1" ColumnDefinitions="240,*,Auto,Auto">
         <!-- Column 0: Left Sidebar -->
         <Border Grid.Column="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,1,0">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -400,7 +400,7 @@
         </Border>
 
         <!-- Column 1: Center Panes (Single 100% or Dual Split 50%/50%) -->
-        <Grid Grid.Column="1" ColumnDefinitions="*,Auto,*">
+        <Grid Grid.Column="1" ColumnDefinitions="*,Auto,*" MinWidth="250">
           <!-- Left / Primary Pane -->
           <views:ExplorerPaneView Grid.Column="0"
                                   Grid.ColumnSpan="{Binding $parent[Window].((vm:MainViewModel)DataContext).LeftPaneColumnSpan}"
@@ -417,8 +417,26 @@
                                   PointerPressed="OnRightPanePointerPressed"/>
         </Grid>
 
-        <!-- Column 2: Right Inspector Preview Panel -->
-        <views:InspectorPanelView Grid.Column="2" DataContext="{Binding Inspector}"
+        <!-- Column 2: Resizable Inspector Splitter (Wide hit target, thin line) -->
+        <GridSplitter Grid.Column="2" Width="8" Background="Transparent"
+                      IsVisible="{Binding ShowInspector}"
+                      Cursor="SizeWestEast"
+                      DoubleTapped="OnInspectorSplitterDoubleTapped"
+                      Margin="-4,0,-4,0" ZIndex="10">
+          <GridSplitter.Template>
+            <ControlTemplate>
+              <Border Background="Transparent" Width="8" HorizontalAlignment="Center">
+                <Border Width="1.5" Background="{DynamicResource AppBorderBrush}"
+                        HorizontalAlignment="Center" VerticalAlignment="Stretch"/>
+              </Border>
+            </ControlTemplate>
+          </GridSplitter.Template>
+        </GridSplitter>
+
+        <!-- Column 3: Right Inspector Preview Panel -->
+        <views:InspectorPanelView Grid.Column="3" DataContext="{Binding Inspector}"
+                                  Width="{Binding $parent[Window].((vm:MainViewModel)DataContext).InspectorWidth}"
+                                  MinWidth="180" MaxWidth="800"
                                   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).ShowInspector}"/>
       </Grid>
 
