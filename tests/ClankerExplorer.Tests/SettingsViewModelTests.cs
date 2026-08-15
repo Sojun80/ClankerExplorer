@@ -5,7 +5,7 @@ using ClankerExplorer.ViewModels;
 
 namespace ClankerExplorer.Tests;
 
-public sealed class SettingsViewModelTests
+public sealed class SettingsViewModelTests : IDisposable
 {
     [Fact]
     public void Save_RoundTripsTabAndThumbnailPreferences()
@@ -54,4 +54,6 @@ public sealed class SettingsViewModelTests
         Assert.Equal("Details", viewModel.ViewMode);
         Assert.Equal(144, viewModel.ThumbnailSize);
     }
+
+    public void Dispose() => TestEnvironment.ResetGlobalSettings(TestEnvironment.DefaultFolder);
 }

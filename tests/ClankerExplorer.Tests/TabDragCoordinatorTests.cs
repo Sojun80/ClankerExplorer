@@ -157,5 +157,9 @@ public sealed class TabDragCoordinatorTests : IDisposable
         Assert.False(_coordinator.IsDragging);
     }
 
-    public void Dispose() => _coordinator.CancelDrag();
+    public void Dispose()
+    {
+        _coordinator.CancelDrag();
+        TestEnvironment.ResetGlobalSettings(TestEnvironment.DefaultFolder);
+    }
 }

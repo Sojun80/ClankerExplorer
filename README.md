@@ -6,25 +6,9 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
 
 ---
 
-## 📸 Screenshots
+## 📸 Overview
 
-### 🔀 Dual-Pane Split View & Live Navigation
-![Dual Pane Split View](docs/screenshots/dual_pane_overview.png)
-
-<br/>
-
-### 🔍 Explorer Grid & Live File Inspector
-![Explorer Grid and Inspector](docs/screenshots/main_explorer.png)
-
-<br/>
-
-### ⚙️ Settings, Configurable Columns & Portability Backups
-![Settings and Columns](docs/screenshots/settings_dialog.png)
-
-<br/>
-
-### 🗑️ Safe Deletion & Visual Cut Feedback
-![Safe Deletion Modal](docs/screenshots/delete_dialog.png)
+![ClankerExplorer Overview](docs/screenshots/main_overview.png)
 
 ---
 

@@ -7,7 +7,7 @@ using ClankerExplorer.Tests.TestInfrastructure;
 
 namespace ClankerExplorer.Tests;
 
-public sealed class ThumbnailServiceTests
+public sealed class ThumbnailServiceTests : IDisposable
 {
     private const string OnePixelPng =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
@@ -117,4 +117,6 @@ public sealed class ThumbnailServiceTests
         File.WriteAllBytes(path, Convert.FromBase64String(OnePixelPng));
         return path;
     }
+
+    public void Dispose() => TestEnvironment.ResetGlobalSettings(TestEnvironment.DefaultFolder);
 }

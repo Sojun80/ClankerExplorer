@@ -72,6 +72,14 @@ public class TabDragCoordinator
 
         targetPane ??= CurrentTargetPane ?? SourcePane;
 
+        bool wouldAddTabToTarget = isCtrl || SourcePane != targetPane;
+        int maxTabs = SettingsService.Instance.CurrentSettings.MaxTabsAllowed;
+        if (wouldAddTabToTarget && maxTabs > 0 && targetPane.Tabs.Count >= maxTabs)
+        {
+            CancelDrag();
+            return;
+        }
+
         try
         {
             if (isCtrl)

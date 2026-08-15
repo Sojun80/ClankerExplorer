@@ -8,9 +8,9 @@ dotnet test
 
 The suite is split by behavior rather than by implementation detail:
 
-- service and view-model tests cover tabs, panes, navigation, filtering, sorting, persistence, Quick Access, and pointer-gesture decisions;
+- service and view-model tests cover tabs, panes, navigation, filtering, sorting, persistence, Quick Access, thumbnail loading/caching, view settings, and pointer-gesture decisions;
 - filesystem integration tests use a fresh `TemporaryFileSystem` tree for every test;
-- two Avalonia Headless smoke tests verify that the application window initializes and that a tab header is actually rendered.
+- Avalonia Headless smoke tests verify window initialization, rendered tabs and thumbnail items, tab overflow controls, Preview Window collapse/restore, and the Stay on Top binding.
 
 The test assembly sets `CLANKEREXPLORER_DATA_DIR` to a process-specific temporary directory before application singletons initialize. Tests must use that location or `TemporaryFileSystem`; they must never use a real user profile or folder.
 

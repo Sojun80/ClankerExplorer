@@ -171,9 +171,16 @@ public sealed class UiSmokeTests
 
             var detailsGrid = Assert.IsType<DataGrid>(view.FindControl<DataGrid>("FileDataGrid"));
             Assert.False(detailsGrid.IsVisible);
+            var thumbnails = Assert.IsType<ListBox>(view.FindControl<ListBox>("ThumbnailListBox"));
+            Assert.True(thumbnails.IsVisible);
             Assert.Contains(
                 view.GetVisualDescendants().OfType<TextBlock>(),
                 text => text.IsVisible && text.Text == "visible-in-thumbnails.txt");
+
+            var item = Assert.Single(pane.SelectedTab.FilteredItems);
+            thumbnails.SelectedItem = item;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Same(item, pane.SelectedTab.SelectedItem);
         }
         finally
         {
