@@ -6,6 +6,28 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
 
 ---
 
+## 📸 Screenshots
+
+### 🔀 Dual-Pane Split View & Live Navigation
+![Dual Pane Split View](docs/screenshots/dual_pane_overview.png)
+
+<br/>
+
+### 🔍 Explorer Grid & Live File Inspector
+![Explorer Grid and Inspector](docs/screenshots/main_explorer.png)
+
+<br/>
+
+### ⚙️ Settings, Configurable Columns & Portability Backups
+![Settings and Columns](docs/screenshots/settings_dialog.png)
+
+<br/>
+
+### 🗑️ Safe Deletion & Visual Cut Feedback
+![Safe Deletion Modal](docs/screenshots/delete_dialog.png)
+
+---
+
 ## 🌟 Key Features
 
 - 📑 **Tabs & Dual-Pane Navigation**: Multi-tab browsing with independent address bars and file grids; side-by-side Dual Pane split (`Ctrl+Shift+D`).
@@ -25,7 +47,7 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
   - Row-level `×` reset with instant `↩ Undo` restoration banner.
 - 🌐 **Network & WSL Browser**: Collapsible bottom section for network shares, local subnets, and WSL Linux distributions.
 - 🔍 **Quick Inspector (`F3`)**: Code/Text syntax viewer, Binary Hex dump (Offset / Hex / ASCII), and instant SHA-256 & MD5 hash calculator.
-- ⚡ **Live Quick Filter (`Ctrl+F`)**: Real-time wildcard (`*.cs`, `*test*`) and regular expression file search.
+- ⚡ **Live Quick Filter (`Ctrl+F`)**: Real-time wildcard (`*.cs`, `*test*`) and regular expression file search with 250ms catastrophic backtracking protection.
 - 💾 **Portability & Full Backup**:
   - Portable single-file profile export/import (`settings.json` + `history.json` + column layout).
   - Cross-platform path normalization between Windows (`C:\...`) and Linux (`/home/...`).
@@ -46,6 +68,7 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
 | `Ctrl + Shift + N` | **Create New Folder** |
 | `Ctrl + N` | **Create New File** |
 | `Delete` | **Delete Selected Item (With Confirmation Modal)** |
+| `Shift + Delete` | **Permanent Delete Bypass** |
 | `F5` | **Refresh Directory & Drives** |
 | `Mouse Back / Forward` | **Navigate Directory History** |
 
