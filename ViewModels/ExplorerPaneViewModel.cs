@@ -372,8 +372,14 @@ public partial class ExplorerPaneViewModel : ObservableObject
 
     partial void OnSelectedTabChanged(ExplorerTabViewModel? value)
     {
+        foreach (var t in Tabs)
+        {
+            t.IsSelected = (t == value);
+        }
+
         if (value != null)
         {
+            value.IsSelected = true;
             value.LastActiveTime = DateTime.Now;
             RawAddressInput = value.CurrentPath;
             NotifyContextMenuProperties();

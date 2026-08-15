@@ -10,6 +10,28 @@
              PointerReleased="OnPanePointerReleased"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600">
 
+  <UserControl.Styles>
+    <Style Selector="Border.tab-border">
+      <Setter Property="Background" Value="{DynamicResource AppBgBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1,1,1,0"/>
+      <Setter Property="Opacity" Value="0.8"/>
+    </Style>
+    <Style Selector="Border.tab-border:pointerover">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+      <Setter Property="Opacity" Value="1.0"/>
+    </Style>
+    <Style Selector="Border.tab-border.active">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppHighlightBrush}"/>
+      <Setter Property="BorderThickness" Value="1,1,1,0"/>
+      <Setter Property="Opacity" Value="1.0"/>
+    </Style>
+    <Style Selector="Border.tab-border.dragging">
+      <Setter Property="Opacity" Value="0.4"/>
+    </Style>
+  </UserControl.Styles>
+
   <Grid RowDefinitions="Auto,Auto,*,Auto">
     <!-- Row 0: Tab Bar -->
     <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1" Height="36">
@@ -50,9 +72,8 @@
                           IsVisible="{Binding IsDropTargetRight}"/>
 
                   <!-- Tab Container -->
-                  <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppAccentBrush}" BorderThickness="1,1,1,0"
+                  <Border Classes="tab-border" Classes.active="{Binding IsSelected}" Classes.dragging="{Binding IsBeingDragged}"
                           CornerRadius="4,4,0,0" Padding="10,5" Cursor="Hand"
-                          Opacity="{Binding IsBeingDragged, Converter={x:Null}, FallbackValue=1.0}"
                           PointerPressed="OnTabPointerPressed"
                           PointerMoved="OnTabPointerMoved"
                           PointerReleased="OnTabPointerReleased"
