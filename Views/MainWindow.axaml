@@ -16,7 +16,10 @@
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="40"
         ExtendClientAreaChromeHints="Default"
-        PointerPressed="OnWindowPointerPressed">
+        PointerPressed="OnWindowPointerPressed"
+        PointerMoved="OnWindowPointerMoved"
+        PointerReleased="OnWindowPointerReleased"
+        PointerCaptureLost="OnWindowPointerCaptureLost">
 
   <Window.Styles>
     <Style Selector="Border.quick-access-item">

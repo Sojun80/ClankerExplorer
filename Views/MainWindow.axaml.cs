@@ -253,6 +253,112 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnWindowPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (TabDragCoordinator.Instance.IsDragging && TabDragCoordinator.Instance.DraggedTab != null)
+        {
+            var winPos = e.GetPosition(this);
+            var visuals = this.GetVisualsAt(winPos).ToList();
+
+            ExplorerPaneViewModel? targetPane = null;
+            ExplorerTabViewModel? targetTab = null;
+            bool isLeftHalf = false;
+
+            foreach (var v in visuals)
+            {
+                if (targetTab == null && v.DataContext is ExplorerTabViewModel tvm)
+                {
+                    targetTab = tvm;
+                    var tabPos = e.GetPosition(v);
+                    isLeftHalf = tabPos.X < v.Bounds.Width / 2;
+                }
+
+                if (targetPane == null && v is ExplorerPaneView paneView && paneView.DataContext is ExplorerPaneViewModel pvm)
+                {
+                    targetPane = pvm;
+                }
+                else if (targetPane == null && v.DataContext is ExplorerPaneViewModel pvm2)
+                {
+                    targetPane = pvm2;
+                }
+            }
+
+            TabDragCoordinator.Instance.UpdateDrag(targetPane, targetTab, isLeftHalf, e.KeyModifiers.HasFlag(KeyModifiers.Control), winPos);
+        }
+    }
+
+    private void OnWindowPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (TabDragCoordinator.Instance.IsDragging)
+        {
+            var winPos = e.GetPosition(this);
+            var visuals = this.GetVisualsAt(winPos).ToList();
+
+            ExplorerPaneViewModel? targetPane = TabDragCoordinator.Instance.CurrentTargetPane;
+            ExplorerTabViewModel? targetTab = TabDragCoordinator.Instance.CurrentHoveredTab;
+            bool isLeft = TabDragCoordinator.Instance.IsLeftDropHalf;
+            bool isCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+
+            // Double check targetPane and targetTab from visuals at drop position
+            if (targetPane == null || targetTab == null)
+            {
+                foreach (var v in visuals)
+                {
+                    if (targetTab == null && v.DataContext is ExplorerTabViewModel tvm)
+                    {
+                        targetTab = tvm;
+                        var tabPos = e.GetPosition(v);
+                        isLeft = tabPos.X < v.Bounds.Width / 2;
+                    }
+
+                    if (targetPane == null && v is ExplorerPaneView paneView && paneView.DataContext is ExplorerPaneViewModel pvm)
+                    {
+                        targetPane = pvm;
+                    }
+                    else if (targetPane == null && v.DataContext is ExplorerPaneViewModel pvm2)
+                    {
+                        targetPane = pvm2;
+                    }
+                }
+            }
+
+            // Check if dropped into a valid pane / tab area
+            bool isOverValidPane = targetPane != null && visuals.Any(v => v is ExplorerPaneView || (v.DataContext is ExplorerPaneViewModel) || (v.DataContext is ExplorerTabViewModel));
+
+            if (isOverValidPane && targetPane != null)
+            {
+                int targetIndex = -1;
+                if (targetTab != null)
+                {
+                    int idx = targetPane.Tabs.IndexOf(targetTab);
+                    if (idx >= 0)
+                    {
+                        targetIndex = isLeft ? idx : idx + 1;
+                    }
+                }
+                else
+                {
+                    targetIndex = targetPane.Tabs.Count;
+                }
+
+                TabDragCoordinator.Instance.CompleteDrop(targetPane, targetIndex, isCtrl);
+            }
+            else
+            {
+                // Dropped outside or over invalid drop zone -> SNAP BACK safely!
+                TabDragCoordinator.Instance.CancelDrag();
+            }
+        }
+    }
+
+    private void OnWindowPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (TabDragCoordinator.Instance.IsDragging)
+        {
+            TabDragCoordinator.Instance.CancelDrag();
+        }
+    }
+
     private void OnTitleBarPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)

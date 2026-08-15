@@ -200,18 +200,16 @@ public partial class ExplorerPaneView : UserControl
     private ExplorerTabViewModel? _pressedTab;
     private Point _tabPressStartPoint;
     private bool _isTabDragging;
-    private IInputElement? _capturedTabBorder;
 
     private void OnTabPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (sender is IInputElement inputElem && sender is Visual visual && visual.DataContext is ExplorerTabViewModel tab && DataContext is ExplorerPaneViewModel vm)
+        if (sender is Visual visual && visual.DataContext is ExplorerTabViewModel tab && DataContext is ExplorerPaneViewModel vm)
         {
             if (e.GetCurrentPoint(visual).Properties.IsLeftButtonPressed)
             {
                 _pressedTab = tab;
                 _tabPressStartPoint = e.GetPosition(this);
                 _isTabDragging = false;
-                _capturedTabBorder = inputElem;
                 vm.SelectedTab = tab;
             }
         }
@@ -232,77 +230,19 @@ public partial class ExplorerPaneView : UserControl
                 _isTabDragging = true;
                 TabDragCoordinator.Instance.StartDrag(_pressedTab, vm, e.KeyModifiers.HasFlag(KeyModifiers.Control), windowPos);
             }
-
-            if (_isTabDragging && topLevel != null)
-            {
-                // Hit test across top level window using GetVisualsAt to reliably locate target tab and target pane
-                var visuals = topLevel.GetVisualsAt(windowPos).ToList();
-
-                ExplorerPaneViewModel? targetPane = null;
-                ExplorerTabViewModel? targetTab = null;
-                bool isLeftHalf = false;
-
-                foreach (var v in visuals)
-                {
-                    if (targetTab == null && v.DataContext is ExplorerTabViewModel tvm)
-                    {
-                        targetTab = tvm;
-                        var tabPos = e.GetPosition(v);
-                        isLeftHalf = tabPos.X < v.Bounds.Width / 2;
-                    }
-
-                    if (targetPane == null && v is ExplorerPaneView paneView && paneView.DataContext is ExplorerPaneViewModel pvm)
-                    {
-                        targetPane = pvm;
-                    }
-                    else if (targetPane == null && v.DataContext is ExplorerPaneViewModel pvm2)
-                    {
-                        targetPane = pvm2;
-                    }
-                }
-
-                targetPane ??= vm;
-                TabDragCoordinator.Instance.UpdateDrag(targetPane, targetTab, isLeftHalf, e.KeyModifiers.HasFlag(KeyModifiers.Control), windowPos);
-            }
         }
     }
 
     private void OnTabPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_isTabDragging && _pressedTab != null && DataContext is ExplorerPaneViewModel vm)
-        {
-            var targetPane = TabDragCoordinator.Instance.CurrentTargetPane ?? vm;
-            var targetTab = TabDragCoordinator.Instance.CurrentHoveredTab;
-            bool isLeft = TabDragCoordinator.Instance.IsLeftDropHalf;
-            bool isCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
-
-            int targetIndex = -1;
-            if (targetPane != null && targetTab != null)
-            {
-                int idx = targetPane.Tabs.IndexOf(targetTab);
-                if (idx >= 0)
-                {
-                    targetIndex = isLeft ? idx : idx + 1;
-                }
-            }
-
-            TabDragCoordinator.Instance.CompleteDrop(targetPane, targetIndex, isCtrl);
-        }
-
         _pressedTab = null;
         _isTabDragging = false;
-        _capturedTabBorder = null;
     }
 
     private void OnTabPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
-        if (_isTabDragging)
-        {
-            TabDragCoordinator.Instance.CancelDrag();
-        }
         _pressedTab = null;
         _isTabDragging = false;
-        _capturedTabBorder = null;
     }
 
     private void OnFolderBackgroundStripPointerPressed(object? sender, PointerPressedEventArgs e)
