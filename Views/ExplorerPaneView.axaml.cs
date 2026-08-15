@@ -245,6 +245,37 @@ public partial class ExplorerPaneView : UserControl
         _isTabDragging = false;
     }
 
+    private void OnTabsPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (TabsScrollViewer != null)
+        {
+            double scrollDelta = e.Delta.Y != 0 ? -e.Delta.Y * 70 : -e.Delta.X * 70;
+            double maxOffset = Math.Max(0, TabsScrollViewer.Extent.Width - TabsScrollViewer.Viewport.Width);
+            double targetOffset = Math.Clamp(TabsScrollViewer.Offset.X + scrollDelta, 0, maxOffset);
+            TabsScrollViewer.Offset = new Vector(targetOffset, TabsScrollViewer.Offset.Y);
+            e.Handled = true;
+        }
+    }
+
+    private void OnTabScrollLeftClicked(object? sender, RoutedEventArgs e)
+    {
+        if (TabsScrollViewer != null)
+        {
+            double targetOffset = Math.Max(0, TabsScrollViewer.Offset.X - 120);
+            TabsScrollViewer.Offset = new Vector(targetOffset, TabsScrollViewer.Offset.Y);
+        }
+    }
+
+    private void OnTabScrollRightClicked(object? sender, RoutedEventArgs e)
+    {
+        if (TabsScrollViewer != null)
+        {
+            double maxOffset = Math.Max(0, TabsScrollViewer.Extent.Width - TabsScrollViewer.Viewport.Width);
+            double targetOffset = Math.Min(maxOffset, TabsScrollViewer.Offset.X + 120);
+            TabsScrollViewer.Offset = new Vector(targetOffset, TabsScrollViewer.Offset.Y);
+        }
+    }
+
     private void OnFolderBackgroundStripPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null)

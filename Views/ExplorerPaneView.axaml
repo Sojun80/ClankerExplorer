@@ -43,15 +43,36 @@
           <TextBlock Text="{Binding PaneLabel}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
         </Border>
 
-        <!-- New Tab Button -->
-        <Button DockPanel.Dock="Right" Command="{Binding AddNewTabCommand}"
-                Background="Transparent" BorderThickness="0" Padding="8,4" Margin="4,2"
-                ToolTip.Tip="New Tab (Ctrl+T)" VerticalAlignment="Center">
-          <TextBlock Text="+" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"/>
-        </Button>
+        <!-- Right controls: Notepad++ Style Scroll Arrows + New Tab Button -->
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="2,0,6,0">
+          <!-- Scroll Left Arrow Button -->
+          <Button x:Name="TabScrollLeftBtn" Click="OnTabScrollLeftClicked"
+                  Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="3,0,0,3" Padding="5,2" Height="22" Width="20"
+                  ToolTip.Tip="Scroll Tabs Left" VerticalAlignment="Center">
+            <TextBlock Text="◀" FontSize="8" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AppSubTextBrush}"/>
+          </Button>
+          <!-- Scroll Right Arrow Button -->
+          <Button x:Name="TabScrollRightBtn" Click="OnTabScrollRightClicked"
+                  Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,1,1,1"
+                  CornerRadius="0,3,3,0" Padding="5,2" Height="22" Width="20"
+                  ToolTip.Tip="Scroll Tabs Right" VerticalAlignment="Center">
+            <TextBlock Text="▶" FontSize="8" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AppSubTextBrush}"/>
+          </Button>
 
-        <!-- Tabs List -->
-        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+          <!-- New Tab Button -->
+          <Button Command="{Binding AddNewTabCommand}"
+                  Background="Transparent" BorderThickness="0" Padding="6,2" Margin="2,0,0,0" Height="22"
+                  ToolTip.Tip="New Tab (Ctrl+T)" VerticalAlignment="Center">
+            <TextBlock Text="+" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"/>
+          </Button>
+        </StackPanel>
+
+        <!-- Tabs List (Hidden Scrollbar + Mouse Wheel Support) -->
+        <ScrollViewer x:Name="TabsScrollViewer"
+                      HorizontalScrollBarVisibility="Hidden"
+                      VerticalScrollBarVisibility="Disabled"
+                      PointerWheelChanged="OnTabsPointerWheelChanged">
           <ItemsControl ItemsSource="{Binding Tabs}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
