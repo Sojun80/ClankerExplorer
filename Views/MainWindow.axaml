@@ -131,13 +131,13 @@
         </DockPanel>
       </Border>
 
-      <!-- Row 1: Main Area (Sidebar + Center Panes + Inspector) -->
-      <Grid Grid.Row="1">
+      <!-- Row 1: Main Area (Sidebar + Center Panes + Preview Window) -->
+      <Grid x:Name="MainContentGrid" Grid.Row="1">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="240" MinWidth="180" MaxWidth="360"/>
           <ColumnDefinition Width="*" MinWidth="380"/>
           <ColumnDefinition Width="Auto"/>
-          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="320" MinWidth="240" MaxWidth="800"/>
         </Grid.ColumnDefinitions>
         <!-- Column 0: Left Sidebar -->
         <Border Grid.Column="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,1,0">
@@ -521,10 +521,8 @@
           </GridSplitter.Template>
         </GridSplitter>
 
-        <!-- Column 3: Right Inspector Preview Panel -->
+        <!-- Column 3: Right Preview Window Panel -->
         <views:InspectorPanelView x:Name="InspectorPanel" Grid.Column="3" DataContext="{Binding Inspector}"
-                                  Width="{Binding $parent[Window].((vm:MainViewModel)DataContext).InspectorWidth}"
-                                  MinWidth="200" MaxWidth="800"
                                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).ShowInspector}"/>
       </Grid>

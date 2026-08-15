@@ -11,6 +11,8 @@ namespace ClankerExplorer.Views;
 
 public partial class MainWindow : Window
 {
+    private ColumnDefinition? PreviewColumnDefinition => MainContentGrid != null && MainContentGrid.ColumnDefinitions.Count > 3 ? MainContentGrid.ColumnDefinitions[3] : null;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -195,6 +197,44 @@ public partial class MainWindow : Window
                 vm.RefreshAll();
                 e.Handled = true;
             }
+
+            if (PreviewColumnDefinition != null)
+            {
+                if (!vm.ShowInspector)
+                {
+                    PreviewColumnDefinition.MinWidth = 0;
+                    PreviewColumnDefinition.Width = new GridLength(0);
+                }
+                else
+                {
+                    double safeWidth = Math.Clamp(vm.InspectorWidth, 240, Math.Max(240, Bounds.Width - 660));
+                    PreviewColumnDefinition.MinWidth = 240;
+                    PreviewColumnDefinition.Width = new GridLength(safeWidth);
+                }
+            }
+
+            vm.PropertyChanged += (s, args) =>
+            {
+                if (args.PropertyName == nameof(MainViewModel.ShowInspector) && PreviewColumnDefinition != null)
+                {
+                    if (!vm.ShowInspector)
+                    {
+                        PreviewColumnDefinition.MinWidth = 0;
+                        PreviewColumnDefinition.Width = new GridLength(0);
+                    }
+                    else
+                    {
+                        double safeWidth = Math.Clamp(vm.InspectorWidth, 240, Math.Max(240, Bounds.Width - 660));
+                        PreviewColumnDefinition.MinWidth = 240;
+                        PreviewColumnDefinition.Width = new GridLength(safeWidth);
+                    }
+                }
+                else if (args.PropertyName == nameof(MainViewModel.InspectorWidth) && PreviewColumnDefinition != null && vm.ShowInspector)
+                {
+                    double safeWidth = Math.Clamp(vm.InspectorWidth, 240, Math.Max(240, Bounds.Width - 660));
+                    PreviewColumnDefinition.Width = new GridLength(safeWidth);
+                }
+            };
         };
 
         TabDragCoordinator.Instance.TabDragMoved += OnTabDragMoved;
@@ -202,12 +242,13 @@ public partial class MainWindow : Window
 
         SizeChanged += (s, e) =>
         {
-            if (DataContext is MainViewModel vm && vm.ShowInspector && InspectorPanel != null)
+            if (DataContext is MainViewModel vm && vm.ShowInspector && PreviewColumnDefinition != null)
             {
-                double maxAllowed = Math.Max(200, Bounds.Width - 660);
-                InspectorPanel.MaxWidth = maxAllowed;
-                if (vm.InspectorWidth > maxAllowed)
+                double maxAllowed = Math.Max(240, Bounds.Width - 660);
+                PreviewColumnDefinition.MaxWidth = maxAllowed;
+                if (PreviewColumnDefinition.Width.Value > maxAllowed)
                 {
+                    PreviewColumnDefinition.Width = new GridLength(maxAllowed);
                     vm.InspectorWidth = maxAllowed;
                 }
             }
@@ -217,10 +258,10 @@ public partial class MainWindow : Window
         {
             InspectorPanel.SizeChanged += (s, e) =>
             {
-                if (DataContext is MainViewModel vm && vm.ShowInspector && e.NewSize.Width >= 180)
+                if (DataContext is MainViewModel vm && vm.ShowInspector && e.NewSize.Width >= 200)
                 {
-                    double maxAllowed = Math.Max(200, Bounds.Width - 660);
-                    double clampedWidth = Math.Min(e.NewSize.Width, maxAllowed);
+                    double maxAllowed = Math.Max(240, Bounds.Width - 660);
+                    double clampedWidth = Math.Clamp(e.NewSize.Width, 240, maxAllowed);
                     vm.InspectorWidth = clampedWidth;
                 }
             };
@@ -660,6 +701,11 @@ public partial class MainWindow : Window
         if (DataContext is MainViewModel vm)
         {
             vm.ResetInspectorWidth();
+            if (PreviewColumnDefinition != null && vm.ShowInspector)
+            {
+                PreviewColumnDefinition.MinWidth = 240;
+                PreviewColumnDefinition.Width = new GridLength(320);
+            }
         }
     }
 }
