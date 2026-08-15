@@ -45,7 +45,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public bool IsTextFileSelected => SelectedTab?.SelectedItem != null && !SelectedTab.SelectedItem.IsDirectory && FileSystemService.Instance.IsTextLikeFile(SelectedTab.SelectedItem.FullPath);
 
     public bool IsSelectedFolderPinned => SelectedTab?.SelectedItem?.IsDirectory == true && QuickAccessService.Instance.IsPinned(SelectedTab.SelectedItem.FullPath);
-    public string PinFolderLabel => IsSelectedFolderPinned ? "Unpin from Quick Access" : "📌 Pin to Quick Access";
+    public string PinFolderLabel => IsSelectedFolderPinned ? "⭐ Unpin from Quick Access" : "⭐ Add to Quick Access";
 
     public string OpenArchiveLabel => "7-Zip: Open Archive";
     public string ExtractHereLabel => "7-Zip: Extract Here";

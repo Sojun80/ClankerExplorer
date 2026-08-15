@@ -303,7 +303,7 @@
           <MenuItem Header="Open" Command="{Binding OpenItemCommand}" IsVisible="{Binding IsFolderSelected}"/>
           <MenuItem Header="Open in New Tab" Command="{Binding OpenFolderInNewTabCommand}" IsVisible="{Binding IsFolderSelected}"/>
           <MenuItem Header="Open in Other Pane" Command="{Binding OpenFolderInOtherPaneCommand}" IsVisible="{Binding IsFolderSelected}"/>
-          <MenuItem Header="Pin Folder" Command="{Binding PinFolderCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="{Binding PinFolderLabel}" Command="{Binding PinFolderCommand}" IsVisible="{Binding IsFolderSelected}"/>
           <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsFolderSelected}"/>
           <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsFolderSelected}"/>
           <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsFolderSelected}"/>

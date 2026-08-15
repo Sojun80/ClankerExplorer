@@ -224,7 +224,7 @@
                           <Border.ContextMenu>
                             <ContextMenu Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
                                          BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
-                              <MenuItem Header="📌 Unpin from Quick Access"
+                              <MenuItem Header="⭐ Remove from Quick Access"
                                         Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).UnpinFromQuickAccessCommand}"
                                         CommandParameter="{Binding Path}"/>
                             </ContextMenu>
@@ -243,7 +243,7 @@
                                     CommandParameter="{Binding}"
                                     Classes="quick-remove-btn"
                                     Background="Transparent" BorderThickness="0" Padding="4,0"
-                                    ToolTip.Tip="Unpin from Quick Access" VerticalAlignment="Center">
+                                    ToolTip.Tip="Remove from Quick Access" VerticalAlignment="Center">
                               <TextBlock Text="–" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"/>
                             </Button>
                           </Grid>
