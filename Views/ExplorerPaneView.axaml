@@ -267,12 +267,26 @@
         <DataGridTemplateColumn Header="Name" Width="3*" MinWidth="150" SortMemberPath="Name">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
-              <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
-                <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
-                      Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.6" Width="13" Height="11" Stretch="Uniform"
-                      IsVisible="{Binding IsDirectory}" VerticalAlignment="Center"/>
-                <TextBlock Text="📄" IsVisible="{Binding !IsDirectory}" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}"/>
-                <TextBlock Text="{Binding Name}" FontSize="12" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+              <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
+                <!-- Folder Icon: Bigger & bolder (17x14px vector) -->
+                <Border IsVisible="{Binding IsDirectory}" Width="20" Height="18" VerticalAlignment="Center">
+                  <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
+                        Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.8" Width="17" Height="14" Stretch="Uniform"
+                        VerticalAlignment="Center"/>
+                </Border>
+
+                <!-- File Icon: Standard 12px file icon -->
+                <Border IsVisible="{Binding !IsDirectory}" Width="20" Height="18" VerticalAlignment="Center">
+                  <TextBlock Text="📄" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+
+                <!-- Folder Name: Distinct Bold Weight & Prominent Size -->
+                <TextBlock Text="{Binding Name}" IsVisible="{Binding IsDirectory}"
+                           FontWeight="Bold" FontSize="12.5" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+
+                <!-- File Name: Standard Regular Weight -->
+                <TextBlock Text="{Binding Name}" IsVisible="{Binding !IsDirectory}"
+                           FontWeight="Normal" FontSize="12" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
               </StackPanel>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
