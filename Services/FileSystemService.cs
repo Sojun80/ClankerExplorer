@@ -98,7 +98,7 @@ public class FileSystemService
 
             try
             {
-                await process.WaitForExitAsync(cts.Token);
+                await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
                 return (stdoutBuilder.ToString(), stderrBuilder.ToString(), process.ExitCode);
             }
             catch (OperationCanceledException)
@@ -311,7 +311,7 @@ public class FileSystemService
                             IsArchive = isArchive,
                             AttributesString = string.Join(" ", attrChars),
                             PermissionsString = GetPermissionsDisplay(info, isDir, isReadOnly),
-                            OwnerGroupString = isDir ? "root:root" : "user:user"
+                            OwnerGroupString = GetLinuxOwnerGroup(info)
                         });
                     }
                     catch (OperationCanceledException) { throw; }
@@ -737,14 +737,15 @@ public class FileSystemService
         }
     }
 
-    public void Delete(IEnumerable<string> paths, bool permanent = false)
+    public async Task DeleteAsync(IEnumerable<string> paths, bool permanent = false, CancellationToken cancellationToken = default)
     {
-        foreach (var path in paths)
+        await Task.Run(async () =>
         {
-            if (string.IsNullOrWhiteSpace(path)) continue;
-
-            try
+            foreach (var path in paths)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(path)) continue;
+
                 if (permanent)
                 {
                     if (File.Exists(path))
@@ -781,7 +782,7 @@ public class FileSystemService
                     else
                     {
                         // Linux / POSIX Trash via gio
-                        var (output, error, exitCode) = RunProcessWithTimeoutAsync("gio", $"trash \"{path}\"", 3000).GetAwaiter().GetResult();
+                        var (output, error, exitCode) = await RunProcessWithTimeoutAsync("gio", $"trash \"{path}\"", 3000, cancellationToken: cancellationToken).ConfigureAwait(false);
                         if (exitCode != 0)
                         {
                             // Never fall back to permanent deletion if trash fails!
@@ -790,11 +791,25 @@ public class FileSystemService
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Failed to delete {path}: {ex.Message}");
-                throw;
-            }
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public void Delete(IEnumerable<string> paths, bool permanent = false)
+    {
+        DeleteAsync(paths, permanent).GetAwaiter().GetResult();
+    }
+
+    private static string GetLinuxOwnerGroup(FileSystemInfo info)
+    {
+        if (OperatingSystem.IsWindows()) return string.Empty;
+        try
+        {
+            string user = Environment.UserName;
+            return $"{user}:{user}";
+        }
+        catch
+        {
+            return "user:user";
         }
     }
 

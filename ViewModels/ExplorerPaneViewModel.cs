@@ -407,7 +407,15 @@ public partial class ExplorerPaneViewModel : ObservableObject
     public void GoUp() => SelectedTab?.GoUp();
 
     [RelayCommand]
-    public void Refresh() => SelectedTab?.Refresh();
+    public void Refresh() => _ = RefreshAsync();
+
+    public async Task RefreshAsync()
+    {
+        if (SelectedTab != null)
+        {
+            await SelectedTab.RefreshAsync();
+        }
+    }
 
     [RelayCommand]
     public void SubmitAddress()
@@ -499,12 +507,12 @@ public partial class ExplorerPaneViewModel : ObservableObject
     }
 
     [RelayCommand]
-    public void PasteFiles()
+    public async Task PasteFilesAsync()
     {
         if (SelectedTab != null)
         {
-            ClipboardFileService.Paste(SelectedTab.CurrentPath);
-            Refresh();
+            await ClipboardFileService.PasteAsync(SelectedTab.CurrentPath);
+            await SelectedTab.RefreshAsync();
         }
     }
 
@@ -538,35 +546,35 @@ public partial class ExplorerPaneViewModel : ObservableObject
     }
 
     [RelayCommand]
-    public void ExtractHere()
+    public async Task ExtractHereAsync()
     {
         var target = SelectedTab?.SelectedItem;
-        if (target != null)
+        if (target != null && SelectedTab != null)
         {
-            ArchiveService.Instance.ExtractHere(target.FullPath);
-            Refresh();
+            await ArchiveService.Instance.ExtractHereAsync(target.FullPath);
+            await SelectedTab.RefreshAsync();
         }
     }
 
     [RelayCommand]
-    public void ExtractToSubfolder()
+    public async Task ExtractToSubfolderAsync()
     {
         var target = SelectedTab?.SelectedItem;
-        if (target != null)
+        if (target != null && SelectedTab != null)
         {
-            ArchiveService.Instance.ExtractToSubfolder(target.FullPath);
-            Refresh();
+            await ArchiveService.Instance.ExtractToSubfolderAsync(target.FullPath);
+            await SelectedTab.RefreshAsync();
         }
     }
 
     [RelayCommand]
-    public void ExtractToCustom()
+    public async Task ExtractToCustomAsync()
     {
         var target = SelectedTab?.SelectedItem;
-        if (target != null)
+        if (target != null && SelectedTab != null)
         {
             ArchiveService.Instance.OpenExtractDialog(target.FullPath);
-            Refresh();
+            await SelectedTab.RefreshAsync();
         }
     }
 

@@ -121,12 +121,20 @@ public static class ClipboardFileService
                         if (isCutMode)
                         {
                             Directory.Move(source, dest);
+                            successfulPaths.Add(source);
                         }
                         else
                         {
-                            CopyDirectorySafe(source, dest, cancellationToken);
+                            var (success, count, errors) = CopyDirectorySafe(source, dest, cancellationToken);
+                            if (success)
+                            {
+                                successfulPaths.Add(source);
+                            }
+                            else
+                            {
+                                failedPaths.Add(source);
+                            }
                         }
-                        successfulPaths.Add(source);
                     }
                     else
                     {
@@ -139,7 +147,7 @@ public static class ClipboardFileService
                     failedPaths.Add(source);
                 }
             }
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
 
         lock (_lock)
         {
@@ -160,11 +168,6 @@ public static class ClipboardFileService
 
         ClipboardChanged?.Invoke();
         return (successfulPaths.Count, failedPaths);
-    }
-
-    public static void Paste(string destinationDirectory)
-    {
-        PasteAsync(destinationDirectory).GetAwaiter().GetResult();
     }
 
     private static string GetNonConflictingPath(string dir, string name, bool isMove)
@@ -204,12 +207,34 @@ public static class ClipboardFileService
         }
     }
 
-    private static void CopyDirectorySafe(string sourceDir, string destDir, CancellationToken cancellationToken = default)
+    private static (bool success, int filesCopied, List<string> errors) CopyDirectorySafe(string sourceDir, string destDir, CancellationToken cancellationToken = default)
     {
+        var errors = new List<string>();
+        int filesCopied = 0;
+
         if (IsDescendantOf(destDir, sourceDir))
         {
-            Debug.WriteLine($"Cannot copy directory {sourceDir} into its own descendant {destDir}");
-            return;
+            errors.Add($"Cannot copy directory {sourceDir} into its own descendant {destDir}");
+            return (false, 0, errors);
+        }
+
+        // Handle symlink at root source
+        var rootInfo = new DirectoryInfo(sourceDir);
+        if ((rootInfo.Attributes & FileAttributes.ReparsePoint) != 0 || rootInfo.LinkTarget != null)
+        {
+            try
+            {
+                if (rootInfo.LinkTarget != null)
+                {
+                    Directory.CreateSymbolicLink(destDir, rootInfo.LinkTarget);
+                    return (true, 1, errors);
+                }
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Failed to copy symlink {sourceDir}: {ex.Message}");
+                return (false, 0, errors);
+            }
         }
 
         var visitedDirs = new HashSet<string>(PathComparer);
@@ -232,7 +257,7 @@ public static class ClipboardFileService
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Failed to create directory {currentDst}: {ex.Message}");
+                errors.Add($"Failed to create directory {currentDst}: {ex.Message}");
                 continue;
             }
 
@@ -248,19 +273,20 @@ public static class ClipboardFileService
                     {
                         var targetFilePath = Path.Combine(currentDst, file.Name);
                         file.CopyTo(targetFilePath, true);
+                        filesCopied++;
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"Failed to copy file {file.FullName}: {ex.Message}");
+                        errors.Add($"Failed to copy file {file.FullName}: {ex.Message}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Failed to read files from {currentSrc}: {ex.Message}");
+                errors.Add($"Failed to enumerate files from {currentSrc}: {ex.Message}");
             }
 
-            // Enqueue subdirectories (skipping reparse points / symlinks to prevent infinite cycles)
+            // Enqueue subdirectories
             try
             {
                 foreach (var subDir in dirInfo.GetDirectories())
@@ -271,26 +297,41 @@ public static class ClipboardFileService
                         bool isReparsePoint = (subDir.Attributes & FileAttributes.ReparsePoint) != 0 || subDir.LinkTarget != null;
                         if (isReparsePoint)
                         {
-                            Debug.WriteLine($"Skipping traversal into reparse point / link {subDir.FullName}");
+                            try
+                            {
+                                if (subDir.LinkTarget != null)
+                                {
+                                    var targetSubDir = Path.Combine(currentDst, subDir.Name);
+                                    Directory.CreateSymbolicLink(targetSubDir, subDir.LinkTarget);
+                                    filesCopied++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                errors.Add($"Failed to link subfolder {subDir.FullName}: {ex.Message}");
+                            }
                             continue;
                         }
 
-                        var targetSubDir = Path.Combine(currentDst, subDir.Name);
-                        if (!IsDescendantOf(targetSubDir, subDir.FullName))
+                        var targetDir = Path.Combine(currentDst, subDir.Name);
+                        if (!IsDescendantOf(targetDir, subDir.FullName))
                         {
-                            workQueue.Enqueue((subDir.FullName, targetSubDir));
+                            workQueue.Enqueue((subDir.FullName, targetDir));
                         }
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"Failed to process directory {subDir.FullName}: {ex.Message}");
+                        errors.Add($"Failed to process directory {subDir.FullName}: {ex.Message}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Failed to read subdirectories from {currentSrc}: {ex.Message}");
+                errors.Add($"Failed to enumerate subdirectories from {currentSrc}: {ex.Message}");
             }
         }
+
+        bool success = errors.Count == 0;
+        return (success, filesCopied, errors);
     }
 }

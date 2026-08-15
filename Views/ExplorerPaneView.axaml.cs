@@ -35,6 +35,8 @@ public partial class ExplorerPaneView : UserControl
             if (FileDataGrid != null)
             {
                 FileDataGrid.AddHandler(PointerPressedEvent, OnDataGridPointerPressedTunnel, RoutingStrategies.Tunnel);
+                FileDataGrid.AddHandler(PointerReleasedEvent, (sender, args) => SaveCurrentColumnLayout(), RoutingStrategies.Bubble);
+                FileDataGrid.ColumnReordered += (sender, args) => SaveCurrentColumnLayout();
             }
 
             if (GridContextMenu != null)
@@ -48,6 +50,81 @@ public partial class ExplorerPaneView : UserControl
                 };
             }
         };
+    }
+
+    private void SaveCurrentColumnLayout()
+    {
+        if (FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm) return;
+
+        var s = SettingsService.Instance.CurrentSettings;
+        bool changed = false;
+
+        foreach (var col in FileDataGrid.Columns)
+        {
+            var header = col.Header?.ToString();
+            double actualWidth = col.ActualWidth;
+            if (actualWidth > 20)
+            {
+                switch (header)
+                {
+                    case "Name":
+                        s.ColumnWidthName = actualWidth;
+                        vm.ColumnWidthName = actualWidth;
+                        changed = true;
+                        break;
+                    case "Ext":
+                        s.ColumnWidthExt = actualWidth;
+                        vm.ColumnWidthExt = actualWidth;
+                        changed = true;
+                        break;
+                    case "Size":
+                        s.ColumnWidthSize = actualWidth;
+                        vm.ColumnWidthSize = actualWidth;
+                        changed = true;
+                        break;
+                    case "Date Modified":
+                        s.ColumnWidthDateModified = actualWidth;
+                        vm.ColumnWidthDateModified = actualWidth;
+                        changed = true;
+                        break;
+                    case "Date Created":
+                        s.ColumnWidthDateCreated = actualWidth;
+                        vm.ColumnWidthDateCreated = actualWidth;
+                        changed = true;
+                        break;
+                    case "Date Accessed":
+                        s.ColumnWidthDateAccessed = actualWidth;
+                        vm.ColumnWidthDateAccessed = actualWidth;
+                        changed = true;
+                        break;
+                    case "Type":
+                        s.ColumnWidthItemType = actualWidth;
+                        vm.ColumnWidthItemType = actualWidth;
+                        changed = true;
+                        break;
+                    case "Attributes":
+                        s.ColumnWidthAttributes = actualWidth;
+                        vm.ColumnWidthAttributes = actualWidth;
+                        changed = true;
+                        break;
+                    case "Permissions":
+                        s.ColumnWidthPermissions = actualWidth;
+                        vm.ColumnWidthPermissions = actualWidth;
+                        changed = true;
+                        break;
+                    case "Owner:Group":
+                        s.ColumnWidthOwnerGroup = actualWidth;
+                        vm.ColumnWidthOwnerGroup = actualWidth;
+                        changed = true;
+                        break;
+                }
+            }
+        }
+
+        if (changed)
+        {
+            SettingsService.Instance.SaveSettings(s);
+        }
     }
 
     private void OnDataGridPointerPressedTunnel(object? sender, PointerPressedEventArgs e)

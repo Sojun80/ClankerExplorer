@@ -286,9 +286,11 @@ public class HistoryService
     public static string FormatCompactPath(string path, int maxLength = 22)
     {
         if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+
+        bool startsWithSlash = path.StartsWith('/');
         path = path.TrimEnd('\\', '/');
 
-        if (path.Length <= maxLength) return path;
+        if (path.Length <= maxLength) return startsWithSlash && !path.StartsWith('/') ? "/" + path : path;
 
         // UNC Path: \\wsl$\Ubuntu\home -> \\wsl$\...\home
         if (path.StartsWith(@"\\"))
@@ -308,10 +310,11 @@ public class HistoryService
             string root = segments[0]; // e.g. "C:" or "home"
             string leaf = segments[^1]; // e.g. "FD"
             var sep = OperatingSystem.IsWindows() ? '\\' : '/';
-            return $"{root}{sep}...{sep}{leaf}";
+            string prefix = startsWithSlash ? "/" : "";
+            return $"{prefix}{root}{sep}...{sep}{leaf}";
         }
 
-        return path;
+        return startsWithSlash && !path.StartsWith('/') ? "/" + path : path;
     }
 
     private FrequentFolderItem CreateItem(FolderHistoryEntry e)

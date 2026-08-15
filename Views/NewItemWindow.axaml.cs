@@ -50,7 +50,29 @@ public partial class NewItemWindow : Window
         var text = TxtInput.Text?.Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
-            TxtError.Text = "Name cannot be empty";
+            TxtError.Text = "Name cannot be empty.";
+            TxtError.IsVisible = true;
+            return;
+        }
+
+        if (text == "." || text == "..")
+        {
+            TxtError.Text = "Name cannot be '.' or '..'.";
+            TxtError.IsVisible = true;
+            return;
+        }
+
+        if (text != System.IO.Path.GetFileName(text) || text.Contains('/') || text.Contains('\\') || text.Contains(':'))
+        {
+            TxtError.Text = "Name cannot contain directory separators (/ or \\) or path prefixes.";
+            TxtError.IsVisible = true;
+            return;
+        }
+
+        var invalidChars = System.IO.Path.GetInvalidFileNameChars();
+        if (text.IndexOfAny(invalidChars) >= 0)
+        {
+            TxtError.Text = "Name contains invalid characters.";
             TxtError.IsVisible = true;
             return;
         }

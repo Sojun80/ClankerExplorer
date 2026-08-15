@@ -97,16 +97,16 @@ public class ArchiveService
         }
     }
 
-    public void ExtractHere(string archivePath)
+    public async Task<(bool success, string message)> ExtractHereAsync(string archivePath, CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(archivePath)) return;
+        if (!File.Exists(archivePath)) return (false, "Archive file does not exist.");
         var dir = Path.GetDirectoryName(archivePath) ?? "";
-        ExtractTo(archivePath, dir);
+        return await ExtractToAsync(archivePath, dir, cancellationToken: cancellationToken);
     }
 
-    public void ExtractToSubfolder(string archivePath)
+    public async Task<(bool success, string message)> ExtractToSubfolderAsync(string archivePath, CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(archivePath)) return;
+        if (!File.Exists(archivePath)) return (false, "Archive file does not exist.");
         var dir = Path.GetDirectoryName(archivePath) ?? "";
         var nameWithoutExt = Path.GetFileNameWithoutExtension(archivePath);
         if (nameWithoutExt.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
@@ -115,41 +115,88 @@ public class ArchiveService
         }
         var targetDir = Path.Combine(dir, nameWithoutExt);
         Directory.CreateDirectory(targetDir);
-        ExtractTo(archivePath, targetDir);
+        return await ExtractToAsync(archivePath, targetDir, cancellationToken: cancellationToken);
     }
 
-    public void ExtractTo(string archivePath, string destinationDirectory)
+    public async Task<(bool success, string message)> ExtractToAsync(string archivePath, string destinationDirectory, bool overwrite = false, CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(archivePath)) return;
+        if (!File.Exists(archivePath)) return (false, "Archive file does not exist.");
+        Directory.CreateDirectory(destinationDirectory);
 
-        var exe = _sevenZipGuiExe ?? _sevenZipCliExe;
-        if (exe != null && File.Exists(exe))
+        return await Task.Run(() =>
         {
-            Process.Start(new ProcessStartInfo
+            var exe = _sevenZipGuiExe ?? _sevenZipCliExe;
+            if (exe != null && File.Exists(exe))
             {
-                FileName = exe,
-                Arguments = $"x \"{archivePath}\" -o\"{destinationDirectory}\" -y",
-                UseShellExecute = true
-            });
-        }
-        else
-        {
-            // Background fallback to System.IO.Compression for zip files
-            Task.Run(() =>
+                try
+                {
+                    // If GUI extractor (7zG.exe), run with interactive prompt on conflict
+                    bool isGui = exe.EndsWith("7zG.exe", StringComparison.OrdinalIgnoreCase);
+                    string args = isGui
+                        ? $"x \"{archivePath}\" -o\"{destinationDirectory}\""
+                        : $"x \"{archivePath}\" -o\"{destinationDirectory}\" {(overwrite ? "-aoa" : "-aos")}";
+
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = exe,
+                        Arguments = args,
+                        UseShellExecute = false,
+                        CreateNoWindow = !isGui
+                    };
+
+                    using var proc = Process.Start(psi);
+                    if (proc != null)
+                    {
+                        proc.WaitForExit();
+                        return (proc.ExitCode == 0, proc.ExitCode == 0 ? "Extracted successfully." : $"Extraction exited with code {proc.ExitCode}");
+                    }
+                    return (false, "Failed to start extraction process.");
+                }
+                catch (Exception ex)
+                {
+                    return (false, $"7-Zip extraction error: {ex.Message}");
+                }
+            }
+            else
             {
+                // Fallback to System.IO.Compression for zip files
                 try
                 {
                     if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                     {
-                        ZipFile.ExtractToDirectory(archivePath, destinationDirectory, true);
+                        using var archive = ZipFile.OpenRead(archivePath);
+                        foreach (var entry in archive.Entries)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var destPath = Path.Combine(destinationDirectory, entry.FullName);
+
+                            if (string.IsNullOrEmpty(entry.Name))
+                            {
+                                Directory.CreateDirectory(destPath);
+                                continue;
+                            }
+
+                            var parent = Path.GetDirectoryName(destPath);
+                            if (parent != null) Directory.CreateDirectory(parent);
+
+                            if (File.Exists(destPath) && !overwrite)
+                            {
+                                // Safe non-overwriting extraction
+                                continue;
+                            }
+
+                            entry.ExtractToFile(destPath, overwrite);
+                        }
+                        return (true, "Extracted successfully.");
                     }
+                    return (false, "Unsupported archive format without 7-Zip installed.");
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Failed extraction fallback: {ex.Message}");
+                    return (false, $"ZIP extraction error: {ex.Message}");
                 }
-            });
-        }
+            }
+        }, cancellationToken);
     }
 
     public void OpenExtractDialog(string archivePath)
@@ -167,7 +214,7 @@ public class ArchiveService
         }
         else
         {
-            ExtractHere(archivePath);
+            _ = ExtractHereAsync(archivePath);
         }
     }
 

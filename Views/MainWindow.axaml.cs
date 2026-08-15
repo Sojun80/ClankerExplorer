@@ -19,19 +19,26 @@ public partial class MainWindow : Window
             {
                 vm.RequestCreateItem += async (type, parent) =>
                 {
-                    var dlg = new NewItemWindow(type, parent);
-                    var res = await dlg.ShowDialog<bool>(this);
-                    if (res)
+                    try
                     {
-                        if (type == "folder")
+                        var dlg = new NewItemWindow(type, parent);
+                        var res = await dlg.ShowDialog<bool>(this);
+                        if (res)
                         {
-                            FileSystemService.Instance.CreateFolder(parent, dlg.ItemName);
+                            if (type == "folder")
+                            {
+                                FileSystemService.Instance.CreateFolder(parent, dlg.ItemName);
+                            }
+                            else
+                            {
+                                FileSystemService.Instance.CreateFile(parent, dlg.ItemName);
+                            }
+                            await vm.ActivePane.RefreshAsync();
                         }
-                        else
-                        {
-                            FileSystemService.Instance.CreateFile(parent, dlg.ItemName);
-                        }
-                        vm.ActivePane.Refresh();
+                    }
+                    catch (Exception ex)
+                    {
+                        await ShowErrorDialogAsync("Create Failed", ex.Message);
                     }
                 };
 
@@ -61,12 +68,19 @@ public partial class MainWindow : Window
                 vm.RequestRename += async item =>
                 {
                     if (item == null) return;
-                    var dlg = new RenameWindow(item.Name);
-                    var res = await dlg.ShowDialog<bool>(this);
-                    if (res && !string.IsNullOrWhiteSpace(dlg.NewName) && dlg.NewName != item.Name)
+                    try
                     {
-                        FileSystemService.Instance.Rename(item.FullPath, dlg.NewName);
-                        vm.ActivePane.Refresh();
+                        var dlg = new RenameWindow(item.Name);
+                        var res = await dlg.ShowDialog<bool>(this);
+                        if (res && !string.IsNullOrWhiteSpace(dlg.NewName) && dlg.NewName != item.Name)
+                        {
+                            FileSystemService.Instance.Rename(item.FullPath, dlg.NewName);
+                            await vm.ActivePane.RefreshAsync();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        await ShowErrorDialogAsync("Rename Failed", ex.Message);
                     }
                 };
 
@@ -85,16 +99,23 @@ public partial class MainWindow : Window
                 vm.RequestDeleteWithConfirmation += async (item, perm) =>
                 {
                     if (item == null) return;
-                    var settings = SettingsService.Instance.CurrentSettings;
-                    if (settings.ConfirmBeforeDelete)
+                    try
                     {
-                        var dlg = new ConfirmDeleteWindow(item.Name, item.FullPath, perm);
-                        var res = await dlg.ShowDialog<bool>(this);
-                        if (!res) return;
-                    }
+                        var settings = SettingsService.Instance.CurrentSettings;
+                        if (settings.ConfirmBeforeDelete)
+                        {
+                            var dlg = new ConfirmDeleteWindow(item.Name, item.FullPath, perm);
+                            var res = await dlg.ShowDialog<bool>(this);
+                            if (!res) return;
+                        }
 
-                    FileSystemService.Instance.Delete(new[] { item.FullPath }, perm);
-                    vm.ActivePane.Refresh();
+                        await FileSystemService.Instance.DeleteAsync(new[] { item.FullPath }, perm);
+                        await vm.ActivePane.RefreshAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        await ShowErrorDialogAsync("Delete Failed", ex.Message);
+                    }
                 };
             }
         };
@@ -266,5 +287,51 @@ public partial class MainWindow : Window
         {
             vm.SetActivePane("right");
         }
+    }
+
+    private async System.Threading.Tasks.Task ShowErrorDialogAsync(string title, string message)
+    {
+        var win = new Window
+        {
+            Title = title,
+            Width = 440,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Background = (Avalonia.Media.IBrush)this.FindResource("AppSurfaceBrush")!,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(20),
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"⚠️ {title}",
+                        FontSize = 14,
+                        FontWeight = Avalonia.Media.FontWeight.Bold,
+                        Foreground = (Avalonia.Media.IBrush)this.FindResource("AppTextBrush")!
+                    },
+                    new TextBlock
+                    {
+                        Text = message,
+                        FontSize = 12,
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        Foreground = (Avalonia.Media.IBrush)this.FindResource("AppSubTextBrush")!
+                    },
+                    new Button
+                    {
+                        Content = "OK",
+                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                        Classes = { "power-btn" }
+                    }
+                }
+            }
+        };
+
+        var btn = (Button)((StackPanel)win.Content).Children[2];
+        btn.Click += (s, e) => win.Close();
+
+        await win.ShowDialog(this);
     }
 }
