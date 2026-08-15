@@ -200,13 +200,28 @@ public partial class MainWindow : Window
         TabDragCoordinator.Instance.TabDragMoved += OnTabDragMoved;
         TabDragCoordinator.Instance.TabDragEnded += OnTabDragEnded;
 
+        SizeChanged += (s, e) =>
+        {
+            if (DataContext is MainViewModel vm && vm.ShowInspector && InspectorPanel != null)
+            {
+                double maxAllowed = Math.Max(200, Bounds.Width - 660);
+                InspectorPanel.MaxWidth = maxAllowed;
+                if (vm.InspectorWidth > maxAllowed)
+                {
+                    vm.InspectorWidth = maxAllowed;
+                }
+            }
+        };
+
         if (InspectorPanel != null)
         {
             InspectorPanel.SizeChanged += (s, e) =>
             {
                 if (DataContext is MainViewModel vm && vm.ShowInspector && e.NewSize.Width >= 180)
                 {
-                    vm.InspectorWidth = e.NewSize.Width;
+                    double maxAllowed = Math.Max(200, Bounds.Width - 660);
+                    double clampedWidth = Math.Min(e.NewSize.Width, maxAllowed);
+                    vm.InspectorWidth = clampedWidth;
                 }
             };
         }

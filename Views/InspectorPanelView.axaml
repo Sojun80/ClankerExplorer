@@ -17,7 +17,7 @@
         <DockPanel LastChildFill="True">
           <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
             <TextBlock Text="🔍" FontSize="12"/>
-            <TextBlock Text="Inspector Preview" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}"/>
+            <TextBlock Text="Preview Window" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}"/>
           </StackPanel>
         </DockPanel>
       </Border>
