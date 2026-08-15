@@ -9,7 +9,7 @@
         x:DataType="vm:MainViewModel"
         Title="C-Explorer"
         Icon="/Assets/app-icon.png"
-        Width="1360" Height="860"
+        Width="1360" Height="960"
         MinWidth="900" MinHeight="500"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource AppBgBrush}" Foreground="{DynamicResource AppTextBrush}"
