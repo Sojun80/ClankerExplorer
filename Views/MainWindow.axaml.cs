@@ -13,6 +13,14 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        Closing += (s, e) =>
+        {
+            if (DataContext is MainViewModel vm)
+            {
+                SessionService.Instance.SaveSession(vm);
+            }
+        };
+
         Loaded += (s, e) =>
         {
             if (DataContext is MainViewModel vm)

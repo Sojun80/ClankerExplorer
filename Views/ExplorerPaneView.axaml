@@ -41,12 +41,39 @@
                 <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppAccentBrush}" BorderThickness="1,1,1,0"
                         CornerRadius="4,4,0,0" Padding="10,5" Margin="2,4,0,0" Cursor="Hand"
                         PointerPressed="OnTabClicked">
+                  <Border.ContextMenu>
+                    <ContextMenu>
+                      <MenuItem Command="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).TogglePinTabCommand}"
+                                CommandParameter="{Binding}">
+                        <MenuItem.Header>
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="📌"/>
+                            <TextBlock Text="Pin / Unpin Tab"/>
+                          </StackPanel>
+                        </MenuItem.Header>
+                      </MenuItem>
+                      <MenuItem Header="Duplicate Tab"
+                                Command="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).DuplicateTabCommand}"
+                                CommandParameter="{Binding}"/>
+                      <Separator/>
+                      <MenuItem Header="Close Other Tabs"
+                                Command="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).CloseOtherTabsCommand}"
+                                CommandParameter="{Binding}"/>
+                      <MenuItem Header="Close Tab"
+                                Command="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).CloseTabCommand}"
+                                CommandParameter="{Binding}"
+                                IsEnabled="{Binding !IsPinned}"/>
+                    </ContextMenu>
+                  </Border.ContextMenu>
                   <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <TextBlock Text="📌" FontSize="11" IsVisible="{Binding IsPinned}" ToolTip.Tip="Pinned Tab (Always Restored)"/>
                     <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
-                          Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.6" Width="13" Height="11" Stretch="Uniform" VerticalAlignment="Center"/>
+                          Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.6" Width="13" Height="11" Stretch="Uniform" VerticalAlignment="Center"
+                          IsVisible="{Binding !IsPinned}"/>
                     <TextBlock Text="{Binding Title}" FontSize="12" Foreground="{DynamicResource AppTextBrush}" MaxWidth="160" TextTrimming="CharacterEllipsis"/>
                     <Button Command="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).CloseTabCommand}"
                             CommandParameter="{Binding}"
+                            IsVisible="{Binding !IsPinned}"
                             Background="Transparent" BorderThickness="0" Padding="3,0" Margin="4,0,0,0">
                       <TextBlock Text="×" FontSize="13" Foreground="{DynamicResource AppSubTextBrush}"/>
                     </Button>

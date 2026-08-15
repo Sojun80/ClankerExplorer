@@ -299,7 +299,51 @@
         <!-- TAB 4: BEHAVIOR & STARTUP -->
         <TabItem Header="⚙️ General &amp; Startup">
           <ScrollViewer Margin="0,10">
-            <StackPanel Spacing="14">
+            <StackPanel Spacing="16">
+              <!-- Startup Tab Mode -->
+              <StackPanel Spacing="6">
+                <TextBlock Text="ON STARTUP" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12,10">
+                  <StackPanel Spacing="10">
+                    <RadioButton IsChecked="{Binding IsStartupRestoreSession, Mode=TwoWay}" GroupName="StartupMode">
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="🔄 Restore last session (Recommended)" Foreground="{DynamicResource AppTextBrush}" FontSize="12" FontWeight="SemiBold"/>
+                        <TextBlock Text="Restores the most recently active tabs and selects the active tab. Pinned tabs always survive."
+                                   Foreground="{DynamicResource AppSubTextBrush}" FontSize="11"/>
+                      </StackPanel>
+                    </RadioButton>
+
+                    <RadioButton IsChecked="{Binding IsStartupOpenPinned, Mode=TwoWay}" GroupName="StartupMode">
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="📌 Open pinned folders" Foreground="{DynamicResource AppTextBrush}" FontSize="12" FontWeight="SemiBold"/>
+                        <TextBlock Text="Opens only tabs that were pinned. If none are pinned, opens the default location."
+                                   Foreground="{DynamicResource AppSubTextBrush}" FontSize="11"/>
+                      </StackPanel>
+                    </RadioButton>
+
+                    <RadioButton IsChecked="{Binding IsStartupOpenDefault, Mode=TwoWay}" GroupName="StartupMode">
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="🏠 Open a single default location" Foreground="{DynamicResource AppTextBrush}" FontSize="12" FontWeight="SemiBold"/>
+                        <TextBlock Text="Starts clean with a single tab pointing to the default startup directory."
+                                   Foreground="{DynamicResource AppSubTextBrush}" FontSize="11"/>
+                      </StackPanel>
+                    </RadioButton>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <!-- Startup Restore Cap -->
+              <StackPanel Spacing="4">
+                <DockPanel>
+                  <TextBlock Text="Max Tabs Restored on Startup:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" DockPanel.Dock="Left"/>
+                  <TextBlock Text="{Binding MaxTabsRestoredOnStartup, StringFormat='{}{0} tabs'}" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"
+                             FontFamily="{DynamicResource AppMonoFont}" HorizontalAlignment="Right" DockPanel.Dock="Right"/>
+                </DockPanel>
+                <Slider Minimum="4" Maximum="16" Value="{Binding MaxTabsRestoredOnStartup, Mode=TwoWay}"/>
+                <TextBlock Text="Prevents chaotic multi-tab sessions from cluttering startup. Pinned tabs are always kept regardless of this cap."
+                           Foreground="{DynamicResource AppSubTextBrush}" FontSize="10.5"/>
+              </StackPanel>
+
               <!-- Default Startup Path -->
               <StackPanel Spacing="4">
                 <TextBlock Text="DEFAULT STARTUP DIRECTORY" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
@@ -307,20 +351,25 @@
                          BorderBrush="{DynamicResource AppBorderBrush}" FontFamily="{DynamicResource AppMonoFont}" Padding="6,4"/>
               </StackPanel>
 
-              <!-- Dual Pane Startup -->
-              <CheckBox IsChecked="{Binding StartInDualPane, Mode=TwoWay}" Margin="0,4">
-                <TextBlock Text="Start in Dual-Pane mode on launch" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
-              </CheckBox>
+              <!-- Checkbox Options -->
+              <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12,10">
+                <StackPanel Spacing="8">
+                  <!-- Dual Pane Startup -->
+                  <CheckBox IsChecked="{Binding StartInDualPane, Mode=TwoWay}">
+                    <TextBlock Text="Start in Dual-Pane mode on launch" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
 
-              <!-- Inspector Startup -->
-              <CheckBox IsChecked="{Binding ShowInspectorOnStartup, Mode=TwoWay}" Margin="0,4">
-                <TextBlock Text="Open File Inspector panel on launch" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
-              </CheckBox>
+                  <!-- Inspector Startup -->
+                  <CheckBox IsChecked="{Binding ShowInspectorOnStartup, Mode=TwoWay}">
+                    <TextBlock Text="Open File Inspector panel on launch" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
 
-              <!-- Confirm Delete -->
-              <CheckBox IsChecked="{Binding ConfirmBeforeDelete, Mode=TwoWay}" Margin="0,4">
-                <TextBlock Text="Confirm before deleting files" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
-              </CheckBox>
+                  <!-- Confirm Delete -->
+                  <CheckBox IsChecked="{Binding ConfirmBeforeDelete, Mode=TwoWay}">
+                    <TextBlock Text="Confirm before deleting files" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </ScrollViewer>
         </TabItem>

@@ -332,7 +332,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
         SettingsService.Instance.SaveSettings(s);
     }
 
-    private void WireTabEvents(ExplorerTabViewModel tab)
+    public void WireTabEvents(ExplorerTabViewModel tab)
     {
         tab.PropertyChanged += (s, e) =>
         {
@@ -364,6 +364,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
     {
         if (value != null)
         {
+            value.LastActiveTime = DateTime.Now;
             RawAddressInput = value.CurrentPath;
             NotifyContextMenuProperties();
             FileSelectedForPreview?.Invoke(value.SelectedItem);
@@ -384,7 +385,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
     public void CloseTab(ExplorerTabViewModel? tab)
     {
         var target = tab ?? SelectedTab;
-        if (target == null || Tabs.Count <= 1) return;
+        if (target == null || Tabs.Count <= 1 || target.IsPinned) return;
 
         int idx = Tabs.IndexOf(target);
         Tabs.Remove(target);
@@ -395,6 +396,41 @@ public partial class ExplorerPaneViewModel : ObservableObject
             int nextIdx = Math.Min(idx, Tabs.Count - 1);
             SelectedTab = Tabs[nextIdx];
         }
+    }
+
+    [RelayCommand]
+    public void TogglePinTab(ExplorerTabViewModel? tab)
+    {
+        var target = tab ?? SelectedTab;
+        if (target != null)
+        {
+            target.IsPinned = !target.IsPinned;
+        }
+    }
+
+    [RelayCommand]
+    public void DuplicateTab(ExplorerTabViewModel? tab)
+    {
+        var target = tab ?? SelectedTab;
+        if (target != null)
+        {
+            AddNewTab(target.CurrentPath);
+        }
+    }
+
+    [RelayCommand]
+    public void CloseOtherTabs(ExplorerTabViewModel? tab)
+    {
+        var target = tab ?? SelectedTab;
+        if (target == null) return;
+
+        var toRemove = Tabs.Where(t => t != target && !t.IsPinned).ToList();
+        foreach (var t in toRemove)
+        {
+            Tabs.Remove(t);
+            t.Dispose();
+        }
+        SelectedTab = target;
     }
 
     [RelayCommand]

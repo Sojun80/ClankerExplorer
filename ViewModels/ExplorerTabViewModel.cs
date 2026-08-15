@@ -32,6 +32,9 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     private bool _isPinned;
 
     [ObservableProperty]
+    private DateTime _lastActiveTime = DateTime.Now;
+
+    [ObservableProperty]
     private bool _isLoading;
 
     [ObservableProperty]

@@ -25,6 +25,9 @@ public class AppSettings
 
     // Preferences & Behavior
     public string DefaultPath { get; set; } = OperatingSystem.IsWindows() ? @"C:\" : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    public string StartupBehavior { get; set; } = "RestoreSession"; // "RestoreSession", "OpenPinned", "OpenDefaultPath"
+    public int MaxTabsRestoredOnStartup { get; set; } = 8;
+    public int MaxTabsAllowed { get; set; } = 30;
     public bool StartInDualPane { get; set; } = false;
     public bool ShowInspectorOnStartup { get; set; } = true;
     public bool ConfirmBeforeDelete { get; set; } = true;
@@ -70,6 +73,9 @@ public class AppSettings
             BaseFontSize = this.BaseFontSize,
             DataGridRowHeight = this.DataGridRowHeight,
             DefaultPath = this.DefaultPath,
+            StartupBehavior = this.StartupBehavior,
+            MaxTabsRestoredOnStartup = this.MaxTabsRestoredOnStartup,
+            MaxTabsAllowed = this.MaxTabsAllowed,
             StartInDualPane = this.StartInDualPane,
             ShowInspectorOnStartup = this.ShowInspectorOnStartup,
             ConfirmBeforeDelete = this.ConfirmBeforeDelete,

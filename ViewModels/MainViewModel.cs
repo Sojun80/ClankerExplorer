@@ -88,17 +88,132 @@ public partial class MainViewModel : ObservableObject
         var startPath = string.IsNullOrWhiteSpace(settings.DefaultPath) ? FileSystemService.DefaultRootPath : settings.DefaultPath;
         if (!Directory.Exists(startPath)) startPath = FileSystemService.DefaultRootPath;
 
-        _isDualPane = settings.StartInDualPane;
-        _showInspector = settings.ShowInspectorOnStartup;
-
-        _leftPane = new ExplorerPaneViewModel("left", startPath, "PANE 1") { IsActive = true };
-        _rightPane = new ExplorerPaneViewModel("right", startPath, "PANE 2") { IsActive = false };
-        _activePane = _leftPane;
-
-        WirePaneEvents(_leftPane);
-        WirePaneEvents(_rightPane);
+        InitializePanesFromStartupSettings(settings, startPath);
 
         LoadSidebarData();
+    }
+
+    private void InitializePanesFromStartupSettings(AppSettings settings, string defaultPath)
+    {
+        IsDualPane = settings.StartInDualPane;
+        ShowInspector = settings.ShowInspectorOnStartup;
+
+        var session = SessionService.Instance.LoadSession();
+
+        if (settings.StartupBehavior == "RestoreSession" && session != null)
+        {
+            IsDualPane = session.IsDualPane;
+            var paneLeft = RestorePaneFromSession("left", session.LeftPane, defaultPath, "PANE 1");
+            var paneRight = RestorePaneFromSession("right", session.RightPane, defaultPath, "PANE 2");
+
+            if (session.ActivePaneId == "right" && IsDualPane)
+            {
+                paneLeft.IsActive = false;
+                paneRight.IsActive = true;
+                ActivePane = paneRight;
+            }
+            else
+            {
+                paneLeft.IsActive = true;
+                paneRight.IsActive = false;
+                ActivePane = paneLeft;
+            }
+
+            LeftPane = paneLeft;
+            RightPane = paneRight;
+        }
+        else if (settings.StartupBehavior == "OpenPinned" && session != null)
+        {
+            var paneLeft = RestorePinnedPane("left", session.LeftPane, defaultPath, "PANE 1");
+            var paneRight = RestorePinnedPane("right", session.RightPane, defaultPath, "PANE 2");
+            paneLeft.IsActive = true;
+            paneRight.IsActive = false;
+            LeftPane = paneLeft;
+            RightPane = paneRight;
+            ActivePane = paneLeft;
+        }
+        else
+        {
+            // Open a single default location
+            var paneLeft = new ExplorerPaneViewModel("left", defaultPath, "PANE 1") { IsActive = true };
+            var paneRight = new ExplorerPaneViewModel("right", defaultPath, "PANE 2") { IsActive = false };
+            LeftPane = paneLeft;
+            RightPane = paneRight;
+            ActivePane = paneLeft;
+        }
+
+        WirePaneEvents(LeftPane);
+        WirePaneEvents(RightPane);
+    }
+
+    private static ExplorerPaneViewModel RestorePaneFromSession(string paneId, PaneSessionState? paneSession, string defaultPath, string label)
+    {
+        var settings = SettingsService.Instance.CurrentSettings;
+        var pane = new ExplorerPaneViewModel(paneId, defaultPath, label);
+
+        if (paneSession != null && paneSession.Tabs.Count > 0)
+        {
+            var filteredTabs = SessionService.Instance.FilterTabsToRestore(
+                paneSession.Tabs,
+                settings.MaxTabsRestoredOnStartup,
+                paneSession.ActiveTabPath
+            );
+
+            if (filteredTabs.Count > 0)
+            {
+                pane.Tabs.Clear();
+                ExplorerTabViewModel? selectedTab = null;
+
+                foreach (var tabInfo in filteredTabs)
+                {
+                    var tab = new ExplorerTabViewModel(tabInfo.Path)
+                    {
+                        IsPinned = tabInfo.IsPinned,
+                        LastActiveTime = tabInfo.LastActiveTime
+                    };
+                    pane.Tabs.Add(tab);
+                    pane.WireTabEvents(tab);
+
+                    if (selectedTab == null || string.Equals(tab.CurrentPath, paneSession.ActiveTabPath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    {
+                        selectedTab = tab;
+                    }
+                }
+
+                pane.SelectedTab = selectedTab ?? pane.Tabs.FirstOrDefault();
+                return pane;
+            }
+        }
+
+        return pane;
+    }
+
+    private static ExplorerPaneViewModel RestorePinnedPane(string paneId, PaneSessionState? paneSession, string defaultPath, string label)
+    {
+        var pane = new ExplorerPaneViewModel(paneId, defaultPath, label);
+
+        if (paneSession != null)
+        {
+            var pinned = paneSession.Tabs.Where(t => t.IsPinned && Directory.Exists(t.Path)).ToList();
+            if (pinned.Count > 0)
+            {
+                pane.Tabs.Clear();
+                foreach (var t in pinned)
+                {
+                    var tab = new ExplorerTabViewModel(t.Path)
+                    {
+                        IsPinned = true,
+                        LastActiveTime = t.LastActiveTime
+                    };
+                    pane.Tabs.Add(tab);
+                    pane.WireTabEvents(tab);
+                }
+                pane.SelectedTab = pane.Tabs.FirstOrDefault();
+                return pane;
+            }
+        }
+
+        return pane;
     }
 
     private void WirePaneEvents(ExplorerPaneViewModel pane)

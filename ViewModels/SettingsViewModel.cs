@@ -145,6 +145,36 @@ public partial class SettingsViewModel : ObservableObject
     private string _defaultPath = @"C:\";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsStartupRestoreSession))]
+    [NotifyPropertyChangedFor(nameof(IsStartupOpenPinned))]
+    [NotifyPropertyChangedFor(nameof(IsStartupOpenDefault))]
+    private string _startupBehavior = "RestoreSession";
+
+    public bool IsStartupRestoreSession
+    {
+        get => StartupBehavior == "RestoreSession";
+        set { if (value) StartupBehavior = "RestoreSession"; }
+    }
+
+    public bool IsStartupOpenPinned
+    {
+        get => StartupBehavior == "OpenPinned";
+        set { if (value) StartupBehavior = "OpenPinned"; }
+    }
+
+    public bool IsStartupOpenDefault
+    {
+        get => StartupBehavior == "OpenDefaultPath";
+        set { if (value) StartupBehavior = "OpenDefaultPath"; }
+    }
+
+    [ObservableProperty]
+    private int _maxTabsRestoredOnStartup = 8;
+
+    [ObservableProperty]
+    private int _maxTabsAllowed = 30;
+
+    [ObservableProperty]
     private bool _startInDualPane = false;
 
     [ObservableProperty]
@@ -245,6 +275,9 @@ public partial class SettingsViewModel : ObservableObject
         BaseFontSize = s.BaseFontSize;
         DataGridRowHeight = s.DataGridRowHeight;
         DefaultPath = s.DefaultPath;
+        StartupBehavior = string.IsNullOrWhiteSpace(s.StartupBehavior) ? "RestoreSession" : s.StartupBehavior;
+        MaxTabsRestoredOnStartup = s.MaxTabsRestoredOnStartup > 0 ? s.MaxTabsRestoredOnStartup : 8;
+        MaxTabsAllowed = s.MaxTabsAllowed > 0 ? s.MaxTabsAllowed : 30;
         StartInDualPane = s.StartInDualPane;
         ShowInspectorOnStartup = s.ShowInspectorOnStartup;
         ConfirmBeforeDelete = s.ConfirmBeforeDelete;
@@ -315,6 +348,9 @@ public partial class SettingsViewModel : ObservableObject
             BaseFontSize = BaseFontSize,
             DataGridRowHeight = DataGridRowHeight,
             DefaultPath = DefaultPath,
+            StartupBehavior = StartupBehavior,
+            MaxTabsRestoredOnStartup = MaxTabsRestoredOnStartup,
+            MaxTabsAllowed = MaxTabsAllowed,
             StartInDualPane = StartInDualPane,
             ShowInspectorOnStartup = ShowInspectorOnStartup,
             ConfirmBeforeDelete = ConfirmBeforeDelete,
