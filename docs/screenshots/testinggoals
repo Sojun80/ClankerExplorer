@@ -1,0 +1,273 @@
+Build a practical regression test suite for ClankerExplorer.
+
+The app is evolving very quickly and recent feature work has already caused regressions such as tabs disappearing. I want a test harness that catches core functionality breaking before more changes are accepted.
+
+Do not focus on exhaustive coverage or cosmetic pixel-perfect testing right now. Prioritize high-value behavioral regression tests, state preservation, and interaction boundaries.
+
+### Goals
+
+Create a test structure that is:
+
+* fast enough to run frequently
+* reliable
+* easy to extend
+* isolated from the user's real filesystem
+* appropriate for the current Avalonia/.NET architecture
+* capable of catching major regressions such as tabs, navigation, panes, selection, persistence, and file operations breaking
+
+Prefer testing underlying view models/services/state directly where that gives reliable coverage. Use UI-level tests only where interaction behavior actually needs them.
+
+### 1. Core application smoke tests
+
+Add tests covering the basic application model/state.
+
+At minimum verify:
+
+* application/window initialization succeeds without an exception
+* expected primary pane state is created
+* tabs exist after startup
+* a new tab can be created
+* tabs can be switched
+* tabs can be closed
+* active tab tracking works
+* each tab retains its own current path/state
+* left and right panes retain independent state where dual-pane mode is involved
+* folder navigation changes the current location correctly
+* back navigation works
+* forward navigation works
+
+The recent "tabs disappeared" regression should have been caught by this suite.
+
+### 2. Tab regression tests
+
+Tabs are now a protected core feature.
+
+Test:
+
+* creating several tabs
+* closing first/middle/last tabs
+* switching repeatedly between tabs
+* tab order
+* active-tab behavior after closing a tab
+* moving/reordering a tab if the current implementation supports it
+* moving a tab between panes if supported
+* duplicating a tab if supported
+* preservation of tab path/history during moves
+* restoring tabs from persisted/session state
+
+Avoid fragile tests tied unnecessarily to visual presentation.
+
+### 3. Selection regression tests
+
+Protect all major selection behavior.
+
+Test where practical:
+
+* single click selection
+* Ctrl multi-selection
+* Shift range selection
+* Ctrl+A
+* clicking background clears selection where expected
+* marquee selection selects the expected items
+* items entering/leaving a marquee update selection correctly
+* scrolling does not unexpectedly corrupt selection
+
+Most importantly, verify that the different mouse interaction modes do not interfere with one another.
+
+### 4. Interaction invariants
+
+ClankerExplorer now has several different drag interactions sharing mouse/pointer events.
+
+Create tests around the behavior or underlying decision logic for:
+
+* background drag -> marquee selection
+* selected file drag -> file drag/drop
+* tab drag -> tab reorder/move
+* splitter drag -> pane resize
+* Quick Access item drag -> sidebar reorder
+
+Where possible, separate pointer gesture classification into testable logic instead of burying everything inside UI event handlers.
+
+Tests should verify that a feature added to one interaction mode does not accidentally hijack another.
+
+Examples:
+
+* starting a marquee must not initiate file drag
+* dragging a selected file must not start a marquee
+* dragging the inspector splitter must not affect file selection
+* dragging tabs must not interact with file-list selection underneath
+
+### 5. Persistence/state restoration tests
+
+ClankerExplorer is becoming increasingly stateful.
+
+Test serialization and reconstruction for whichever of these features currently exist:
+
+* active tab
+* tab order
+* open tab paths
+* left/right pane state
+* Quick Access entries
+* Quick Access order
+* pinned folders
+* inspector/splitter width
+* column widths
+* column ordering
+* view settings
+* startup/session restoration
+
+Use a temporary settings location rather than the real user configuration.
+
+Tests should follow a pattern like:
+
+1. create state
+2. persist it
+3. destroy/reconstruct relevant objects
+4. reload state
+5. verify it matches expectations
+
+### 6. Temporary filesystem test fixture
+
+Create a reusable disposable temporary filesystem tree for integration tests.
+
+Something like:
+
+```text
+TestRoot/
+    FolderA/
+        alpha.txt
+        beta.txt
+        file2.txt
+        file10.txt
+    FolderB/
+    FolderC/
+        Nested/
+            nested.txt
+```
+
+Add other files as needed.
+
+All filesystem tests must operate only inside disposable temporary directories.
+
+Never use or modify real user folders.
+
+### 7. Filesystem behavior tests
+
+Cover the underlying operations currently implemented by ClankerExplorer.
+
+Where supported, test:
+
+* enumerate directory
+* create folder
+* create text file
+* rename file
+* rename folder
+* copy file
+* copy multiple files
+* move file
+* move folder
+* delete behavior
+* filtering
+* sorting
+* natural sorting, especially `file2` before `file10`
+* folders-first behavior if implemented
+* refresh after filesystem changes
+* filesystem watcher updates if currently implemented
+
+If some features are not implemented yet, structure the fixtures/helpers so they are easy to add later.
+
+### 8. File-operation edge cases
+
+Add regression tests for inexpensive/high-value cases such as:
+
+* duplicate destination name
+* missing source file
+* destination folder missing
+* moving within same directory
+* invalid descendant move, e.g. moving a folder into its own child
+* operations involving multiple selected items
+
+Do not overbuild obscure error cases yet. Concentrate on behavior that is likely to regress during normal development.
+
+### 9. Quick Access tests
+
+If the current implementation supports configurable Quick Access, test:
+
+* pin folder
+* prevent duplicate pin
+* unpin folder
+* reorder entries
+* persistence after reload
+* pinning a Frequent/Recent location
+* removing a Quick Access shortcut does not modify the real folder
+
+### 10. Test architecture
+
+Inspect the existing codebase and choose appropriate test projects/frameworks rather than forcing an unsuitable design.
+
+I want a clean separation such as:
+
+* fast unit tests for services/view models/state
+* filesystem integration tests using temporary directories
+* a limited number of UI/interaction tests where necessary
+
+Refactor production code modestly where needed to make core behavior testable.
+
+Do not perform a massive architectural rewrite solely for testing.
+
+### 11. Regression-first bug fixing rule
+
+From now on, when you identify a reproducible bug during this work:
+
+1. reproduce the bug
+2. write a test that fails because of it
+3. fix the bug
+4. verify the test passes
+5. keep the regression test permanently
+
+If practical, add a regression test specifically for the recent loss-of-tabs failure mode once you determine its cause.
+
+### 12. Avoid brittle cosmetic tests
+
+Do not attempt broad screenshot/pixel comparison testing yet.
+
+The visual design is changing rapidly.
+
+Test:
+
+* behavior
+* state
+* commands
+* interaction semantics
+* persistence
+
+not exact colors, coordinates, typography, or pixel layouts unless some measurement is directly required for functionality.
+
+### 13. Single-command execution
+
+Make the complete relevant test suite easy to run locally.
+
+Ideally:
+
+```text
+dotnet test
+```
+
+from the repository root should run everything appropriate.
+
+If additional setup or a dedicated script is necessary, keep it simple and document it clearly.
+
+### 14. Output/report
+
+When finished:
+
+* summarize the test structure you added
+* list the major behaviors protected
+* identify any production code refactoring required for testability
+* list any regressions/bugs discovered while writing the tests
+* note any important areas that are currently difficult to test and why
+* run the full suite and report the final result
+
+Do not spend time chasing a vanity coverage percentage.
+
+The objective is simple: ClankerExplorer is moving fast, and core functionality should stop silently disappearing when unrelated features are added.

@@ -13,6 +13,7 @@ public class QuickAccessService
 
     private readonly string _filePath;
     private readonly string _portableFilePath;
+    private readonly bool _populateDefaultsWhenEmpty;
     private readonly List<QuickAccessItem> _items = new();
 
     public event Action? QuickAccessChanged;
@@ -28,15 +29,19 @@ public class QuickAccessService
         }
     }
 
-    public QuickAccessService()
+    private static StringComparison PathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
+    public string FilePath => File.Exists(_portableFilePath) ? _portableFilePath : _filePath;
+
+    public QuickAccessService(string? dataDirectory = null, bool populateDefaultsWhenEmpty = true)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var configDir = Path.Combine(appData, "C-Explorer");
-        Directory.CreateDirectory(configDir);
+        _populateDefaultsWhenEmpty = populateDefaultsWhenEmpty;
+        var configDir = AppStoragePaths.GetDataDirectory(dataDirectory);
         _filePath = Path.Combine(configDir, "quickaccess.json");
 
-        var appBase = AppDomain.CurrentDomain.BaseDirectory;
-        _portableFilePath = Path.Combine(appBase, "quickaccess.json");
+        _portableFilePath = AppStoragePaths.GetPortableFilePath("quickaccess.json", dataDirectory);
 
         Load();
     }
@@ -73,9 +78,11 @@ public class QuickAccessService
                 }
             }
 
-            // Defaults
-            PopulateDefaults();
-            Save();
+            if (_populateDefaultsWhenEmpty)
+            {
+                PopulateDefaults();
+                Save();
+            }
         }
     }
 
@@ -114,12 +121,7 @@ public class QuickAccessService
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 var json = JsonSerializer.Serialize(dtoList, options);
 
-                File.WriteAllText(_filePath, json);
-
-                if (File.Exists(_portableFilePath) || File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json")))
-                {
-                    File.WriteAllText(_portableFilePath, json);
-                }
+                File.WriteAllText(FilePath, json);
             }
             catch (Exception ex)
             {
@@ -136,7 +138,7 @@ public class QuickAccessService
         var normalized = Normalize(path);
         lock (_items)
         {
-            return _items.Any(i => Normalize(i.Path).Equals(normalized, StringComparison.OrdinalIgnoreCase));
+            return _items.Any(i => Normalize(i.Path).Equals(normalized, PathComparison));
         }
     }
 
@@ -147,7 +149,7 @@ public class QuickAccessService
 
         lock (_items)
         {
-            if (_items.Any(i => Normalize(i.Path).Equals(normalized, StringComparison.OrdinalIgnoreCase)))
+            if (_items.Any(i => Normalize(i.Path).Equals(normalized, PathComparison)))
             {
                 return; // Already pinned
             }
@@ -172,7 +174,7 @@ public class QuickAccessService
         bool changed = false;
         lock (_items)
         {
-            var target = _items.FirstOrDefault(i => Normalize(i.Path).Equals(normalized, StringComparison.OrdinalIgnoreCase));
+            var target = _items.FirstOrDefault(i => Normalize(i.Path).Equals(normalized, PathComparison));
             if (target != null)
             {
                 _items.Remove(target);

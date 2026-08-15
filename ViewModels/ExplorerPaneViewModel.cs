@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -9,8 +11,14 @@ using ClankerExplorer.Services;
 
 namespace ClankerExplorer.ViewModels;
 
-public partial class ExplorerPaneViewModel : ObservableObject
+public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 {
+    private readonly Dictionary<ExplorerTabViewModel, PropertyChangedEventHandler> _tabPropertyHandlers = new();
+    private readonly Action _clipboardChangedHandler;
+    private readonly Action _quickAccessChangedHandler;
+    private readonly Action<AppSettings> _settingsChangedHandler;
+    private bool _isDisposed;
+
     public string PaneId { get; }
     public string PaneLabel { get; }
 
@@ -208,14 +216,17 @@ public partial class ExplorerPaneViewModel : ObservableObject
 
         WireTabEvents(tab);
 
-        ClipboardFileService.ClipboardChanged += () => OnPropertyChanged(nameof(CanPaste));
-        QuickAccessService.Instance.QuickAccessChanged += () => NotifyContextMenuProperties();
-
-        SettingsService.Instance.SettingsChanged += s =>
+        _clipboardChangedHandler = () => OnPropertyChanged(nameof(CanPaste));
+        _quickAccessChangedHandler = NotifyContextMenuProperties;
+        _settingsChangedHandler = s =>
         {
             LoadColumnSettings();
             NotifyColumnWidthsChanged();
         };
+
+        ClipboardFileService.ClipboardChanged += _clipboardChangedHandler;
+        QuickAccessService.Instance.QuickAccessChanged += _quickAccessChangedHandler;
+        SettingsService.Instance.SettingsChanged += _settingsChangedHandler;
     }
 
     public bool CanPaste => ClipboardFileService.CanPaste;
@@ -352,7 +363,9 @@ public partial class ExplorerPaneViewModel : ObservableObject
 
     public void WireTabEvents(ExplorerTabViewModel tab)
     {
-        tab.PropertyChanged += (s, e) =>
+        if (_tabPropertyHandlers.ContainsKey(tab)) return;
+
+        PropertyChangedEventHandler handler = (s, e) =>
         {
             if (e.PropertyName == nameof(ExplorerTabViewModel.CurrentPath) && tab == SelectedTab)
             {
@@ -367,6 +380,17 @@ public partial class ExplorerPaneViewModel : ObservableObject
                 }
             }
         };
+
+        _tabPropertyHandlers[tab] = handler;
+        tab.PropertyChanged += handler;
+    }
+
+    public void UnwireTabEvents(ExplorerTabViewModel tab)
+    {
+        if (_tabPropertyHandlers.Remove(tab, out var handler))
+        {
+            tab.PropertyChanged -= handler;
+        }
     }
 
     public void NotifyContextMenuProperties()
@@ -418,6 +442,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
 
         int idx = Tabs.IndexOf(target);
         Tabs.Remove(target);
+        UnwireTabEvents(target);
         target.Dispose();
 
         if (SelectedTab == target)
@@ -457,6 +482,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
         foreach (var t in toRemove)
         {
             Tabs.Remove(t);
+            UnwireTabEvents(t);
             t.Dispose();
         }
         SelectedTab = target;
@@ -769,5 +795,23 @@ public partial class ExplorerPaneViewModel : ObservableObject
         {
             RequestDeleteWithConfirmation?.Invoke(item, permanent);
         }
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+
+        ClipboardFileService.ClipboardChanged -= _clipboardChangedHandler;
+        QuickAccessService.Instance.QuickAccessChanged -= _quickAccessChangedHandler;
+        SettingsService.Instance.SettingsChanged -= _settingsChangedHandler;
+
+        foreach (var tab in Tabs.ToList())
+        {
+            UnwireTabEvents(tab);
+            tab.Dispose();
+        }
+        Tabs.Clear();
+        SelectedTab = null;
     }
 }

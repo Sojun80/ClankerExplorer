@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using Avalonia;
 using ClankerExplorer.ViewModels;
 
 namespace ClankerExplorer.Services;
@@ -19,8 +20,10 @@ public class TabDragCoordinator
     public bool IsDragging { get; private set; }
 
     public event Action? DragStateChanged;
+    public event Action<ExplorerTabViewModel, Point, bool>? TabDragMoved;
+    public event Action? TabDragEnded;
 
-    public void StartDrag(ExplorerTabViewModel tab, ExplorerPaneViewModel sourcePane, bool isCtrl)
+    public void StartDrag(ExplorerTabViewModel tab, ExplorerPaneViewModel sourcePane, bool isCtrl, Point initialPosition)
     {
         DraggedTab = tab;
         SourcePane = sourcePane;
@@ -29,9 +32,10 @@ public class TabDragCoordinator
 
         tab.IsBeingDragged = true;
         DragStateChanged?.Invoke();
+        TabDragMoved?.Invoke(tab, initialPosition, isCtrl);
     }
 
-    public void UpdateDrag(ExplorerPaneViewModel? targetPane, ExplorerTabViewModel? hoveredTab, bool isLeftHalf, bool isCtrl)
+    public void UpdateDrag(ExplorerPaneViewModel? targetPane, ExplorerTabViewModel? hoveredTab, bool isLeftHalf, bool isCtrl, Point position)
     {
         if (!IsDragging || DraggedTab == null) return;
 
@@ -55,6 +59,7 @@ public class TabDragCoordinator
         }
 
         DragStateChanged?.Invoke();
+        TabDragMoved?.Invoke(DraggedTab, position, isCtrl);
     }
 
     public void CompleteDrop(ExplorerPaneViewModel? targetPane, int targetIndex, bool isCtrl)
@@ -109,7 +114,15 @@ public class TabDragCoordinator
                         SourcePane.SelectedTab = fallback;
                     }
 
+                    int sourceIndex = SourcePane.Tabs.IndexOf(DraggedTab);
+                    bool movedTabWasSelected = SourcePane.SelectedTab == DraggedTab;
                     SourcePane.Tabs.Remove(DraggedTab);
+                    SourcePane.UnwireTabEvents(DraggedTab);
+
+                    if (movedTabWasSelected && SourcePane.Tabs.Count > 0)
+                    {
+                        SourcePane.SelectedTab = SourcePane.Tabs[Math.Min(sourceIndex, SourcePane.Tabs.Count - 1)];
+                    }
 
                     if (targetIndex < 0 || targetIndex >= targetPane.Tabs.Count)
                     {
@@ -177,5 +190,6 @@ public class TabDragCoordinator
         IsCtrlCopy = false;
 
         DragStateChanged?.Invoke();
+        TabDragEnded?.Invoke();
     }
 }

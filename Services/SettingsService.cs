@@ -39,15 +39,12 @@ public class SettingsService
 
     public event Action<AppSettings>? SettingsChanged;
 
-    public SettingsService()
+    public SettingsService(string? dataDirectory = null)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var settingsDir = Path.Combine(appData, "C-Explorer");
-        Directory.CreateDirectory(settingsDir);
+        var settingsDir = AppStoragePaths.GetDataDirectory(dataDirectory);
         _settingsFilePath = Path.Combine(settingsDir, "settings.json");
 
-        var appBase = AppDomain.CurrentDomain.BaseDirectory;
-        _portableSettingsFilePath = Path.Combine(appBase, "settings.json");
+        _portableSettingsFilePath = AppStoragePaths.GetPortableFilePath("settings.json", dataDirectory);
 
         LoadSettings();
     }

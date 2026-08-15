@@ -69,8 +69,6 @@ public static class ClipboardFileService
 
     public static async Task<(int successCount, List<string> failedPaths)> PasteAsync(string destinationDirectory, CancellationToken cancellationToken = default)
     {
-        if (!Directory.Exists(destinationDirectory)) return (0, new List<string>());
-
         List<string> sources;
         bool isCutMode;
 
@@ -79,6 +77,8 @@ public static class ClipboardFileService
             sources = _storedPaths.ToList();
             isCutMode = _isCut;
         }
+
+        if (!Directory.Exists(destinationDirectory)) return (0, sources);
 
         var successfulPaths = new List<string>();
         var failedPaths = new List<string>();

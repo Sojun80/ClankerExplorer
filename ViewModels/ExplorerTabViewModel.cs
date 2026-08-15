@@ -296,22 +296,22 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         {
             sorted = SortColumn switch
             {
-                "Extension" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Extension).ThenBy(i => i.Name),
-                "Size" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.SizeBytes),
-                "Modified" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.ModifiedTime),
-                "Attributes" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.AttributesString),
-                _ => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Name)
+                "Extension" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Size" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.SizeBytes).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Modified" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.ModifiedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Attributes" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.AttributesString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                _ => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase)
             };
         }
         else
         {
             sorted = SortColumn switch
             {
-                "Extension" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Extension).ThenBy(i => i.Name),
-                "Size" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.SizeBytes),
-                "Modified" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.ModifiedTime),
-                "Attributes" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.AttributesString),
-                _ => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Name)
+                "Extension" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Size" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.SizeBytes).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Modified" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.ModifiedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Attributes" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.AttributesString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                _ => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase)
             };
         }
 

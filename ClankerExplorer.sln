@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClankerExplorer", "ClankerExplorer.csproj", "{4AC45E69-7D56-4E2F-A79A-B4D09F0BC9EF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClankerExplorer.Tests", "tests\ClankerExplorer.Tests\ClankerExplorer.Tests.csproj", "{E490C387-53A2-49AB-9953-B1B3A6014E24}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4AC45E69-7D56-4E2F-A79A-B4D09F0BC9EF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4AC45E69-7D56-4E2F-A79A-B4D09F0BC9EF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4AC45E69-7D56-4E2F-A79A-B4D09F0BC9EF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4AC45E69-7D56-4E2F-A79A-B4D09F0BC9EF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E490C387-53A2-49AB-9953-B1B3A6014E24}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E490C387-53A2-49AB-9953-B1B3A6014E24}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E490C387-53A2-49AB-9953-B1B3A6014E24}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E490C387-53A2-49AB-9953-B1B3A6014E24}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

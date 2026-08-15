@@ -196,6 +196,32 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
         };
+
+        TabDragCoordinator.Instance.TabDragMoved += OnTabDragMoved;
+        TabDragCoordinator.Instance.TabDragEnded += OnTabDragEnded;
+    }
+
+    private void OnTabDragMoved(ExplorerTabViewModel tab, Point winPos, bool isCtrl)
+    {
+        if (TabDragGhost != null && TabGhostTitle != null && TabGhostPinIcon != null && TabGhostFolderIcon != null && TabGhostCopyBadge != null)
+        {
+            TabDragGhost.IsVisible = true;
+            TabGhostTitle.Text = tab.Title;
+            TabGhostPinIcon.IsVisible = tab.IsPinned;
+            TabGhostFolderIcon.IsVisible = !tab.IsPinned;
+            TabGhostCopyBadge.IsVisible = isCtrl;
+
+            Canvas.SetLeft(TabDragGhost, Math.Max(0, winPos.X - 15));
+            Canvas.SetTop(TabDragGhost, Math.Max(0, winPos.Y - 20));
+        }
+    }
+
+    private void OnTabDragEnded()
+    {
+        if (TabDragGhost != null)
+        {
+            TabDragGhost.IsVisible = false;
+        }
     }
 
     private void OnWindowPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -292,6 +318,16 @@ public partial class MainWindow : Window
 
             if (_isQaDragging)
             {
+                if (QuickAccessDragGhost != null && QaGhostIcon != null && QaGhostTitle != null)
+                {
+                    QuickAccessDragGhost.IsVisible = true;
+                    QaGhostIcon.Text = _pressedQuickAccessItem.IconSymbol;
+                    QaGhostTitle.Text = _pressedQuickAccessItem.DisplayName;
+
+                    Canvas.SetLeft(QuickAccessDragGhost, Math.Max(0, cur.X - 15));
+                    Canvas.SetTop(QuickAccessDragGhost, Math.Max(0, cur.Y - 15));
+                }
+
                 var topLevel = TopLevel.GetTopLevel(this);
                 var hitVisual = topLevel?.InputHitTest(cur) as Visual;
                 QuickAccessItem? targetItem = null;
@@ -369,6 +405,11 @@ public partial class MainWindow : Window
 
     private void ClearQuickAccessDragState()
     {
+        if (QuickAccessDragGhost != null)
+        {
+            QuickAccessDragGhost.IsVisible = false;
+        }
+
         if (_pressedQuickAccessItem != null)
         {
             _pressedQuickAccessItem.IsBeingDragged = false;

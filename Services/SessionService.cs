@@ -39,40 +39,41 @@ public class SessionService
     private readonly string _sessionFilePath;
     private readonly string _portableSessionFilePath;
 
-    public SessionService()
+    public string SessionFilePath => File.Exists(_portableSessionFilePath) ? _portableSessionFilePath : _sessionFilePath;
+
+    public SessionService(string? dataDirectory = null)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var sessionDir = Path.Combine(appData, "C-Explorer");
-        Directory.CreateDirectory(sessionDir);
+        var sessionDir = AppStoragePaths.GetDataDirectory(dataDirectory);
         _sessionFilePath = Path.Combine(sessionDir, "session.json");
 
-        var appBase = AppDomain.CurrentDomain.BaseDirectory;
-        _portableSessionFilePath = Path.Combine(appBase, "session.json");
+        _portableSessionFilePath = AppStoragePaths.GetPortableFilePath("session.json", dataDirectory);
     }
 
     public void SaveSession(MainViewModel vm)
     {
         try
         {
-            var state = new AppSessionState
+            SaveSession(new AppSessionState
             {
                 IsDualPane = vm.IsDualPane,
                 ActivePaneId = vm.ActivePane == vm.RightPane ? "right" : "left",
                 InspectorWidth = vm.InspectorWidth,
                 LeftPane = BuildPaneSession(vm.LeftPane),
                 RightPane = BuildPaneSession(vm.RightPane)
-            };
-
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            string json = JsonSerializer.Serialize(state, options);
-
-            string targetPath = File.Exists(_portableSessionFilePath) ? _portableSessionFilePath : _sessionFilePath;
-            File.WriteAllText(targetPath, json);
+            });
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Failed to save session: {ex.Message}");
         }
+    }
+
+    public void SaveSession(AppSessionState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        string json = JsonSerializer.Serialize(state, options);
+        File.WriteAllText(SessionFilePath, json);
     }
 
     private static PaneSessionState BuildPaneSession(ExplorerPaneViewModel pane)
@@ -103,7 +104,7 @@ public class SessionService
     {
         try
         {
-            string targetPath = File.Exists(_portableSessionFilePath) ? _portableSessionFilePath : _sessionFilePath;
+            string targetPath = SessionFilePath;
             if (File.Exists(targetPath))
             {
                 var json = File.ReadAllText(targetPath);

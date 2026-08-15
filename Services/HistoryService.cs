@@ -33,17 +33,16 @@ public class HistoryService
     public bool CanUndo => _lastDeletedEntry != null;
     public string LastDeletedName => _lastDeletedEntry != null ? FormatCompactPath(_lastDeletedEntry.Path) : string.Empty;
 
-    public HistoryService()
+    public string HistoryFilePath => File.Exists(_portableHistoryFilePath) ? _portableHistoryFilePath : _historyFilePath;
+
+    public HistoryService(string? dataDirectory = null)
     {
         _history = new Dictionary<string, FolderHistoryEntry>(PathComparer);
 
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var dir = System.IO.Path.Combine(appData, "C-Explorer");
-        Directory.CreateDirectory(dir);
+        var dir = AppStoragePaths.GetDataDirectory(dataDirectory);
         _historyFilePath = System.IO.Path.Combine(dir, "history.json");
 
-        var appBase = AppDomain.CurrentDomain.BaseDirectory;
-        _portableHistoryFilePath = System.IO.Path.Combine(appBase, "history.json");
+        _portableHistoryFilePath = AppStoragePaths.GetPortableFilePath("history.json", dataDirectory);
 
         LoadHistory();
     }
@@ -54,7 +53,7 @@ public class HistoryService
         {
             try
             {
-                string targetPath = File.Exists(_portableHistoryFilePath) ? _portableHistoryFilePath : _historyFilePath;
+                string targetPath = HistoryFilePath;
                 if (File.Exists(targetPath))
                 {
                     string json = File.ReadAllText(targetPath);
@@ -90,7 +89,7 @@ public class HistoryService
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 string json = JsonSerializer.Serialize(list, options);
 
-                string targetPath = File.Exists(_portableHistoryFilePath) ? _portableHistoryFilePath : _historyFilePath;
+                string targetPath = HistoryFilePath;
                 File.WriteAllText(targetPath, json);
             }
             catch (Exception ex)

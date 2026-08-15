@@ -10,8 +10,11 @@ using ClankerExplorer.Services;
 
 namespace ClankerExplorer.ViewModels;
 
-public partial class MainViewModel : ObservableObject
+public partial class MainViewModel : ObservableObject, IDisposable
 {
+    private readonly Action _quickAccessChangedHandler;
+    private bool _isDisposed;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(LeftPaneColumnSpan))]
     private bool _isDualPane;
@@ -85,7 +88,7 @@ public partial class MainViewModel : ObservableObject
     public event Action<FileItem?>? RequestProperties;
     public event Action<FileItem, bool>? RequestDeleteWithConfirmation;
 
-    public MainViewModel()
+    public MainViewModel(bool loadSidebarData = true)
     {
         var settings = SettingsService.Instance.CurrentSettings;
         var startPath = string.IsNullOrWhiteSpace(settings.DefaultPath) ? FileSystemService.DefaultRootPath : settings.DefaultPath;
@@ -93,9 +96,17 @@ public partial class MainViewModel : ObservableObject
 
         InitializePanesFromStartupSettings(settings, startPath);
 
-        QuickAccessService.Instance.QuickAccessChanged += RefreshQuickAccess;
+        _quickAccessChangedHandler = RefreshQuickAccess;
+        QuickAccessService.Instance.QuickAccessChanged += _quickAccessChangedHandler;
 
-        LoadSidebarData();
+        if (loadSidebarData)
+        {
+            LoadSidebarData();
+        }
+        else
+        {
+            RefreshQuickAccess();
+        }
     }
 
     private void InitializePanesFromStartupSettings(AppSettings settings, string defaultPath)
@@ -510,5 +521,14 @@ public partial class MainViewModel : ObservableObject
     public void ReorderQuickAccess(int fromIndex, int toIndex)
     {
         QuickAccessService.Instance.MoveItem(fromIndex, toIndex);
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+        QuickAccessService.Instance.QuickAccessChanged -= _quickAccessChangedHandler;
+        LeftPane.Dispose();
+        RightPane.Dispose();
     }
 }

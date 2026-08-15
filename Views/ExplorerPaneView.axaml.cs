@@ -224,6 +224,9 @@ public partial class ExplorerPaneView : UserControl
             var cur = e.GetPosition(this);
             var delta = cur - _tabPressStartPoint;
 
+            var topLevel = TopLevel.GetTopLevel(this);
+            var windowPos = topLevel != null ? e.GetPosition(topLevel) : cur;
+
             if (!_isTabDragging && (Math.Abs(delta.X) > 6 || Math.Abs(delta.Y) > 6))
             {
                 _isTabDragging = true;
@@ -231,16 +234,14 @@ public partial class ExplorerPaneView : UserControl
                 {
                     e.Pointer.Capture(_capturedTabBorder);
                 }
-                TabDragCoordinator.Instance.StartDrag(_pressedTab, vm, e.KeyModifiers.HasFlag(KeyModifiers.Control));
+                TabDragCoordinator.Instance.StartDrag(_pressedTab, vm, e.KeyModifiers.HasFlag(KeyModifiers.Control), windowPos);
             }
 
             if (_isTabDragging)
             {
                 // Hit test across top level window to find target tab and pane
-                var topLevel = TopLevel.GetTopLevel(this);
                 if (topLevel != null)
                 {
-                    var windowPos = e.GetPosition(topLevel);
                     var hitVisual = topLevel.InputHitTest(windowPos) as Visual;
 
                     ExplorerPaneViewModel? targetPane = null;
@@ -264,7 +265,7 @@ public partial class ExplorerPaneView : UserControl
                         hitVisual = hitVisual.GetVisualParent();
                     }
 
-                    TabDragCoordinator.Instance.UpdateDrag(targetPane ?? vm, targetTab, isLeftHalf, e.KeyModifiers.HasFlag(KeyModifiers.Control));
+                    TabDragCoordinator.Instance.UpdateDrag(targetPane ?? vm, targetTab, isLeftHalf, e.KeyModifiers.HasFlag(KeyModifiers.Control), windowPos);
                 }
             }
         }

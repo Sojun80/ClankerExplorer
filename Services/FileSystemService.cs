@@ -650,6 +650,7 @@ public class FileSystemService
 
     public void CreateFolder(string parentPath, string name)
     {
+        ValidateItemName(name);
         var target = Path.Combine(parentPath, name);
         if (Directory.Exists(target) || File.Exists(target))
         {
@@ -660,6 +661,7 @@ public class FileSystemService
 
     public void CreateFile(string parentPath, string name)
     {
+        ValidateItemName(name);
         var target = Path.Combine(parentPath, name);
         if (File.Exists(target) || Directory.Exists(target))
         {
@@ -670,7 +672,13 @@ public class FileSystemService
 
     public void Rename(string oldPath, string newName)
     {
-        if (string.IsNullOrWhiteSpace(oldPath) || string.IsNullOrWhiteSpace(newName)) return;
+        if (string.IsNullOrWhiteSpace(oldPath)) throw new ArgumentException("A source path is required.", nameof(oldPath));
+        ValidateItemName(newName);
+
+        if (!File.Exists(oldPath) && !Directory.Exists(oldPath))
+        {
+            throw new FileNotFoundException($"Source item not found: {oldPath}", oldPath);
+        }
 
         var dir = Path.GetDirectoryName(oldPath) ?? "";
         var oldName = Path.GetFileName(oldPath);
@@ -729,6 +737,20 @@ public class FileSystemService
                 Debug.WriteLine($"Case-only rename failed: {ex.Message}");
                 throw;
             }
+        }
+    }
+
+    public static void ValidateItemName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Item name cannot be empty.", nameof(name));
+        }
+
+        var invalidChars = Path.GetInvalidFileNameChars().Concat(new[] { '/', '\\' }).Distinct().ToArray();
+        if (name is "." or ".." || Path.IsPathRooted(name) || name.IndexOfAny(invalidChars) >= 0)
+        {
+            throw new ArgumentException("Item name must be a single file or folder name without path separators.", nameof(name));
         }
     }
 

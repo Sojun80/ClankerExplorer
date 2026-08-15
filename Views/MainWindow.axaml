@@ -541,6 +541,46 @@
           </StackPanel>
         </DockPanel>
       </Border>
+
+      <!-- Global Floating Drag Adorner Canvas Overlay -->
+      <Canvas x:Name="DragGhostCanvas" Grid.RowSpan="3" IsHitTestVisible="False" ZIndex="99999">
+        <!-- Floating Tab Drag Preview Card -->
+        <Border x:Name="TabDragGhost"
+                Background="{DynamicResource AppSurfaceBrush}"
+                BorderBrush="{DynamicResource AppHighlightBrush}"
+                BorderThickness="1.5"
+                CornerRadius="6"
+                Padding="12,6"
+                BoxShadow="0 10 30 0 #A0000000"
+                Opacity="0.95"
+                IsVisible="False">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock x:Name="TabGhostPinIcon" Text="📌" FontSize="11" IsVisible="False"/>
+            <Path x:Name="TabGhostFolderIcon" Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
+                  Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.6" Width="13" Height="11" Stretch="Uniform" VerticalAlignment="Center"/>
+            <TextBlock x:Name="TabGhostTitle" Text="Tab Title" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AppTextBrush}"/>
+            <Border x:Name="TabGhostCopyBadge" Background="{DynamicResource AppHighlightBrush}" CornerRadius="3" Padding="4,1" Margin="4,0,0,0" IsVisible="False">
+              <TextBlock Text="+ COPY" FontSize="9" FontWeight="Bold" Foreground="#000000" FontFamily="{DynamicResource AppMonoFont}"/>
+            </Border>
+          </StackPanel>
+        </Border>
+
+        <!-- Floating Quick Access Drag Ghost -->
+        <Border x:Name="QuickAccessDragGhost"
+                Background="{DynamicResource AppSurfaceBrush}"
+                BorderBrush="{DynamicResource AppHighlightBrush}"
+                BorderThickness="1.5"
+                CornerRadius="6"
+                Padding="10,6"
+                BoxShadow="0 10 30 0 #A0000000"
+                Opacity="0.95"
+                IsVisible="False">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock x:Name="QaGhostIcon" Text="📁" FontSize="12" Foreground="{DynamicResource AppHighlightBrush}"/>
+            <TextBlock x:Name="QaGhostTitle" Text="Quick Access Item" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AppTextBrush}"/>
+          </StackPanel>
+        </Border>
+      </Canvas>
     </Grid>
   </Border>
 </Window>
