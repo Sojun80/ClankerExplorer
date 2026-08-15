@@ -54,10 +54,9 @@
       <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1"
               Height="40" Padding="12,0" PointerPressed="OnTitleBarPointerPressed">
         <DockPanel LastChildFill="True">
-          <!-- App Brand & Blue Folder Icon -->
-          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <Image Source="/Assets/app-icon.png" Width="22" Height="22" VerticalAlignment="Center"/>
-            <TextBlock Text="C-Explorer" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+          <!-- Left: Compact App Icon with ToolTip -->
+          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Image Source="/Assets/app-icon.png" Width="20" Height="20" VerticalAlignment="Center" ToolTip.Tip="Clanker Explorer"/>
           </StackPanel>
 
           <!-- Right Side Global Power Tools -->
@@ -127,6 +126,15 @@
             <Button Command="{Binding OpenSettingsCommand}" Classes="power-btn" ToolTip.Tip="Settings, Colors, Fonts &amp; Portability">
               <TextBlock Text="⚙️" FontSize="12"/>
             </Button>
+
+            <TextBlock Text="|" Foreground="{DynamicResource AppBorderBrush}" VerticalAlignment="Center" Margin="4,0,2,0"/>
+
+            <!-- Far-Right C-Explorer Brand Label with 'Clanker Explorer' ToolTip -->
+            <Border Background="Transparent" VerticalAlignment="Center" Margin="4,0,0,0"
+                    ToolTip.Tip="Clanker Explorer">
+              <TextBlock Text="C-Explorer" FontWeight="Bold" FontSize="12"
+                         Foreground="{DynamicResource AppSubTextBrush}" VerticalAlignment="Center"/>
+            </Border>
           </StackPanel>
         </DockPanel>
       </Border>
