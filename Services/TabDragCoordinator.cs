@@ -96,9 +96,14 @@ public class TabDragCoordinator
                 {
                     // Same pane reorder
                     int oldIndex = targetPane.Tabs.IndexOf(DraggedTab);
-                    if (oldIndex >= 0 && targetIndex >= 0 && targetIndex < targetPane.Tabs.Count && oldIndex != targetIndex)
+                    if (oldIndex >= 0 && targetIndex >= 0)
                     {
-                        targetPane.Tabs.Move(oldIndex, targetIndex);
+                        int finalIndex = targetIndex > oldIndex ? targetIndex - 1 : targetIndex;
+                        finalIndex = Math.Clamp(finalIndex, 0, targetPane.Tabs.Count - 1);
+                        if (oldIndex != finalIndex)
+                        {
+                            targetPane.Tabs.Move(oldIndex, finalIndex);
+                        }
                     }
                     targetPane.SelectedTab = DraggedTab;
                 }
@@ -130,7 +135,8 @@ public class TabDragCoordinator
                     }
                     else
                     {
-                        targetPane.Tabs.Insert(targetIndex, DraggedTab);
+                        int safeIndex = Math.Clamp(targetIndex, 0, targetPane.Tabs.Count);
+                        targetPane.Tabs.Insert(safeIndex, DraggedTab);
                     }
 
                     targetPane.WireTabEvents(DraggedTab);

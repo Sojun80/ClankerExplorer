@@ -230,52 +230,48 @@ public partial class ExplorerPaneView : UserControl
             if (!_isTabDragging && PointerGestureClassifier.ExceedsDragThreshold(delta.X, delta.Y, 6))
             {
                 _isTabDragging = true;
-                if (_capturedTabBorder != null)
-                {
-                    e.Pointer.Capture(_capturedTabBorder);
-                }
                 TabDragCoordinator.Instance.StartDrag(_pressedTab, vm, e.KeyModifiers.HasFlag(KeyModifiers.Control), windowPos);
             }
 
-            if (_isTabDragging)
+            if (_isTabDragging && topLevel != null)
             {
-                // Hit test across top level window to find target tab and pane
-                if (topLevel != null)
+                // Hit test across top level window using GetVisualsAt to reliably locate target tab and target pane
+                var visuals = topLevel.GetVisualsAt(windowPos).ToList();
+
+                ExplorerPaneViewModel? targetPane = null;
+                ExplorerTabViewModel? targetTab = null;
+                bool isLeftHalf = false;
+
+                foreach (var v in visuals)
                 {
-                    var hitVisual = topLevel.InputHitTest(windowPos) as Visual;
-
-                    ExplorerPaneViewModel? targetPane = null;
-                    ExplorerTabViewModel? targetTab = null;
-                    bool isLeftHalf = false;
-
-                    while (hitVisual != null)
+                    if (targetTab == null && v.DataContext is ExplorerTabViewModel tvm)
                     {
-                        if (targetTab == null && hitVisual.DataContext is ExplorerTabViewModel tvm)
-                        {
-                            targetTab = tvm;
-                            var tabPos = e.GetPosition(hitVisual);
-                            isLeftHalf = tabPos.X < hitVisual.Bounds.Width / 2;
-                        }
-
-                        if (targetPane == null && hitVisual is ExplorerPaneView paneView && paneView.DataContext is ExplorerPaneViewModel pvm)
-                        {
-                            targetPane = pvm;
-                        }
-
-                        hitVisual = hitVisual.GetVisualParent();
+                        targetTab = tvm;
+                        var tabPos = e.GetPosition(v);
+                        isLeftHalf = tabPos.X < v.Bounds.Width / 2;
                     }
 
-                    TabDragCoordinator.Instance.UpdateDrag(targetPane ?? vm, targetTab, isLeftHalf, e.KeyModifiers.HasFlag(KeyModifiers.Control), windowPos);
+                    if (targetPane == null && v is ExplorerPaneView paneView && paneView.DataContext is ExplorerPaneViewModel pvm)
+                    {
+                        targetPane = pvm;
+                    }
+                    else if (targetPane == null && v.DataContext is ExplorerPaneViewModel pvm2)
+                    {
+                        targetPane = pvm2;
+                    }
                 }
+
+                targetPane ??= vm;
+                TabDragCoordinator.Instance.UpdateDrag(targetPane, targetTab, isLeftHalf, e.KeyModifiers.HasFlag(KeyModifiers.Control), windowPos);
             }
         }
     }
 
     private void OnTabPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_isTabDragging && _pressedTab != null)
+        if (_isTabDragging && _pressedTab != null && DataContext is ExplorerPaneViewModel vm)
         {
-            var targetPane = TabDragCoordinator.Instance.CurrentTargetPane ?? DataContext as ExplorerPaneViewModel;
+            var targetPane = TabDragCoordinator.Instance.CurrentTargetPane ?? vm;
             var targetTab = TabDragCoordinator.Instance.CurrentHoveredTab;
             bool isLeft = TabDragCoordinator.Instance.IsLeftDropHalf;
             bool isCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
@@ -291,7 +287,6 @@ public partial class ExplorerPaneView : UserControl
             }
 
             TabDragCoordinator.Instance.CompleteDrop(targetPane, targetIndex, isCtrl);
-            e.Pointer.Capture(null);
         }
 
         _pressedTab = null;
