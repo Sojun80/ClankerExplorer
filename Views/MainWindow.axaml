@@ -19,6 +19,17 @@
         PointerPressed="OnWindowPointerPressed">
 
   <Window.Styles>
+    <Style Selector="Border.quick-access-item">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Opacity" Value="1.0"/>
+    </Style>
+    <Style Selector="Border.quick-access-item:pointerover">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+    </Style>
+    <Style Selector="Border.quick-access-item.dragging">
+      <Setter Property="Opacity" Value="0.4"/>
+    </Style>
+
     <Style Selector="Button.quick-remove-btn">
       <Setter Property="Opacity" Value="0"/>
       <Setter Property="Transitions">
@@ -193,8 +204,8 @@
                                 IsVisible="{Binding IsDropTargetBottom}" ZIndex="10"/>
 
                         <!-- Quick Access Row Container -->
-                        <Border Background="Transparent" CornerRadius="4" Padding="6,4" Cursor="Hand"
-                                Opacity="{Binding IsBeingDragged, Converter={x:Null}, FallbackValue=1.0}"
+                        <Border Classes="quick-access-item" Classes.dragging="{Binding IsBeingDragged}"
+                                CornerRadius="4" Padding="6,4" Cursor="Hand"
                                 PointerPressed="OnQuickAccessPointerPressed"
                                 PointerMoved="OnQuickAccessPointerMoved"
                                 PointerReleased="OnQuickAccessPointerReleased"
