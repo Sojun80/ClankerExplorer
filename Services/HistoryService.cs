@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using ClankerExplorer.Models;
 
 namespace ClankerExplorer.Services;
@@ -18,17 +20,23 @@ public class HistoryService
 {
     public static HistoryService Instance { get; } = new();
 
+    private static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
     private readonly string _historyFilePath;
     private readonly string _portableHistoryFilePath;
-    private readonly Dictionary<string, FolderHistoryEntry> _history = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, FolderHistoryEntry> _history;
+    private readonly object _lock = new();
 
     private FolderHistoryEntry? _lastDeletedEntry;
+    private CancellationTokenSource? _saveDebounceCts;
 
     public bool CanUndo => _lastDeletedEntry != null;
     public string LastDeletedName => _lastDeletedEntry != null ? FormatCompactPath(_lastDeletedEntry.Path) : string.Empty;
 
     public HistoryService()
     {
+        _history = new Dictionary<string, FolderHistoryEntry>(PathComparer);
+
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var dir = System.IO.Path.Combine(appData, "C-Explorer");
         Directory.CreateDirectory(dir);
@@ -42,47 +50,74 @@ public class HistoryService
 
     public void LoadHistory()
     {
-        try
+        lock (_lock)
         {
-            string targetPath = File.Exists(_portableHistoryFilePath) ? _portableHistoryFilePath : _historyFilePath;
-            if (File.Exists(targetPath))
+            try
             {
-                string json = File.ReadAllText(targetPath);
-                var list = JsonSerializer.Deserialize<List<FolderHistoryEntry>>(json);
-                if (list != null)
+                string targetPath = File.Exists(_portableHistoryFilePath) ? _portableHistoryFilePath : _historyFilePath;
+                if (File.Exists(targetPath))
                 {
-                    _history.Clear();
-                    foreach (var item in list)
+                    string json = File.ReadAllText(targetPath);
+                    var list = JsonSerializer.Deserialize<List<FolderHistoryEntry>>(json);
+                    if (list != null)
                     {
-                        if (!string.IsNullOrWhiteSpace(item.Path))
+                        _history.Clear();
+                        foreach (var item in list)
                         {
-                            _history[item.Path.TrimEnd('\\', '/')] = item;
+                            if (!string.IsNullOrWhiteSpace(item.Path))
+                            {
+                                var key = item.Path.TrimEnd('\\', '/');
+                                _history[key] = item;
+                            }
                         }
                     }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Failed to load history: {ex.Message}");
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to load history: {ex.Message}");
+            }
         }
     }
 
     public void SaveHistory()
     {
-        try
+        lock (_lock)
         {
-            var list = _history.Values.ToList();
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            string json = JsonSerializer.Serialize(list, options);
+            try
+            {
+                var list = _history.Values.ToList();
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                string json = JsonSerializer.Serialize(list, options);
 
-            string targetPath = File.Exists(_portableHistoryFilePath) ? _portableHistoryFilePath : _historyFilePath;
-            File.WriteAllText(targetPath, json);
+                string targetPath = File.Exists(_portableHistoryFilePath) ? _portableHistoryFilePath : _historyFilePath;
+                File.WriteAllText(targetPath, json);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to save history: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+    }
+
+    public void ScheduleSaveHistory()
+    {
+        _saveDebounceCts?.Cancel();
+        _saveDebounceCts = new CancellationTokenSource();
+        var token = _saveDebounceCts.Token;
+
+        Task.Run(async () =>
         {
-            System.Diagnostics.Debug.WriteLine($"Failed to save history: {ex.Message}");
-        }
+            try
+            {
+                await Task.Delay(300, token);
+                if (!token.IsCancellationRequested)
+                {
+                    SaveHistory();
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, token);
     }
 
     public void RecordFolderVisit(string path)
@@ -90,24 +125,73 @@ public class HistoryService
         if (string.IsNullOrWhiteSpace(path)) return;
         path = path.TrimEnd('\\', '/');
 
-        // Do not record root drive letters like C: or Z:
-        if (path.Length <= 3 && path.Contains(':')) return;
+        // Do not record root drive letters like C: or / on Unix
+        if (path.Length <= 3 && (path.Contains(':') || path == "/")) return;
 
-        if (_history.TryGetValue(path, out var entry))
+        lock (_lock)
         {
-            entry.VisitCount++;
-            entry.LastVisited = DateTime.Now;
-        }
-        else
-        {
-            _history[path] = new FolderHistoryEntry
+            if (_history.TryGetValue(path, out var entry))
             {
-                Path = path,
-                VisitCount = 1,
-                LastVisited = DateTime.Now
-            };
+                entry.VisitCount++;
+                entry.LastVisited = DateTime.Now;
+            }
+            else
+            {
+                _history[path] = new FolderHistoryEntry
+                {
+                    Path = path,
+                    VisitCount = 1,
+                    LastVisited = DateTime.Now
+                };
+            }
         }
 
+        ScheduleSaveHistory();
+    }
+
+    public List<FolderHistoryEntry> GetAllHistoryEntries()
+    {
+        lock (_lock)
+        {
+            return _history.Values
+                .Select(e => new FolderHistoryEntry
+                {
+                    Path = e.Path,
+                    VisitCount = e.VisitCount,
+                    LastVisited = e.LastVisited
+                })
+                .ToList();
+        }
+    }
+
+    public void ImportHistoryEntries(IEnumerable<FolderHistoryEntry> entries)
+    {
+        if (entries == null) return;
+        lock (_lock)
+        {
+            foreach (var e in entries)
+            {
+                if (string.IsNullOrWhiteSpace(e.Path)) continue;
+                var key = e.Path.TrimEnd('\\', '/');
+                if (_history.TryGetValue(key, out var existing))
+                {
+                    existing.VisitCount = Math.Max(existing.VisitCount, e.VisitCount);
+                    if (e.LastVisited > existing.LastVisited)
+                    {
+                        existing.LastVisited = e.LastVisited;
+                    }
+                }
+                else
+                {
+                    _history[key] = new FolderHistoryEntry
+                    {
+                        Path = e.Path,
+                        VisitCount = e.VisitCount,
+                        LastVisited = e.LastVisited
+                    };
+                }
+            }
+        }
         SaveHistory();
     }
 
@@ -115,25 +199,31 @@ public class HistoryService
     {
         var excludeSet = BuildExcludeSet(excludePaths);
 
-        return _history.Values
-            .Where(e => !string.IsNullOrWhiteSpace(e.Path) && !excludeSet.Contains(e.Path.TrimEnd('\\', '/')))
-            .OrderByDescending(e => e.VisitCount)
-            .ThenByDescending(e => e.LastVisited)
-            .Take(max)
-            .Select(CreateItem)
-            .ToList();
+        lock (_lock)
+        {
+            return _history.Values
+                .Where(e => !string.IsNullOrWhiteSpace(e.Path) && !excludeSet.Contains(e.Path.TrimEnd('\\', '/')))
+                .OrderByDescending(e => e.VisitCount)
+                .ThenByDescending(e => e.LastVisited)
+                .Take(max)
+                .Select(CreateItem)
+                .ToList();
+        }
     }
 
     public List<FrequentFolderItem> GetRecentFolders(IEnumerable<string>? excludePaths = null, int max = 5)
     {
         var excludeSet = BuildExcludeSet(excludePaths);
 
-        return _history.Values
-            .Where(e => !string.IsNullOrWhiteSpace(e.Path) && !excludeSet.Contains(e.Path.TrimEnd('\\', '/')))
-            .OrderByDescending(e => e.LastVisited)
-            .Take(max)
-            .Select(CreateItem)
-            .ToList();
+        lock (_lock)
+        {
+            return _history.Values
+                .Where(e => !string.IsNullOrWhiteSpace(e.Path) && !excludeSet.Contains(e.Path.TrimEnd('\\', '/')))
+                .OrderByDescending(e => e.LastVisited)
+                .Take(max)
+                .Select(CreateItem)
+                .ToList();
+        }
     }
 
     public void ResetFolderHistory(string path)
@@ -141,32 +231,38 @@ public class HistoryService
         if (string.IsNullOrWhiteSpace(path)) return;
         path = path.TrimEnd('\\', '/');
 
-        if (_history.TryGetValue(path, out var entry))
+        lock (_lock)
         {
-            _lastDeletedEntry = new FolderHistoryEntry
+            if (_history.TryGetValue(path, out var entry))
             {
-                Path = entry.Path,
-                VisitCount = entry.VisitCount,
-                LastVisited = entry.LastVisited
-            };
-            _history.Remove(path);
-            SaveHistory();
+                _lastDeletedEntry = new FolderHistoryEntry
+                {
+                    Path = entry.Path,
+                    VisitCount = entry.VisitCount,
+                    LastVisited = entry.LastVisited
+                };
+                _history.Remove(path);
+            }
         }
+        SaveHistory();
     }
 
     public bool UndoReset()
     {
-        if (_lastDeletedEntry == null) return false;
-        var p = _lastDeletedEntry.Path.TrimEnd('\\', '/');
-        _history[p] = _lastDeletedEntry;
-        _lastDeletedEntry = null;
+        lock (_lock)
+        {
+            if (_lastDeletedEntry == null) return false;
+            var p = _lastDeletedEntry.Path.TrimEnd('\\', '/');
+            _history[p] = _lastDeletedEntry;
+            _lastDeletedEntry = null;
+        }
         SaveHistory();
         return true;
     }
 
     private HashSet<string> BuildExcludeSet(IEnumerable<string>? excludePaths)
     {
-        var excludeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var excludeSet = new HashSet<string>(PathComparer);
         if (excludePaths != null)
         {
             foreach (var p in excludePaths)
@@ -202,13 +298,14 @@ public class HistoryService
             return path;
         }
 
-        // Standard Path: C:\Users\5900x\Downloads\FD -> C:\...\FD
+        // Standard Path: C:\Users\5900x\Downloads\FD -> C:\...\FD or /home/user/code/FD -> /home/.../FD
         var segments = path.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length >= 3)
         {
-            string root = segments[0]; // e.g. "C:" or "Z:"
+            string root = segments[0]; // e.g. "C:" or "home"
             string leaf = segments[^1]; // e.g. "FD"
-            return $@"{root}\...\{leaf}";
+            var sep = OperatingSystem.IsWindows() ? '\\' : '/';
+            return $"{root}{sep}...{sep}{leaf}";
         }
 
         return path;

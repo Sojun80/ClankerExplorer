@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace ClankerExplorer.Services;
 
@@ -27,27 +28,43 @@ public class ArchiveService
 
     private void Locate7Zip()
     {
-        var candidates = new[]
+        if (OperatingSystem.IsWindows())
         {
-            @"C:\Program Files\7-Zip",
-            @"C:\Program Files (x86)\7-Zip",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "7-Zip"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "7-Zip")
-        };
+            var candidates = new[]
+            {
+                @"C:\Program Files\7-Zip",
+                @"C:\Program Files (x86)\7-Zip",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "7-Zip"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "7-Zip")
+            };
 
-        foreach (var dir in candidates.Distinct())
+            foreach (var dir in candidates.Distinct())
+            {
+                if (!Directory.Exists(dir)) continue;
+
+                var gui = Path.Combine(dir, "7zG.exe");
+                var fm = Path.Combine(dir, "7zFM.exe");
+                var cli = Path.Combine(dir, "7z.exe");
+
+                if (File.Exists(gui)) _sevenZipGuiExe = gui;
+                if (File.Exists(fm)) _sevenZipFmExe = fm;
+                if (File.Exists(cli)) _sevenZipCliExe = cli;
+
+                if (_sevenZipGuiExe != null) break;
+            }
+        }
+        else
         {
-            if (!Directory.Exists(dir)) continue;
-
-            var gui = Path.Combine(dir, "7zG.exe");
-            var fm = Path.Combine(dir, "7zFM.exe");
-            var cli = Path.Combine(dir, "7z.exe");
-
-            if (File.Exists(gui)) _sevenZipGuiExe = gui;
-            if (File.Exists(fm)) _sevenZipFmExe = fm;
-            if (File.Exists(cli)) _sevenZipCliExe = cli;
-
-            if (_sevenZipGuiExe != null) break;
+            // Linux / Unix standard locations
+            var linuxCandidates = new[] { "/usr/bin/7z", "/usr/local/bin/7z", "/usr/bin/7za", "/usr/bin/p7zip" };
+            foreach (var path in linuxCandidates)
+            {
+                if (File.Exists(path))
+                {
+                    _sevenZipCliExe = path;
+                    break;
+                }
+            }
         }
     }
 
@@ -117,18 +134,21 @@ public class ArchiveService
         }
         else
         {
-            // Fallback to System.IO.Compression for zip files
-            try
+            // Background fallback to System.IO.Compression for zip files
+            Task.Run(() =>
             {
-                if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    ZipFile.ExtractToDirectory(archivePath, destinationDirectory, true);
+                    if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ZipFile.ExtractToDirectory(archivePath, destinationDirectory, true);
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Failed extraction fallback: {ex.Message}");
-            }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Failed extraction fallback: {ex.Message}");
+                }
+            });
         }
     }
 
@@ -147,47 +167,58 @@ public class ArchiveService
         }
         else
         {
-            ExtractToSubfolder(archivePath);
+            ExtractHere(archivePath);
         }
     }
 
-    public void CreateZip(string sourcePath)
+    public void CreateZip(string sourcePath, string? targetZipPath = null)
     {
         if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath)) return;
 
-        var dir = Path.GetDirectoryName(sourcePath) ?? "";
-        var name = Path.GetFileNameWithoutExtension(sourcePath);
-        if (string.IsNullOrEmpty(name)) name = Path.GetFileName(sourcePath);
-        var zipPath = Path.Combine(dir, $"{name}.zip");
+        var dir = Directory.Exists(sourcePath) ? Path.GetDirectoryName(sourcePath.TrimEnd('\\', '/')) ?? "" : Path.GetDirectoryName(sourcePath) ?? "";
+        var name = Path.GetFileName(sourcePath.TrimEnd('\\', '/'));
+        targetZipPath ??= Path.Combine(dir, $"{name}.zip");
 
-        var exe = _sevenZipGuiExe ?? _sevenZipCliExe;
-        if (exe != null && File.Exists(exe))
+        if (_sevenZipGuiExe != null && File.Exists(_sevenZipGuiExe))
         {
             Process.Start(new ProcessStartInfo
             {
-                FileName = exe,
-                Arguments = $"a -tzip \"{zipPath}\" \"{sourcePath}\"",
+                FileName = _sevenZipGuiExe,
+                Arguments = $"a -tzip \"{targetZipPath}\" \"{sourcePath}\"",
+                UseShellExecute = true
+            });
+        }
+        else if (_sevenZipCliExe != null && File.Exists(_sevenZipCliExe))
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = _sevenZipCliExe,
+                Arguments = $"a -tzip \"{targetZipPath}\" \"{sourcePath}\"",
                 UseShellExecute = true
             });
         }
         else
         {
-            try
+            // Background fallback using System.IO.Compression
+            Task.Run(() =>
             {
-                if (Directory.Exists(sourcePath))
+                try
                 {
-                    ZipFile.CreateFromDirectory(sourcePath, zipPath);
+                    if (File.Exists(sourcePath))
+                    {
+                        using var zip = ZipFile.Open(targetZipPath, ZipArchiveMode.Create);
+                        zip.CreateEntryFromFile(sourcePath, Path.GetFileName(sourcePath));
+                    }
+                    else if (Directory.Exists(sourcePath))
+                    {
+                        ZipFile.CreateFromDirectory(sourcePath, targetZipPath);
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
-                    archive.CreateEntryFromFile(sourcePath, Path.GetFileName(sourcePath));
+                    Debug.WriteLine($"Failed ZIP creation: {ex.Message}");
                 }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Failed zip fallback: {ex.Message}");
-            }
+            });
         }
     }
 

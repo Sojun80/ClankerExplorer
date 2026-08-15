@@ -85,14 +85,14 @@ public partial class MainViewModel : ObservableObject
     public MainViewModel()
     {
         var settings = SettingsService.Instance.CurrentSettings;
-        var startPath = string.IsNullOrWhiteSpace(settings.DefaultPath) ? @"C:\" : settings.DefaultPath;
-        if (!Directory.Exists(startPath)) startPath = @"C:\";
+        var startPath = string.IsNullOrWhiteSpace(settings.DefaultPath) ? FileSystemService.DefaultRootPath : settings.DefaultPath;
+        if (!Directory.Exists(startPath)) startPath = FileSystemService.DefaultRootPath;
 
         _isDualPane = settings.StartInDualPane;
         _showInspector = settings.ShowInspectorOnStartup;
 
         _leftPane = new ExplorerPaneViewModel("left", startPath, "PANE 1") { IsActive = true };
-        _rightPane = new ExplorerPaneViewModel("right", @"C:\", "PANE 2") { IsActive = false };
+        _rightPane = new ExplorerPaneViewModel("right", startPath, "PANE 2") { IsActive = false };
         _activePane = _leftPane;
 
         WirePaneEvents(_leftPane);
@@ -152,14 +152,20 @@ public partial class MainViewModel : ObservableObject
         LocalDrives = new ObservableCollection<DriveModel>(driveList.Where(d => !d.IsNetworkDrive));
         NetworkDrives = new ObservableCollection<DriveModel>(driveList.Where(d => d.IsNetworkDrive));
 
-        var qaList = FileSystemService.Instance.GetQuickAccess();
+        var qaList = FileSystemService.Instance.GetStandardQuickAccess();
         QuickAccess = new ObservableCollection<QuickAccessItem>(qaList);
 
-        var wslList = FileSystemService.Instance.GetWslDistributions();
-        WslDistros = new ObservableCollection<WslDistroItem>(wslList);
+        WslDistros = new ObservableCollection<WslDistroItem>();
+        _ = LoadWslDistributionsAsync();
 
         RefreshHistoryData();
         UpdateCurrentDrive();
+    }
+
+    private async Task LoadWslDistributionsAsync()
+    {
+        var wslList = await FileSystemService.Instance.GetWslDistributionsAsync();
+        WslDistros = new ObservableCollection<WslDistroItem>(wslList);
     }
 
     public void RefreshHistoryData()

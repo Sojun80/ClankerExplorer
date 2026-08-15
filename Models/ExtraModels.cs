@@ -61,6 +61,11 @@ public class HexRow
     public string Offset { get; set; } = string.Empty;
     public string HexBytes { get; set; } = string.Empty;
     public string AsciiText { get; set; } = string.Empty;
+    public string Ascii
+    {
+        get => AsciiText;
+        set => AsciiText = value;
+    }
 }
 
 public class FilePreviewData
@@ -71,7 +76,9 @@ public class FilePreviewData
     public long SizeBytes { get; set; }
     public string FormattedSize { get; set; } = string.Empty;
     public string ModifiedTime { get; set; } = string.Empty;
-    public string PreviewType { get; set; } = "text"; // "text", "binary", "image", "directory", "error"
+    public string CreatedTime { get; set; } = string.Empty;
+    public string AccessedTime { get; set; } = string.Empty;
+    public string PreviewType { get; set; } = "text"; // "text", "binary", "hex", "image", "media", "directory", "error"
     public string TextContent { get; set; } = string.Empty;
     public int LineCount { get; set; }
     public List<HexRow>? HexRows { get; set; }

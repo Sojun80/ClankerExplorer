@@ -102,17 +102,18 @@ public partial class ExplorerPaneViewModel : ObservableObject
     public event Action<FileItem?>? RequestProperties;
     public event Action<string>? RequestSetClipboardText;
 
-    public ExplorerPaneViewModel(string paneId, string initialPath = @"C:\", string label = "")
+    public ExplorerPaneViewModel(string paneId, string? initialPath = null, string label = "")
     {
         PaneId = paneId;
         PaneLabel = label;
+        var startPath = initialPath ?? FileSystemService.DefaultRootPath;
 
         LoadColumnSettings();
 
-        var tab = new ExplorerTabViewModel(initialPath);
+        var tab = new ExplorerTabViewModel(startPath);
         Tabs.Add(tab);
         SelectedTab = tab;
-        RawAddressInput = initialPath;
+        RawAddressInput = startPath;
 
         WireTabEvents(tab);
     }
@@ -225,7 +226,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
     [RelayCommand]
     public void AddNewTab(string? path = null)
     {
-        var targetPath = path ?? SelectedTab?.CurrentPath ?? @"C:\";
+        var targetPath = path ?? SelectedTab?.CurrentPath ?? FileSystemService.DefaultRootPath;
         var newTab = new ExplorerTabViewModel(targetPath);
         Tabs.Add(newTab);
         SelectedTab = newTab;
@@ -240,6 +241,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
 
         int idx = Tabs.IndexOf(target);
         Tabs.Remove(target);
+        target.Dispose();
 
         if (SelectedTab == target)
         {

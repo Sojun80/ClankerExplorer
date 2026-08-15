@@ -109,9 +109,7 @@ public class SettingsService
         var bundle = new BackupProfileData
         {
             Settings = CurrentSettings,
-            FolderHistory = HistoryService.Instance.GetFrequentFolders(null, 100)
-                .Select(f => new FolderHistoryEntry { Path = f.Path, VisitCount = f.VisitCount, LastVisited = f.LastVisited })
-                .ToList()
+            FolderHistory = HistoryService.Instance.GetAllHistoryEntries()
         };
 
         var options = new JsonSerializerOptions { WriteIndented = true };
@@ -133,12 +131,9 @@ public class SettingsService
                 CurrentSettings = bundle.Settings;
                 SaveSettings(CurrentSettings);
 
-                if (bundle.FolderHistory != null)
+                if (bundle.FolderHistory != null && bundle.FolderHistory.Count > 0)
                 {
-                    foreach (var h in bundle.FolderHistory)
-                    {
-                        HistoryService.Instance.RecordFolderVisit(h.Path);
-                    }
+                    HistoryService.Instance.ImportHistoryEntries(bundle.FolderHistory);
                 }
                 return;
             }

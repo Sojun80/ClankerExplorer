@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using ClankerExplorer.Models;
 
@@ -13,12 +14,15 @@ public class NetworkDiscoveryService
 {
     public static NetworkDiscoveryService Instance { get; } = new();
 
-    private readonly HashSet<string> _knownServers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _knownServers = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     public NetworkDiscoveryService()
     {
         // Add known default network nodes
-        _knownServers.Add(Environment.MachineName); // 5900X
+        if (!string.IsNullOrWhiteSpace(Environment.MachineName))
+        {
+            _knownServers.Add(Environment.MachineName);
+        }
         _knownServers.Add("TRUENAS");
         _knownServers.Add("MSI");
     }
@@ -33,29 +37,21 @@ public class NetworkDiscoveryService
         }
     }
 
-    public async Task<List<NetworkNode>> DiscoverComputersAsync()
+    public async Task<List<NetworkNode>> DiscoverComputersAsync(CancellationToken cancellationToken = default)
     {
-        return await Task.Run(() =>
-        {
-            var list = new List<NetworkNode>();
-            var set = new HashSet<string>(_knownServers, StringComparer.OrdinalIgnoreCase);
+        var list = new List<NetworkNode>();
+        var set = new HashSet<string>(_knownServers, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
-            // Also check mapped network drives for server names
+        if (OperatingSystem.IsWindows())
+        {
+            // Check mapped network drives for server names
             try
             {
-                var psi = new ProcessStartInfo
+                var (output, _, exitCode) = await FileSystemService.Instance.RunProcessWithTimeoutAsync(
+                    "net.exe", "use", 1500, null, cancellationToken);
+
+                if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
                 {
-                    FileName = "net.exe",
-                    Arguments = "use",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc != null)
-                {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit(1500);
                     var matches = Regex.Matches(output, @"\\\\([^\\]+)\\", RegexOptions.IgnoreCase);
                     foreach (Match m in matches)
                     {
@@ -66,22 +62,14 @@ public class NetworkDiscoveryService
             }
             catch { }
 
-            // Try net view in background (with short timeout)
+            // Try net view with 2000ms timeout
             try
             {
-                var psi = new ProcessStartInfo
+                var (output, _, exitCode) = await FileSystemService.Instance.RunProcessWithTimeoutAsync(
+                    "net.exe", "view", 2000, null, cancellationToken);
+
+                if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
                 {
-                    FileName = "net.exe",
-                    Arguments = "view",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc != null)
-                {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit(2000);
                     var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
                     foreach (var line in lines)
                     {
@@ -95,45 +83,35 @@ public class NetworkDiscoveryService
                 }
             }
             catch { }
+        }
 
-            foreach (var server in set.OrderBy(s => s))
+        foreach (var server in set.OrderBy(s => s))
+        {
+            list.Add(new NetworkNode
             {
-                list.Add(new NetworkNode
-                {
-                    Name = server,
-                    UncPath = $@"\\{server}",
-                    Type = "Computer"
-                });
-            }
+                Name = server,
+                UncPath = $@"\\{server}",
+                Type = "Computer"
+            });
+        }
 
-            return list;
-        });
+        return list;
     }
 
-    public async Task<List<NetworkNode>> GetSharesForComputerAsync(string computerNameOrIp)
+    public async Task<List<NetworkNode>> GetSharesForComputerAsync(string computerNameOrIp, CancellationToken cancellationToken = default)
     {
-        return await Task.Run(() =>
-        {
-            var shares = new List<NetworkNode>();
-            computerNameOrIp = computerNameOrIp.TrimStart('\\');
+        var shares = new List<NetworkNode>();
+        computerNameOrIp = computerNameOrIp.TrimStart('\\');
 
+        if (OperatingSystem.IsWindows())
+        {
             try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "net.exe",
-                    Arguments = $"view \"\\\\{computerNameOrIp}\"",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
+                var (output, _, exitCode) = await FileSystemService.Instance.RunProcessWithTimeoutAsync(
+                    "net.exe", $"view \"\\\\{computerNameOrIp}\"", 2500, null, cancellationToken);
 
-                using var proc = Process.Start(psi);
-                if (proc != null)
+                if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
                 {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit(3000);
-
                     var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
                     bool headerPassed = false;
 
@@ -154,7 +132,6 @@ public class NetworkDiscoveryService
                             if (parts.Length > 0 && !string.IsNullOrWhiteSpace(parts[0]))
                             {
                                 string shareName = parts[0].Trim();
-                                // Skip IPC$
                                 if (shareName.Equals("IPC$", StringComparison.OrdinalIgnoreCase)) continue;
 
                                 shares.Add(new NetworkNode
@@ -173,7 +150,7 @@ public class NetworkDiscoveryService
                 Debug.WriteLine($"Error querying shares for {computerNameOrIp}: {ex.Message}");
             }
 
-            // Fallback: If net view returned nothing or restricted, attempt direct directory test for common share names if local
+            // Fallback: If net view returned nothing, test common local share names
             if (shares.Count == 0 && computerNameOrIp.Equals(Environment.MachineName, StringComparison.OrdinalIgnoreCase))
             {
                 if (Directory.Exists($@"\\{computerNameOrIp}\Users"))
@@ -186,8 +163,8 @@ public class NetworkDiscoveryService
                     });
                 }
             }
+        }
 
-            return shares;
-        });
+        return shares;
     }
 }

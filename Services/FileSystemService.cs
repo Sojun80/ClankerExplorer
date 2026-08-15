@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using ClankerExplorer.Models;
 
@@ -15,86 +16,178 @@ public class FileSystemService
 {
     public static FileSystemService Instance { get; } = new();
 
-    private readonly Dictionary<string, int> _folderVisitCounts = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, DateTime> _folderLastVisited = new(StringComparer.OrdinalIgnoreCase);
+    public static string DefaultRootPath => OperatingSystem.IsWindows() ? @"C:\" : (Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) ?? "/");
 
-    public static string FormatBytes(long bytes)
+    private string? _notepadPlusPlusPath;
+
+    public FileSystemService()
     {
-        if (bytes == 0) return "0 B";
-        string[] sizes = { "B", "KB", "MB", "GB", "TB", "PB" };
-        int order = 0;
-        double len = bytes;
-        while (len >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            len /= 1024;
-        }
-        return $"{len:0.##} {sizes[order]}";
+        LocateNotepadPlusPlus();
     }
 
-    public List<DriveModel> GetDrives()
+    private void LocateNotepadPlusPlus()
     {
-        var list = new List<DriveModel>();
+        if (OperatingSystem.IsWindows())
+        {
+            var candidates = new[]
+            {
+                @"C:\Program Files\Notepad++\notepad++.exe",
+                @"C:\Program Files (x86)\Notepad++\notepad++.exe",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Notepad++", "notepad++.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Notepad++", "notepad++.exe")
+            };
+
+            foreach (var path in candidates)
+            {
+                if (File.Exists(path))
+                {
+                    _notepadPlusPlusPath = path;
+                    break;
+                }
+            }
+        }
+    }
+
+    public string GetEditMenuLabel()
+    {
+        if (OperatingSystem.IsWindows() && _notepadPlusPlusPath != null && File.Exists(_notepadPlusPlusPath))
+        {
+            return "Edit with Notepad++";
+        }
+        return "Edit";
+    }
+
+    public async Task<(string stdout, string stderr, int exitCode)> RunProcessWithTimeoutAsync(
+        string fileName,
+        string arguments,
+        int timeoutMs = 3000,
+        Encoding? encoding = null,
+        CancellationToken cancellationToken = default)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = encoding ?? Encoding.UTF8,
+            StandardErrorEncoding = encoding ?? Encoding.UTF8
+        };
+
         try
         {
-            foreach (var d in DriveInfo.GetDrives())
+            using var process = new Process { StartInfo = psi };
+            var stdoutBuilder = new StringBuilder();
+            var stderrBuilder = new StringBuilder();
+
+            process.OutputDataReceived += (s, e) => { if (e.Data != null) stdoutBuilder.AppendLine(e.Data); };
+            process.ErrorDataReceived += (s, e) => { if (e.Data != null) stderrBuilder.AppendLine(e.Data); };
+
+            if (!process.Start())
             {
-                bool isNetwork = d.DriveType == System.IO.DriveType.Network;
-                if (!d.IsReady)
-                {
-                    list.Add(new DriveModel
-                    {
-                        Letter = d.Name.TrimEnd('\\'),
-                        RootPath = d.RootDirectory.FullName,
-                        VolumeLabel = isNetwork ? "Network Share" : "Not Ready",
-                        DriveType = d.DriveType.ToString(),
-                        IsNetworkDrive = isNetwork
-                    });
-                    continue;
-                }
+                return (string.Empty, "Failed to start process", -1);
+            }
 
-                long total = d.TotalSize;
-                long free = d.AvailableFreeSpace;
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
 
-                list.Add(new DriveModel
-                {
-                    Letter = d.Name.TrimEnd('\\'),
-                    RootPath = d.RootDirectory.FullName,
-                    VolumeLabel = d.VolumeLabel,
-                    DriveType = d.DriveType.ToString(),
-                    IsNetworkDrive = isNetwork,
-                    TotalBytes = total,
-                    FreeBytes = free,
-                    FormattedTotal = FormatBytes(total),
-                    FormattedFree = FormatBytes(free),
-                    FormattedUsed = FormatBytes(Math.Max(0, total - free))
-                });
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(timeoutMs);
+
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+                return (stdoutBuilder.ToString(), stderrBuilder.ToString(), process.ExitCode);
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(true); } catch { }
+                return (stdoutBuilder.ToString(), "Process execution timed out", -2);
             }
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error getting drives: {ex.Message}");
+            return (string.Empty, ex.Message, -1);
         }
-        return list;
     }
 
-    public List<QuickAccessItem> GetQuickAccess()
+    public List<DriveModel> GetDrives()
+    {
+        var drives = new List<DriveModel>();
+
+        try
+        {
+            foreach (var d in DriveInfo.GetDrives())
+            {
+                try
+                {
+                    var isNet = d.DriveType == System.IO.DriveType.Network;
+                    if (d.IsReady)
+                    {
+                        var total = d.TotalSize;
+                        var free = d.TotalFreeSpace;
+                        var used = total - free;
+
+                        drives.Add(new DriveModel
+                        {
+                            Letter = d.Name.TrimEnd('\\'),
+                            VolumeLabel = d.VolumeLabel,
+                            RootPath = d.RootDirectory.FullName,
+                            DriveType = d.DriveType.ToString(),
+                            IsNetworkDrive = isNet,
+                            TotalBytes = total,
+                            FreeBytes = free,
+                            FormattedTotal = FormatBytes(total),
+                            FormattedFree = FormatBytes(free),
+                            FormattedUsed = FormatBytes(used)
+                        });
+                    }
+                    else
+                    {
+                        drives.Add(new DriveModel
+                        {
+                            Letter = d.Name.TrimEnd('\\'),
+                            RootPath = d.Name,
+                            DriveType = d.DriveType.ToString(),
+                            IsNetworkDrive = isNet
+                        });
+                    }
+                }
+                catch
+                {
+                    // Unready or network drives that throw
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Failed to enumerate drives: {ex.Message}");
+        }
+
+        return drives;
+    }
+
+    public List<QuickAccessItem> GetStandardQuickAccess()
     {
         var items = new List<QuickAccessItem>();
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var userProfileName = Path.GetFileName(userProfile); // e.g. "5900x"
 
-        var folders = new[]
+        var list = new (string name, string path, string icon)[]
         {
-            (string.IsNullOrEmpty(userProfileName) ? "User Profile" : userProfileName, userProfile, "Home"),
-            ("Desktop", Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Desktop"),
-            ("Downloads", Path.Combine(userProfile, "Downloads"), "Downloads"),
-            ("Documents", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Documents")
+            ("Home", userProfile, "Folder"),
+            ("Desktop", Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Folder"),
+            ("Downloads", Path.Combine(userProfile, "Downloads"), "Folder"),
+            ("Documents", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Folder"),
+            ("Pictures", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Folder"),
+            ("Music", Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "Folder"),
+            ("Videos", Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Folder")
         };
 
-        foreach (var (name, path, icon) in folders)
+        foreach (var (name, path, icon) in list)
         {
-            if (Directory.Exists(path))
+            if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
             {
                 items.Add(new QuickAccessItem
                 {
@@ -108,25 +201,16 @@ public class FileSystemService
         return items;
     }
 
-    public List<WslDistroItem> GetWslDistributions()
+    public async Task<List<WslDistroItem>> GetWslDistributionsAsync(CancellationToken cancellationToken = default)
     {
         var distros = new List<WslDistroItem>();
+        if (!OperatingSystem.IsWindows()) return distros;
+
         try
         {
-            var psi = new ProcessStartInfo
+            var (output, _, exitCode) = await RunProcessWithTimeoutAsync("wsl.exe", "-l -q", 2000, Encoding.Unicode, cancellationToken);
+            if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
             {
-                FileName = "wsl.exe",
-                Arguments = "-l -q",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.Unicode
-            };
-            using var proc = Process.Start(psi);
-            if (proc != null)
-            {
-                string output = proc.StandardOutput.ReadToEnd();
-                proc.WaitForExit(2000);
                 var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
                 foreach (var line in lines)
                 {
@@ -145,135 +229,136 @@ public class FileSystemService
                 }
             }
         }
-        catch
+        catch { }
+
+        if (distros.Count == 0 && Directory.Exists(@"\\wsl$\Ubuntu"))
         {
-            if (Directory.Exists(@"\\wsl$\Ubuntu"))
+            distros.Add(new WslDistroItem
             {
-                distros.Add(new WslDistroItem
-                {
-                    Name = "Ubuntu (Linux)",
-                    DistroName = "Ubuntu",
-                    RootPath = @"\\wsl$\Ubuntu",
-                    HomePath = @"\\wsl$\Ubuntu\home"
-                });
-            }
+                Name = "Ubuntu (Linux)",
+                DistroName = "Ubuntu",
+                RootPath = @"\\wsl$\Ubuntu",
+                HomePath = @"\\wsl$\Ubuntu\home"
+            });
         }
+
         return distros;
-    }
-
-    public void RecordFolderVisit(string path)
-    {
-        HistoryService.Instance.RecordFolderVisit(path);
-    }
-
-    public List<FrequentFolderItem> GetFrequentFolders(IEnumerable<string>? excludePaths = null, int max = 5)
-    {
-        return HistoryService.Instance.GetFrequentFolders(excludePaths, max);
-    }
-
-    public List<FrequentFolderItem> GetRecentFolders(IEnumerable<string>? excludePaths = null, int max = 5)
-    {
-        return HistoryService.Instance.GetRecentFolders(excludePaths, max);
     }
 
     public (List<FileItem> items, string? error) ReadDirectory(string dirPath)
     {
-        var items = new List<FileItem>();
-        try
-        {
-            var dirInfo = new DirectoryInfo(dirPath);
-            if (!dirInfo.Exists)
-            {
-                return (items, $"Directory does not exist: {dirPath}");
-            }
-
-            RecordFolderVisit(dirPath);
-
-            foreach (var info in dirInfo.EnumerateFileSystemInfos())
-            {
-                try
-                {
-                    bool isDir = (info.Attributes & FileAttributes.Directory) != 0;
-                    bool isHidden = (info.Attributes & FileAttributes.Hidden) != 0 || info.Name.StartsWith(".");
-                    bool isSystem = (info.Attributes & FileAttributes.System) != 0;
-                    bool isReadOnly = (info.Attributes & FileAttributes.ReadOnly) != 0;
-                    bool isArchive = (info.Attributes & FileAttributes.Archive) != 0;
-                    bool isSymlink = (info.Attributes & FileAttributes.ReparsePoint) != 0;
-
-                    string ext = "";
-                    long size = 0;
-
-                    if (!isDir && info is FileInfo fileInfo)
-                    {
-                        size = fileInfo.Length;
-                        var lowerName = info.Name.ToLowerInvariant();
-                        if (lowerName.EndsWith(".tar.gz")) ext = ".tar.gz";
-                        else if (lowerName.EndsWith(".tar.bz2")) ext = ".tar.bz2";
-                        else ext = fileInfo.Extension;
-                    }
-
-                    var attrChars = new List<string>();
-                    if (isDir) attrChars.Add("D");
-                    if (isReadOnly) attrChars.Add("R");
-                    if (isHidden) attrChars.Add("H");
-                    if (isSystem) attrChars.Add("S");
-                    if (isArchive) attrChars.Add("A");
-                    if (isSymlink) attrChars.Add("L");
-
-                    items.Add(new FileItem
-                    {
-                        Name = info.Name,
-                        Extension = ext,
-                        FullPath = info.FullName,
-                        ParentPath = dirPath,
-                        IsDirectory = isDir,
-                        IsSymbolicLink = isSymlink,
-                        SizeBytes = size,
-                        FormattedSize = isDir ? "<DIR>" : FormatBytes(size),
-                        ModifiedTime = info.LastWriteTime,
-                        CreatedTime = info.CreationTime,
-                        AccessedTime = info.LastAccessTime,
-                        IsHidden = isHidden,
-                        IsSystem = isSystem,
-                        IsReadOnly = isReadOnly,
-                        IsArchive = isArchive,
-                        AttributesString = string.Join(" ", attrChars),
-                        PermissionsString = GetPermissionsDisplay(info, isDir, isReadOnly),
-                        OwnerGroupString = isDir ? "root:root" : "user:user"
-                    });
-                }
-                catch
-                {
-                    items.Add(new FileItem
-                    {
-                        Name = info.Name,
-                        Extension = Path.GetExtension(info.Name),
-                        FullPath = info.FullName,
-                        ParentPath = dirPath,
-                        IsDirectory = (info.Attributes & FileAttributes.Directory) != 0,
-                        FormattedSize = "<LOCKED>",
-                        ModifiedTime = DateTime.Now,
-                        IsHidden = info.Name.StartsWith("."),
-                        IsSystem = true,
-                        AttributesString = "S LOCKED"
-                    });
-                }
-            }
-
-            return (items, null);
-        }
-        catch (Exception ex)
-        {
-            return (items, ex.Message);
-        }
+        return ReadDirectoryAsync(dirPath).GetAwaiter().GetResult();
     }
 
-    public async Task<FilePreviewData> GetPreviewDataAsync(string filePath)
+    public async Task<(List<FileItem> items, string? error)> ReadDirectoryAsync(string dirPath, CancellationToken cancellationToken = default)
+    {
+        return await Task.Run(() =>
+        {
+            var items = new List<FileItem>();
+            if (string.IsNullOrWhiteSpace(dirPath)) return (items, "Invalid directory path.");
+
+            try
+            {
+                if (!Directory.Exists(dirPath))
+                {
+                    return (items, $"Directory not found: {dirPath}");
+                }
+
+                var di = new DirectoryInfo(dirPath);
+                var entries = di.EnumerateFileSystemInfos();
+
+                foreach (var info in entries)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        bool isDir = (info.Attributes & FileAttributes.Directory) != 0;
+                        bool isSymlink = (info.Attributes & FileAttributes.ReparsePoint) != 0 || info.LinkTarget != null;
+                        bool isHidden = (info.Attributes & FileAttributes.Hidden) != 0 || info.Name.StartsWith(".");
+                        bool isSystem = (info.Attributes & FileAttributes.System) != 0;
+                        bool isReadOnly = (info.Attributes & FileAttributes.ReadOnly) != 0;
+                        bool isArchive = (info.Attributes & FileAttributes.Archive) != 0;
+
+                        long size = 0;
+                        if (!isDir && info is FileInfo fi)
+                        {
+                            try { size = fi.Length; } catch { }
+                        }
+
+                        var attrChars = new List<string>();
+                        if (isReadOnly) attrChars.Add("R");
+                        if (isHidden) attrChars.Add("H");
+                        if (isSystem) attrChars.Add("S");
+                        if (isArchive) attrChars.Add("A");
+
+                        items.Add(new FileItem
+                        {
+                            Name = info.Name,
+                            Extension = isDir ? "" : Path.GetExtension(info.Name),
+                            FullPath = info.FullName,
+                            ParentPath = dirPath,
+                            IsDirectory = isDir,
+                            IsSymbolicLink = isSymlink,
+                            SizeBytes = size,
+                            FormattedSize = isDir ? "<DIR>" : FormatBytes(size),
+                            ModifiedTime = SafeGetTime(() => info.LastWriteTime),
+                            CreatedTime = SafeGetTime(() => info.CreationTime),
+                            AccessedTime = SafeGetTime(() => info.LastAccessTime),
+                            IsHidden = isHidden,
+                            IsSystem = isSystem,
+                            IsReadOnly = isReadOnly,
+                            IsArchive = isArchive,
+                            AttributesString = string.Join(" ", attrChars),
+                            PermissionsString = GetPermissionsDisplay(info, isDir, isReadOnly),
+                            OwnerGroupString = isDir ? "root:root" : "user:user"
+                        });
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch
+                    {
+                        items.Add(new FileItem
+                        {
+                            Name = info.Name,
+                            Extension = Path.GetExtension(info.Name),
+                            FullPath = info.FullName,
+                            ParentPath = dirPath,
+                            IsDirectory = (info.Attributes & FileAttributes.Directory) != 0,
+                            FormattedSize = "<LOCKED>",
+                            ModifiedTime = DateTime.Now,
+                            IsHidden = info.Name.StartsWith("."),
+                            IsSystem = true,
+                            AttributesString = "S LOCKED"
+                        });
+                    }
+                }
+
+                return (items, null);
+            }
+            catch (OperationCanceledException)
+            {
+                return (items, "Operation canceled");
+            }
+            catch (Exception ex)
+            {
+                return (items, ex.Message);
+            }
+        }, cancellationToken);
+    }
+
+    private static DateTime SafeGetTime(Func<DateTime> getter)
+    {
+        try { return getter(); } catch { return DateTime.MinValue; }
+    }
+
+    public async Task<FilePreviewData> GetPreviewDataAsync(string filePath, CancellationToken cancellationToken = default)
     {
         return await Task.Run(() =>
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (Directory.Exists(filePath))
                 {
                     var di = new DirectoryInfo(filePath);
@@ -284,170 +369,124 @@ public class FileSystemService
                         Extension = "",
                         FormattedSize = "<DIR>",
                         ModifiedTime = di.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                        CreatedTime = di.CreationTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                        AccessedTime = di.LastAccessTime.ToString("yyyy-MM-dd HH:mm:ss"),
                         PreviewType = "directory"
                     };
                 }
 
                 if (!File.Exists(filePath))
                 {
-                    return new FilePreviewData
-                    {
-                        FilePath = filePath,
-                        Name = Path.GetFileName(filePath),
-                        PreviewType = "error",
-                        ErrorMessage = "File does not exist"
-                    };
+                    return new FilePreviewData { FilePath = filePath, PreviewType = "none" };
                 }
 
                 var fi = new FileInfo(filePath);
                 var ext = fi.Extension.ToLowerInvariant();
+                var size = fi.Length;
 
-                var imageExts = new HashSet<string> { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tiff" };
-                if (imageExts.Contains(ext))
-                {
-                    return new FilePreviewData
-                    {
-                        FilePath = filePath,
-                        Name = fi.Name,
-                        Extension = ext,
-                        SizeBytes = fi.Length,
-                        FormattedSize = FormatBytes(fi.Length),
-                        ModifiedTime = fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                        PreviewType = "image"
-                    };
-                }
-
-                if (fi.Length <= 1024 * 1024 * 3)
-                {
-                    byte[] buffer = new byte[Math.Min(fi.Length, 512 * 1024)];
-                    using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                    {
-                        fs.Read(buffer, 0, buffer.Length);
-                    }
-
-                    bool isBinary = false;
-                    for (int i = 0; i < Math.Min(buffer.Length, 1024); i++)
-                    {
-                        if (buffer[i] == 0) { isBinary = true; break; }
-                    }
-
-                    if (!isBinary)
-                    {
-                        string text = Encoding.UTF8.GetString(buffer);
-                        var lines = text.Split('\n');
-                        return new FilePreviewData
-                        {
-                            FilePath = filePath,
-                            Name = fi.Name,
-                            Extension = ext,
-                            SizeBytes = fi.Length,
-                            FormattedSize = FormatBytes(fi.Length),
-                            ModifiedTime = fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                            PreviewType = "text",
-                            TextContent = text,
-                            LineCount = lines.Length
-                        };
-                    }
-                }
-
-                int hexBytesToRead = (int)Math.Min(fi.Length, 4096);
-                byte[] hexBuffer = new byte[hexBytesToRead];
-                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                {
-                    fs.Read(hexBuffer, 0, hexBytesToRead);
-                }
-
-                var hexRows = new List<HexRow>();
-                for (int i = 0; i < hexBytesToRead; i += 16)
-                {
-                    int count = Math.Min(16, hexBytesToRead - i);
-                    string offset = i.ToString("X8");
-                    var hexSb = new StringBuilder();
-                    var asciiSb = new StringBuilder();
-
-                    for (int j = 0; j < 16; j++)
-                    {
-                        if (j < count)
-                        {
-                            byte b = hexBuffer[i + j];
-                            hexSb.Append(b.ToString("X2")).Append(' ');
-                            asciiSb.Append(b >= 32 && b <= 126 ? (char)b : '.');
-                        }
-                        else
-                        {
-                            hexSb.Append("   ");
-                        }
-                        if (j == 7) hexSb.Append(" ");
-                    }
-
-                    hexRows.Add(new HexRow
-                    {
-                        Offset = offset,
-                        HexBytes = hexSb.ToString().TrimEnd(),
-                        AsciiText = asciiSb.ToString()
-                    });
-                }
-
-                return new FilePreviewData
+                var data = new FilePreviewData
                 {
                     FilePath = filePath,
                     Name = fi.Name,
                     Extension = ext,
-                    SizeBytes = fi.Length,
-                    FormattedSize = FormatBytes(fi.Length),
+                    SizeBytes = size,
+                    FormattedSize = FormatBytes(size),
                     ModifiedTime = fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                    PreviewType = "binary",
-                    HexRows = hexRows
+                    CreatedTime = fi.CreationTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                    AccessedTime = fi.LastAccessTime.ToString("yyyy-MM-dd HH:mm:ss")
                 };
+
+                // Determine type
+                if (IsImageExtension(ext))
+                {
+                    data.PreviewType = "image";
+                }
+                else if (IsMediaExtension(ext))
+                {
+                    data.PreviewType = "media";
+                }
+                else if (IsTextExtension(ext))
+                {
+                    data.PreviewType = "text";
+                    if (size < 1_000_000)
+                    {
+                        data.TextContent = File.ReadAllText(filePath);
+                    }
+                    else
+                    {
+                        using var reader = new StreamReader(filePath);
+                        var buffer = new char[8192];
+                        int read = reader.Read(buffer, 0, buffer.Length);
+                        data.TextContent = new string(buffer, 0, read) + "\n\n... [Truncated due to large file size] ...";
+                    }
+                }
+                else if (IsHexApplicable(ext) || size > 0)
+                {
+                    data.PreviewType = "hex";
+                    data.HexRows = GenerateHexDump(filePath, 256);
+                }
+                else
+                {
+                    data.PreviewType = "binary";
+                }
+
+                return data;
             }
             catch (Exception ex)
             {
                 return new FilePreviewData
                 {
                     FilePath = filePath,
-                    Name = Path.GetFileName(filePath),
                     PreviewType = "error",
-                    ErrorMessage = ex.Message
+                    TextContent = $"Preview error: {ex.Message}"
                 };
             }
-        });
+        }, cancellationToken);
     }
 
-    public async Task<HashResult> CalculateHashesAsync(string filePath)
+    public async Task<HashResult> ComputeHashesAsync(string filePath, CancellationToken cancellationToken = default)
     {
         return await Task.Run(() =>
         {
-            using var sha256 = SHA256.Create();
-            using var md5 = MD5.Create();
+            if (!File.Exists(filePath)) return new HashResult();
 
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            byte[] buffer = new byte[81920];
-            int read;
-
-            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            try
             {
-                sha256.TransformBlock(buffer, 0, read, null, 0);
-                md5.TransformBlock(buffer, 0, read, null, 0);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                using var stream = File.OpenRead(filePath);
+                using var sha256 = SHA256.Create();
+                using var md5 = MD5.Create();
+
+                var sha256Bytes = sha256.ComputeHash(stream);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                stream.Position = 0;
+                var md5Bytes = md5.ComputeHash(stream);
+
+                return new HashResult
+                {
+                    Sha256 = BitConverter.ToString(sha256Bytes).Replace("-", "").ToLowerInvariant(),
+                    Md5 = BitConverter.ToString(md5Bytes).Replace("-", "").ToLowerInvariant()
+                };
             }
-
-            sha256.TransformFinalBlock(buffer, 0, 0);
-            md5.TransformFinalBlock(buffer, 0, 0);
-
-            string sha256Hex = BitConverter.ToString(sha256.Hash!).Replace("-", "").ToLowerInvariant();
-            string md5Hex = BitConverter.ToString(md5.Hash!).Replace("-", "").ToLowerInvariant();
-
-            return new HashResult
+            catch (Exception ex)
             {
-                Sha256 = sha256Hex,
-                Md5 = md5Hex
-            };
-        });
+                return new HashResult
+                {
+                    Sha256 = $"Error: {ex.Message}",
+                    Md5 = "—"
+                };
+            }
+        }, cancellationToken);
     }
 
     public List<BatchRenameItem> PreviewBatchRename(IEnumerable<string> paths, BatchRenameRule rule)
     {
         var results = new List<BatchRenameItem>();
         int counter = rule.StartNumber;
+        var invalidChars = Path.GetInvalidFileNameChars().Concat(new[] { '/', '\\' }).Distinct().ToArray();
+        var seenTargetPaths = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
         foreach (var path in paths)
         {
@@ -465,7 +504,7 @@ public class FileSystemService
                     try
                     {
                         var opt = rule.CaseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
-                        newBaseName = Regex.Replace(nameWithoutExt, rule.FindText, rule.ReplaceText ?? "", opt);
+                        newBaseName = Regex.Replace(nameWithoutExt, rule.FindText, rule.ReplaceText ?? "", opt, TimeSpan.FromMilliseconds(250));
                     }
                     catch { }
                 }
@@ -498,7 +537,12 @@ public class FileSystemService
             string newFullName = $"{newBaseName}{ext}";
             string newPath = Path.Combine(dir, newFullName);
             bool willChange = !string.Equals(originalName, newFullName, StringComparison.Ordinal);
-            bool hasConflict = willChange && (File.Exists(newPath) || Directory.Exists(newPath));
+
+            bool isInvalidName = string.IsNullOrWhiteSpace(newFullName) || newFullName.IndexOfAny(invalidChars) >= 0;
+            bool isDuplicateTarget = !seenTargetPaths.Add(newPath);
+            bool isExistingFileCollision = willChange && !paths.Contains(newPath, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal) && (File.Exists(newPath) || Directory.Exists(newPath));
+
+            bool hasConflict = isInvalidName || isDuplicateTarget || isExistingFileCollision;
 
             results.Add(new BatchRenameItem
             {
@@ -513,45 +557,129 @@ public class FileSystemService
         return results;
     }
 
-    public void ExecuteBatchRename(IEnumerable<BatchRenameItem> items)
+    public (bool success, string message, int renamedCount) ExecuteBatchRenameSafe(IEnumerable<BatchRenameItem> items)
     {
-        foreach (var item in items)
+        var itemList = items.Where(i => i.WillChange && !i.HasConflict).ToList();
+        if (itemList.Count == 0) return (true, "No items to rename.", 0);
+
+        var invalidChars = Path.GetInvalidFileNameChars().Concat(new[] { '/', '\\' }).Distinct().ToArray();
+        var seenTargetPaths = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+        foreach (var item in itemList)
         {
-            if (!item.WillChange || item.HasConflict) continue;
-            if (File.Exists(item.OriginalPath))
+            if (string.IsNullOrWhiteSpace(item.NewName) || item.NewName.IndexOfAny(invalidChars) >= 0)
             {
-                File.Move(item.OriginalPath, item.NewPath);
+                return (false, $"Invalid file name: '{item.NewName}' contains illegal characters or path separators.", 0);
             }
-            else if (Directory.Exists(item.OriginalPath))
+
+            if (!seenTargetPaths.Add(item.NewPath))
             {
-                Directory.Move(item.OriginalPath, item.NewPath);
+                return (false, $"Target conflict: multiple items in the batch are named '{item.NewName}'.", 0);
             }
+        }
+
+        // Two-Phase Rename Execution with Rollback
+        var tempRenames = new List<(string originalPath, string tempPath, string finalPath)>();
+        var completedOriginals = new List<(string currentPath, string originalPath)>();
+
+        try
+        {
+            // Phase 1: Move to unique temporary paths
+            foreach (var item in itemList)
+            {
+                var dir = Path.GetDirectoryName(item.OriginalPath) ?? "";
+                var tempPath = Path.Combine(dir, $".c_tmp_{Guid.NewGuid():N}_{item.OriginalName}");
+
+                if (File.Exists(item.OriginalPath))
+                {
+                    File.Move(item.OriginalPath, tempPath);
+                }
+                else if (Directory.Exists(item.OriginalPath))
+                {
+                    Directory.Move(item.OriginalPath, tempPath);
+                }
+                else
+                {
+                    throw new FileNotFoundException($"Source file not found: {item.OriginalPath}");
+                }
+
+                tempRenames.Add((item.OriginalPath, tempPath, item.NewPath));
+                completedOriginals.Add((tempPath, item.OriginalPath));
+            }
+
+            // Phase 2: Move from temporary paths to final target paths
+            for (int i = 0; i < tempRenames.Count; i++)
+            {
+                var (orig, temp, final) = tempRenames[i];
+                if (File.Exists(temp))
+                {
+                    File.Move(temp, final);
+                }
+                else if (Directory.Exists(temp))
+                {
+                    Directory.Move(temp, final);
+                }
+                completedOriginals[i] = (final, orig);
+            }
+
+            return (true, $"Successfully renamed {itemList.Count} items.", itemList.Count);
+        }
+        catch (Exception ex)
+        {
+            // Rollback on any failure
+            Debug.WriteLine($"Batch rename failed, rolling back: {ex.Message}");
+            foreach (var (current, original) in completedOriginals)
+            {
+                try
+                {
+                    if (File.Exists(current)) File.Move(current, original);
+                    else if (Directory.Exists(current)) Directory.Move(current, original);
+                }
+                catch (Exception rollEx)
+                {
+                    Debug.WriteLine($"Rollback error for {current}: {rollEx.Message}");
+                }
+            }
+
+            return (false, $"Batch rename error: {ex.Message}. All changes rolled back.", 0);
         }
     }
 
-    public void CreateFolder(string parentDir, string name)
+    public void ExecuteBatchRename(IEnumerable<BatchRenameItem> items)
     {
-        var target = Path.Combine(parentDir, name);
+        ExecuteBatchRenameSafe(items);
+    }
+
+    public void CreateFolder(string parentPath, string name)
+    {
+        var target = Path.Combine(parentPath, name);
         Directory.CreateDirectory(target);
     }
 
-    public void CreateFile(string parentDir, string name)
+    public void CreateFile(string parentPath, string name)
     {
-        var target = Path.Combine(parentDir, name);
-        using (File.Create(target)) { }
+        var target = Path.Combine(parentPath, name);
+        using var fs = File.Create(target);
     }
 
     public void Rename(string oldPath, string newName)
     {
         var dir = Path.GetDirectoryName(oldPath) ?? "";
         var newPath = Path.Combine(dir, newName);
+        if (string.Equals(oldPath, newPath, StringComparison.Ordinal)) return;
+
+        // Two-step rename to handle Windows case-only renames
         if (File.Exists(oldPath))
         {
-            File.Move(oldPath, newPath);
+            var temp = Path.Combine(dir, $".c_tmp_{Guid.NewGuid():N}");
+            File.Move(oldPath, temp);
+            File.Move(temp, newPath);
         }
         else if (Directory.Exists(oldPath))
         {
-            Directory.Move(oldPath, newPath);
+            var temp = Path.Combine(dir, $".c_tmp_{Guid.NewGuid():N}");
+            Directory.Move(oldPath, temp);
+            Directory.Move(temp, newPath);
         }
     }
 
@@ -645,7 +773,7 @@ public class FileSystemService
     {
         try
         {
-            var workingDir = Directory.Exists(path) ? path : (File.Exists(path) ? Path.GetDirectoryName(path) : path) ?? @"C:\";
+            var workingDir = Directory.Exists(path) ? path : (File.Exists(path) ? Path.GetDirectoryName(path) : path) ?? DefaultRootPath;
             if (OperatingSystem.IsWindows())
             {
                 var psi = new ProcessStartInfo
@@ -663,12 +791,22 @@ public class FileSystemService
             }
             else
             {
-                Process.Start(new ProcessStartInfo
+                string term = Environment.GetEnvironmentVariable("TERMINAL") ?? "";
+                var candidates = new[] { term, "x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "alacritty", "kitty", "xterm" };
+                foreach (var candidate in candidates.Where(c => !string.IsNullOrEmpty(c)))
                 {
-                    FileName = "x-terminal-emulator",
-                    WorkingDirectory = workingDir,
-                    UseShellExecute = true
-                });
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = candidate,
+                            WorkingDirectory = workingDir,
+                            UseShellExecute = true
+                        });
+                        return;
+                    }
+                    catch { }
+                }
             }
         }
         catch (Exception ex)
@@ -681,7 +819,7 @@ public class FileSystemService
     {
         try
         {
-            var workingDir = Directory.Exists(path) ? path : (File.Exists(path) ? Path.GetDirectoryName(path) : path) ?? @"C:\";
+            var workingDir = Directory.Exists(path) ? path : (File.Exists(path) ? Path.GetDirectoryName(path) : path) ?? DefaultRootPath;
             if (OperatingSystem.IsWindows())
             {
                 var psi = new ProcessStartInfo
@@ -704,118 +842,44 @@ public class FileSystemService
         }
     }
 
+    public Task<HashResult> CalculateHashesAsync(string filePath, CancellationToken cancellationToken = default) => ComputeHashesAsync(filePath, cancellationToken);
+
+    public void EditFile(string filePath) => OpenEditor(filePath);
+
     public void OpenEditor(string path)
     {
         try
         {
             if (OperatingSystem.IsWindows())
             {
-                Process.Start(new ProcessStartInfo
+                if (_notepadPlusPlusPath != null && File.Exists(_notepadPlusPlusPath))
                 {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c code \"{path}\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                });
+                    Process.Start(new ProcessStartInfo(_notepadPlusPlusPath, $"\"{path}\"") { UseShellExecute = true });
+                    return;
+                }
+
+                // Try Notepad
+                Process.Start(new ProcessStartInfo("notepad.exe", $"\"{path}\"") { UseShellExecute = true });
             }
             else
             {
-                Process.Start(new ProcessStartInfo
+                // Linux editors: check $VISUAL, $EDITOR, gedit, kate, nano
+                string editor = Environment.GetEnvironmentVariable("VISUAL") ?? Environment.GetEnvironmentVariable("EDITOR") ?? "";
+                var candidates = new[] { editor, "gedit", "kate", "code", "nano" };
+                foreach (var candidate in candidates.Where(c => !string.IsNullOrEmpty(c)))
                 {
-                    FileName = "code",
-                    Arguments = $"\"{path}\"",
-                    UseShellExecute = true
-                });
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo(candidate, $"\"{path}\"") { UseShellExecute = true });
+                        return;
+                    }
+                    catch { }
+                }
             }
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Failed to open editor: {ex.Message}");
-        }
-    }
-
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".log", ".json", ".xml", ".yaml", ".yml", ".ini", ".cfg", ".conf", ".md",
-        ".cs", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".scss", ".less", ".py",
-        ".c", ".cpp", ".cc", ".h", ".hpp", ".rs", ".go", ".java", ".kt", ".sh", ".bash",
-        ".bat", ".ps1", ".cmd", ".sql", ".axaml", ".xaml", ".svg", ".toml", ".env",
-        ".csv", ".tsv", ".properties", ".config", ".editorconfig", ".gitignore", ".gitattributes"
-    };
-
-    private string? _detectedEditorPath;
-    private string? _detectedEditorName;
-
-    public string GetEditorName()
-    {
-        if (_detectedEditorName != null) return _detectedEditorName;
-        DetectEditor();
-        return _detectedEditorName ?? "Editor";
-    }
-
-    public string GetEditMenuLabel()
-    {
-        var name = GetEditorName();
-        return name == "Editor" ? "Edit" : $"Edit with {name}";
-    }
-
-    private void DetectEditor()
-    {
-        var npp = @"C:\Program Files\Notepad++\notepad++.exe";
-        if (File.Exists(npp))
-        {
-            _detectedEditorPath = npp;
-            _detectedEditorName = "Notepad++";
-            return;
-        }
-
-        var npp86 = @"C:\Program Files (x86)\Notepad++\notepad++.exe";
-        if (File.Exists(npp86))
-        {
-            _detectedEditorPath = npp86;
-            _detectedEditorName = "Notepad++";
-            return;
-        }
-
-        _detectedEditorPath = "notepad.exe";
-        _detectedEditorName = "Editor";
-    }
-
-    public bool IsTextLikeFile(string filePath)
-    {
-        if (string.IsNullOrWhiteSpace(filePath) || Directory.Exists(filePath)) return false;
-        var ext = Path.GetExtension(filePath);
-        if (string.IsNullOrEmpty(ext))
-        {
-            var name = Path.GetFileName(filePath);
-            return name.StartsWith(".") || name.Equals("Dockerfile", StringComparison.OrdinalIgnoreCase) || name.Equals("Makefile", StringComparison.OrdinalIgnoreCase);
-        }
-        return TextExtensions.Contains(ext);
-    }
-
-    public void EditFile(string filePath)
-    {
-        if (!File.Exists(filePath)) return;
-        DetectEditor();
-        try
-        {
-            if (!string.IsNullOrEmpty(_detectedEditorPath) && File.Exists(_detectedEditorPath))
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = _detectedEditorPath,
-                    Arguments = $"\"{filePath}\"",
-                    UseShellExecute = true
-                });
-            }
-            else
-            {
-                Process.Start(new ProcessStartInfo("notepad.exe", $"\"{filePath}\"") { UseShellExecute = true });
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Failed to edit file: {ex.Message}");
         }
     }
 
@@ -844,6 +908,13 @@ public class FileSystemService
         }
     }
 
+    public bool IsTextLikeFile(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || Directory.Exists(filePath)) return false;
+        var ext = Path.GetExtension(filePath).ToLowerInvariant();
+        return IsTextExtension(ext);
+    }
+
     private static string GetPermissionsDisplay(FileSystemInfo info, bool isDir, bool isReadOnly)
     {
         try
@@ -858,4 +929,77 @@ public class FileSystemService
 
         return isDir ? "drwxr-xr-x" : (isReadOnly ? "-r--r--r--" : "-rw-rw-rw-");
     }
+
+    private static List<HexRow> GenerateHexDump(string filePath, int maxBytes = 256)
+    {
+        var rows = new List<HexRow>();
+        try
+        {
+            using var fs = File.OpenRead(filePath);
+            var buffer = new byte[16];
+            int offset = 0;
+            int totalRead = 0;
+
+            while (totalRead < maxBytes)
+            {
+                int bytesToRead = Math.Min(16, maxBytes - totalRead);
+                int bytesRead = fs.Read(buffer, 0, bytesToRead);
+                if (bytesRead == 0) break;
+
+                var hexParts = new StringBuilder();
+                var asciiParts = new StringBuilder();
+
+                for (int i = 0; i < bytesRead; i++)
+                {
+                    hexParts.Append($"{buffer[i]:X2} ");
+                    char c = (buffer[i] >= 32 && buffer[i] <= 126) ? (char)buffer[i] : '.';
+                    asciiParts.Append(c);
+                }
+
+                rows.Add(new HexRow
+                {
+                    Offset = $"{offset:X8}",
+                    HexBytes = hexParts.ToString().TrimEnd(),
+                    Ascii = asciiParts.ToString()
+                });
+
+                offset += bytesRead;
+                totalRead += bytesRead;
+            }
+        }
+        catch { }
+
+        return rows;
+    }
+
+    public static string FormatBytes(long bytes)
+    {
+        string[] suffixes = { "B", "KB", "MB", "GB", "TB", "PB" };
+        int counter = 0;
+        decimal number = bytes;
+        while (Math.Round(number / 1024) >= 1)
+        {
+            number /= 1024;
+            counter++;
+        }
+        return $"{number:n1} {suffixes[counter]}";
+    }
+
+    private static bool IsImageExtension(string ext) =>
+        new[] { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".svg" }.Contains(ext);
+
+    private static bool IsMediaExtension(string ext) =>
+        new[] { ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".mp4", ".mkv", ".avi", ".webm", ".mov" }.Contains(ext);
+
+    private static bool IsTextExtension(string ext) =>
+        new[]
+        {
+            ".txt", ".log", ".json", ".xml", ".yaml", ".yml", ".ini", ".cfg", ".conf",
+            ".md", ".markdown", ".cs", ".ts", ".js", ".jsx", ".tsx", ".py", ".rs", ".go",
+            ".cpp", ".c", ".h", ".hpp", ".html", ".css", ".scss", ".axaml", ".xaml",
+            ".sql", ".sh", ".bat", ".cmd", ".ps1", ".toml", ".env", ".gitignore"
+        }.Contains(ext);
+
+    private static bool IsHexApplicable(string ext) =>
+        new[] { ".exe", ".dll", ".so", ".bin", ".dat", ".iso", ".sys", ".db", ".sqlite", ".obj", ".class" }.Contains(ext);
 }

@@ -4,25 +4,38 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
 
 namespace ClankerExplorer.ViewModels;
 
-public partial class ExplorerTabViewModel : ObservableObject
+public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 {
+    private CancellationTokenSource? _loadCts;
+    private CancellationTokenSource? _filterDebounceCts;
+    private long _loadGeneration = 0;
+    private bool _isDisposed;
+
     [ObservableProperty]
     private string _id = Guid.NewGuid().ToString("N");
 
     [ObservableProperty]
-    private string _title = "C:\\";
+    private string _title = "Root";
 
     [ObservableProperty]
-    private string _currentPath = @"C:\";
+    private string _currentPath = FileSystemService.DefaultRootPath;
 
     [ObservableProperty]
     private bool _isPinned;
+
+    [ObservableProperty]
+    private bool _isLoading;
+
+    [ObservableProperty]
+    private string _statusMessage = string.Empty;
 
     [ObservableProperty]
     private string _filterText = string.Empty;
@@ -60,15 +73,16 @@ public partial class ExplorerTabViewModel : ObservableObject
     public bool CanGoBack => HistoryIndex > 0;
     public bool CanGoForward => HistoryIndex < History.Count - 1;
 
-    public ExplorerTabViewModel(string initialPath = @"C:\")
+    public ExplorerTabViewModel(string? initialPath = null)
     {
+        initialPath ??= FileSystemService.DefaultRootPath;
         ClipboardFileService.ClipboardChanged += UpdateCutStatus;
         NavigateTo(initialPath);
     }
 
     public void UpdateCutStatus()
     {
-        if (Items == null) return;
+        if (Items == null || _isDisposed) return;
         foreach (var item in Items)
         {
             item.IsCut = ClipboardFileService.IsPathCut(item.FullPath);
@@ -77,10 +91,16 @@ public partial class ExplorerTabViewModel : ObservableObject
 
     public void NavigateTo(string path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return;
+        if (string.IsNullOrWhiteSpace(path) || _isDisposed) return;
 
-        // Clean path
-        path = Path.GetFullPath(path);
+        try
+        {
+            path = Path.GetFullPath(path);
+        }
+        catch
+        {
+            // Invalid path format
+        }
 
         if (HistoryIndex < History.Count - 1)
         {
@@ -92,7 +112,7 @@ public partial class ExplorerTabViewModel : ObservableObject
 
         CurrentPath = path;
         UpdateTitle(path);
-        Refresh();
+        _ = RefreshAsync();
 
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
@@ -100,28 +120,29 @@ public partial class ExplorerTabViewModel : ObservableObject
 
     public void GoBack()
     {
-        if (!CanGoBack) return;
+        if (!CanGoBack || _isDisposed) return;
         HistoryIndex--;
         CurrentPath = History[HistoryIndex];
         UpdateTitle(CurrentPath);
-        Refresh();
+        _ = RefreshAsync();
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
     }
 
     public void GoForward()
     {
-        if (!CanGoForward) return;
+        if (!CanGoForward || _isDisposed) return;
         HistoryIndex++;
         CurrentPath = History[HistoryIndex];
         UpdateTitle(CurrentPath);
-        Refresh();
+        _ = RefreshAsync();
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
     }
 
     public void GoUp()
     {
+        if (_isDisposed) return;
         var parent = Directory.GetParent(CurrentPath);
         if (parent != null)
         {
@@ -137,21 +158,86 @@ public partial class ExplorerTabViewModel : ObservableObject
 
     public void Refresh()
     {
-        var (list, error) = FileSystemService.Instance.ReadDirectory(CurrentPath);
-        foreach (var item in list)
-        {
-            item.IsCut = ClipboardFileService.IsPathCut(item.FullPath);
-        }
-        Items = new ObservableCollection<FileItem>(list);
-        ApplyFilter();
+        _ = RefreshAsync();
     }
 
-    partial void OnFilterTextChanged(string value) => ApplyFilter();
+    public async Task RefreshAsync()
+    {
+        if (_isDisposed) return;
+
+        _loadCts?.Cancel();
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+        long generation = Interlocked.Increment(ref _loadGeneration);
+
+        IsLoading = true;
+        StatusMessage = "Loading...";
+
+        try
+        {
+            var (list, error) = await FileSystemService.Instance.ReadDirectoryAsync(CurrentPath, token);
+            if (token.IsCancellationRequested || generation != _loadGeneration || _isDisposed) return;
+
+            if (error != null)
+            {
+                StatusMessage = error;
+            }
+            else
+            {
+                StatusMessage = string.Empty;
+            }
+
+            foreach (var item in list)
+            {
+                item.IsCut = ClipboardFileService.IsPathCut(item.FullPath);
+            }
+
+            Items = new ObservableCollection<FileItem>(list);
+            ApplyFilter();
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (generation == _loadGeneration && !_isDisposed)
+            {
+                IsLoading = false;
+            }
+        }
+    }
+
+    partial void OnFilterTextChanged(string value) => ScheduleDebouncedFilter();
     partial void OnIsFilterRegexChanged(bool value) => ApplyFilter();
     partial void OnIsFilterWildcardChanged(bool value) => ApplyFilter();
 
+    private void ScheduleDebouncedFilter()
+    {
+        _filterDebounceCts?.Cancel();
+        _filterDebounceCts = new CancellationTokenSource();
+        var token = _filterDebounceCts.Token;
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(120, token);
+                if (!token.IsCancellationRequested && !_isDisposed)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        if (!token.IsCancellationRequested && !_isDisposed)
+                        {
+                            ApplyFilter();
+                        }
+                    });
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, token);
+    }
+
     public void ApplyFilter()
     {
+        if (_isDisposed || Items == null) return;
         IEnumerable<FileItem> query = Items;
 
         if (!string.IsNullOrWhiteSpace(FilterText))
@@ -160,7 +246,7 @@ public partial class ExplorerTabViewModel : ObservableObject
             {
                 try
                 {
-                    var regex = new Regex(FilterText, RegexOptions.IgnoreCase);
+                    var regex = new Regex(FilterText, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
                     query = query.Where(i => regex.IsMatch(i.Name) || regex.IsMatch(i.Extension));
                 }
                 catch
@@ -173,7 +259,7 @@ public partial class ExplorerTabViewModel : ObservableObject
                 var glob = "^" + Regex.Escape(FilterText).Replace("\\*", ".*").Replace("\\?", ".") + "$";
                 try
                 {
-                    var regex = new Regex(glob, RegexOptions.IgnoreCase);
+                    var regex = new Regex(glob, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
                     query = query.Where(i => regex.IsMatch(i.Name));
                 }
                 catch
@@ -228,5 +314,27 @@ public partial class ExplorerTabViewModel : ObservableObject
             SortAscending = true;
         }
         ApplyFilter();
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+
+        ClipboardFileService.ClipboardChanged -= UpdateCutStatus;
+
+        try
+        {
+            _loadCts?.Cancel();
+            _loadCts?.Dispose();
+        }
+        catch { }
+
+        try
+        {
+            _filterDebounceCts?.Cancel();
+            _filterDebounceCts?.Dispose();
+        }
+        catch { }
     }
 }
