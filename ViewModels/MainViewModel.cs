@@ -22,6 +22,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public int LeftPaneColumnSpan => IsDualPane ? 1 : 3;
 
     [ObservableProperty]
+    private bool _isAlwaysOnTop;
+
+    [ObservableProperty]
     private bool _showInspector = true;
 
     [ObservableProperty]
@@ -415,6 +418,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void ToggleInspector()
     {
         ShowInspector = !ShowInspector;
+    }
+
+    [RelayCommand]
+    public void ToggleAlwaysOnTop()
+    {
+        IsAlwaysOnTop = !IsAlwaysOnTop;
     }
 
     [RelayCommand]

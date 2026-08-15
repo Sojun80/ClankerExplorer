@@ -11,6 +11,7 @@
         Icon="/Assets/app-icon.png"
         Width="1360" Height="960"
         MinWidth="900" MinHeight="500"
+        Topmost="{Binding IsAlwaysOnTop, Mode=TwoWay}"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource AppBgBrush}" Foreground="{DynamicResource AppTextBrush}"
         FontFamily="{DynamicResource AppUiFont}"
@@ -129,12 +130,27 @@
           <!-- Column 2: Window Drag Spacer -->
           <Panel Grid.Column="2" Background="Transparent" HorizontalAlignment="Stretch"/>
 
-          <!-- Column 3: C-Explorer pushed ALL THE WAY to the right, directly before min/max buttons -->
-          <Border Grid.Column="3" Background="Transparent" VerticalAlignment="Center" Margin="0,0,8,0"
-                  ToolTip.Tip="Clanker Explorer">
-            <TextBlock Text="C-Explorer" FontWeight="Bold" FontSize="12"
-                       Foreground="{DynamicResource AppSubTextBrush}" VerticalAlignment="Center"/>
-          </Border>
+          <!-- Column 3: "Stay on Top" toggle button + C-Explorer pushed ALL THE WAY to the right -->
+          <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="0,0,10,0">
+            <!-- Stay on Top Toggle Button -->
+            <ToggleButton IsChecked="{Binding IsAlwaysOnTop, Mode=TwoWay}" Classes="power-btn"
+                          Padding="7,3" Height="24"
+                          ToolTip.Tip="Keep Window Always on Top">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="📌" FontSize="10" VerticalAlignment="Center"/>
+                <TextBlock Text="Stay on Top" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+              </StackPanel>
+            </ToggleButton>
+
+            <TextBlock Text="|" Foreground="{DynamicResource AppBorderBrush}" VerticalAlignment="Center" Margin="2,0"/>
+
+            <!-- C-Explorer Brand Label with 'Clanker Explorer' ToolTip -->
+            <Border Background="Transparent" VerticalAlignment="Center"
+                    ToolTip.Tip="Clanker Explorer">
+              <TextBlock Text="C-Explorer" FontWeight="Bold" FontSize="12"
+                         Foreground="{DynamicResource AppSubTextBrush}" VerticalAlignment="Center"/>
+            </Border>
+          </StackPanel>
 
           <!-- Column 4: 140px Reserved for Window Minimize/Maximize/Close Buttons -->
         </Grid>
