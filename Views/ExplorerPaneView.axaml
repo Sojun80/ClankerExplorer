@@ -43,9 +43,8 @@
           <TextBlock Text="{Binding PaneLabel}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
         </Border>
 
-        <!-- Right controls: Notepad++ Style Scroll Arrows + New Tab Button -->
+        <!-- Right controls: Notepad++ Style Scroll Arrows (Only visible when tabs overflow!) -->
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="2,0,6,0">
-          <!-- Scroll Buttons Container (Only visible when tabs overflow!) -->
           <StackPanel x:Name="TabScrollButtonsPanel" Orientation="Horizontal" Spacing="2" IsVisible="False">
             <!-- Scroll Left Arrow Button -->
             <Button x:Name="TabScrollLeftBtn" Click="OnTabScrollLeftClicked"
@@ -62,26 +61,20 @@
               <TextBlock Text="▶" FontSize="8" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AppSubTextBrush}"/>
             </Button>
           </StackPanel>
-
-          <!-- New Tab Button -->
-          <Button Command="{Binding AddNewTabCommand}"
-                  Background="Transparent" BorderThickness="0" Padding="6,2" Margin="2,0,0,0" Height="22"
-                  ToolTip.Tip="New Tab (Ctrl+T)" VerticalAlignment="Center">
-            <TextBlock Text="+" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"/>
-          </Button>
         </StackPanel>
 
-        <!-- Tabs List (Hidden Scrollbar + Mouse Wheel Support) -->
+        <!-- Tabs List (Hidden Scrollbar + Mouse Wheel Support + '+' directly next to rightmost tab) -->
         <ScrollViewer x:Name="TabsScrollViewer"
                       HorizontalScrollBarVisibility="Hidden"
                       VerticalScrollBarVisibility="Disabled"
                       PointerWheelChanged="OnTabsPointerWheelChanged">
-          <ItemsControl ItemsSource="{Binding Tabs}">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate>
-                <StackPanel Orientation="Horizontal" Spacing="2"/>
-              </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <ItemsControl ItemsSource="{Binding Tabs}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" Spacing="2"/>
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate DataType="vm:ExplorerTabViewModel">
                 <Grid Margin="2,4,0,0">
@@ -146,7 +139,16 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-        </ScrollViewer>
+
+          <!-- '+' New Tab Button directly next to rightmost tab -->
+          <Button Command="{Binding AddNewTabCommand}"
+                  Background="Transparent" BorderThickness="0" Padding="5,2" Margin="2,4,4,0" Height="26" Width="26"
+                  CornerRadius="4"
+                  ToolTip.Tip="New Tab (Ctrl+T)" VerticalAlignment="Center">
+            <TextBlock Text="+" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AppSubTextBrush}"/>
+          </Button>
+        </StackPanel>
+      </ScrollViewer>
       </DockPanel>
     </Border>
 
