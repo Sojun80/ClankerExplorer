@@ -136,6 +136,60 @@ public partial class ExplorerPaneViewModel : ObservableObject
     public event Action<FileItem?>? RequestProperties;
     public event Action<string>? RequestSetClipboardText;
 
+    public Avalonia.Controls.DataGridLength NameColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(3, Avalonia.Controls.DataGridLengthUnitType.Star)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthName, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public Avalonia.Controls.DataGridLength ExtColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(65, Avalonia.Controls.DataGridLengthUnitType.Pixel)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthExt, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public Avalonia.Controls.DataGridLength SizeColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(95, Avalonia.Controls.DataGridLengthUnitType.Pixel)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthSize, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public Avalonia.Controls.DataGridLength ModifiedColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(150, Avalonia.Controls.DataGridLengthUnitType.Pixel)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthDateModified, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public Avalonia.Controls.DataGridLength CreatedColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(150, Avalonia.Controls.DataGridLengthUnitType.Pixel)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthDateCreated, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public Avalonia.Controls.DataGridLength AccessedColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(150, Avalonia.Controls.DataGridLengthUnitType.Pixel)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthDateAccessed, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public Avalonia.Controls.DataGridLength TypeColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(110, Avalonia.Controls.DataGridLengthUnitType.Pixel)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthItemType, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public Avalonia.Controls.DataGridLength AttributesColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(90, Avalonia.Controls.DataGridLengthUnitType.Pixel)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthAttributes, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public Avalonia.Controls.DataGridLength PermissionsColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(110, Avalonia.Controls.DataGridLengthUnitType.Pixel)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthPermissions, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public Avalonia.Controls.DataGridLength OwnerGroupColumnWidthDisplay => SmartColumnSizing
+        ? new Avalonia.Controls.DataGridLength(110, Avalonia.Controls.DataGridLengthUnitType.Pixel)
+        : new Avalonia.Controls.DataGridLength(ColumnWidthOwnerGroup, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+
+    public void NotifyColumnWidthsChanged()
+    {
+        OnPropertyChanged(nameof(NameColumnWidthDisplay));
+        OnPropertyChanged(nameof(ExtColumnWidthDisplay));
+        OnPropertyChanged(nameof(SizeColumnWidthDisplay));
+        OnPropertyChanged(nameof(ModifiedColumnWidthDisplay));
+        OnPropertyChanged(nameof(CreatedColumnWidthDisplay));
+        OnPropertyChanged(nameof(AccessedColumnWidthDisplay));
+        OnPropertyChanged(nameof(TypeColumnWidthDisplay));
+        OnPropertyChanged(nameof(AttributesColumnWidthDisplay));
+        OnPropertyChanged(nameof(PermissionsColumnWidthDisplay));
+        OnPropertyChanged(nameof(OwnerGroupColumnWidthDisplay));
+    }
+
     public ExplorerPaneViewModel(string paneId, string? initialPath = null, string label = "")
     {
         PaneId = paneId;
@@ -150,6 +204,12 @@ public partial class ExplorerPaneViewModel : ObservableObject
         RawAddressInput = startPath;
 
         WireTabEvents(tab);
+
+        SettingsService.Instance.SettingsChanged += s =>
+        {
+            LoadColumnSettings();
+            NotifyColumnWidthsChanged();
+        };
     }
 
     public void LoadColumnSettings()
@@ -185,6 +245,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
         var s = SettingsService.Instance.CurrentSettings;
         s.SmartColumnSizing = SmartColumnSizing;
         SettingsService.Instance.SaveSettings(s);
+        NotifyColumnWidthsChanged();
     }
 
     [RelayCommand]
@@ -215,6 +276,7 @@ public partial class ExplorerPaneViewModel : ObservableObject
         s.ColumnWidthPermissions = 110;
         s.ColumnWidthOwnerGroup = 110;
         SettingsService.Instance.SaveSettings(s);
+        NotifyColumnWidthsChanged();
     }
 
     [RelayCommand]

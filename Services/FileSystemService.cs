@@ -450,34 +450,30 @@ public class FileSystemService
         {
             if (!File.Exists(filePath)) return new HashResult();
 
-            try
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: false);
+            using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            using var md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
+
+            var buffer = new byte[65536];
+            int bytesRead;
+
+            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                using var stream = File.OpenRead(filePath);
-                using var sha256 = SHA256.Create();
-                using var md5 = MD5.Create();
-
-                var sha256Bytes = sha256.ComputeHash(stream);
-                cancellationToken.ThrowIfCancellationRequested();
-
-                stream.Position = 0;
-                var md5Bytes = md5.ComputeHash(stream);
-
-                return new HashResult
-                {
-                    Sha256 = BitConverter.ToString(sha256Bytes).Replace("-", "").ToLowerInvariant(),
-                    Md5 = BitConverter.ToString(md5Bytes).Replace("-", "").ToLowerInvariant()
-                };
+                sha256.AppendData(buffer, 0, bytesRead);
+                md5.AppendData(buffer, 0, bytesRead);
             }
-            catch (Exception ex)
+
+            var sha256Bytes = sha256.GetHashAndReset();
+            var md5Bytes = md5.GetHashAndReset();
+
+            return new HashResult
             {
-                return new HashResult
-                {
-                    Sha256 = $"Error: {ex.Message}",
-                    Md5 = "—"
-                };
-            }
+                Sha256 = Convert.ToHexString(sha256Bytes).ToLowerInvariant(),
+                Md5 = Convert.ToHexString(md5Bytes).ToLowerInvariant()
+            };
         }, cancellationToken);
     }
 
@@ -628,6 +624,7 @@ public class FileSystemService
         {
             // Rollback on any failure
             Debug.WriteLine($"Batch rename failed, rolling back: {ex.Message}");
+            int rollbackFailures = 0;
             foreach (var (current, original) in completedOriginals)
             {
                 try
@@ -637,49 +634,106 @@ public class FileSystemService
                 }
                 catch (Exception rollEx)
                 {
+                    rollbackFailures++;
                     Debug.WriteLine($"Rollback error for {current}: {rollEx.Message}");
                 }
             }
 
-            return (false, $"Batch rename error: {ex.Message}. All changes rolled back.", 0);
+            string rollbackMsg = rollbackFailures == 0 ? "All changes were safely rolled back." : $"{rollbackFailures} items could not be rolled back.";
+            return (false, $"Batch rename error: {ex.Message}. {rollbackMsg}", 0);
         }
     }
 
     public void ExecuteBatchRename(IEnumerable<BatchRenameItem> items)
     {
-        ExecuteBatchRenameSafe(items);
+        var result = ExecuteBatchRenameSafe(items);
+        if (!result.success)
+        {
+            throw new InvalidOperationException(result.message);
+        }
     }
 
     public void CreateFolder(string parentPath, string name)
     {
         var target = Path.Combine(parentPath, name);
+        if (Directory.Exists(target) || File.Exists(target))
+        {
+            throw new IOException($"An item named '{name}' already exists.");
+        }
         Directory.CreateDirectory(target);
     }
 
     public void CreateFile(string parentPath, string name)
     {
         var target = Path.Combine(parentPath, name);
-        using var fs = File.Create(target);
+        if (File.Exists(target) || Directory.Exists(target))
+        {
+            throw new IOException($"An item named '{name}' already exists.");
+        }
+        using var fs = new FileStream(target, FileMode.CreateNew, FileAccess.Write);
     }
 
     public void Rename(string oldPath, string newName)
     {
+        if (string.IsNullOrWhiteSpace(oldPath) || string.IsNullOrWhiteSpace(newName)) return;
+
         var dir = Path.GetDirectoryName(oldPath) ?? "";
+        var oldName = Path.GetFileName(oldPath);
         var newPath = Path.Combine(dir, newName);
+
         if (string.Equals(oldPath, newPath, StringComparison.Ordinal)) return;
 
-        // Two-step rename to handle Windows case-only renames
-        if (File.Exists(oldPath))
+        bool isCaseOnlyWindowsRename = OperatingSystem.IsWindows() &&
+            string.Equals(oldName, newName, StringComparison.OrdinalIgnoreCase);
+
+        if (!isCaseOnlyWindowsRename)
         {
-            var temp = Path.Combine(dir, $".c_tmp_{Guid.NewGuid():N}");
-            File.Move(oldPath, temp);
-            File.Move(temp, newPath);
+            if (File.Exists(newPath) || Directory.Exists(newPath))
+            {
+                throw new IOException($"An item named '{newName}' already exists in this folder.");
+            }
+
+            if (File.Exists(oldPath))
+            {
+                File.Move(oldPath, newPath);
+            }
+            else if (Directory.Exists(oldPath))
+            {
+                Directory.Move(oldPath, newPath);
+            }
         }
-        else if (Directory.Exists(oldPath))
+        else
         {
-            var temp = Path.Combine(dir, $".c_tmp_{Guid.NewGuid():N}");
-            Directory.Move(oldPath, temp);
-            Directory.Move(temp, newPath);
+            // Direct two-step rename for Windows case-only change with rollback
+            string tempPath = Path.Combine(dir, $".c_tmp_{Guid.NewGuid():N}_{oldName}");
+            bool isDir = Directory.Exists(oldPath);
+
+            try
+            {
+                if (isDir) Directory.Move(oldPath, tempPath);
+                else File.Move(oldPath, tempPath);
+
+                try
+                {
+                    if (isDir) Directory.Move(tempPath, newPath);
+                    else File.Move(tempPath, newPath);
+                }
+                catch
+                {
+                    try
+                    {
+                        if (isDir) Directory.Move(tempPath, oldPath);
+                        else File.Move(tempPath, oldPath);
+                    }
+                    catch { }
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Case-only rename failed: {ex.Message}");
+                throw;
+            }
         }
     }
 
@@ -726,26 +780,12 @@ public class FileSystemService
                     }
                     else
                     {
-                        // Linux / POSIX Trash fallback
-                        bool trashed = false;
-                        try
+                        // Linux / POSIX Trash via gio
+                        var (output, error, exitCode) = RunProcessWithTimeoutAsync("gio", $"trash \"{path}\"", 3000).GetAwaiter().GetResult();
+                        if (exitCode != 0)
                         {
-                            var proc = Process.Start(new ProcessStartInfo
-                            {
-                                FileName = "gio",
-                                Arguments = $"trash \"{path}\"",
-                                CreateNoWindow = true,
-                                UseShellExecute = false
-                            });
-                            proc?.WaitForExit(3000);
-                            trashed = proc?.ExitCode == 0;
-                        }
-                        catch { }
-
-                        if (!trashed)
-                        {
-                            if (File.Exists(path)) File.Delete(path);
-                            else if (Directory.Exists(path)) Directory.Delete(path, true);
+                            // Never fall back to permanent deletion if trash fails!
+                            throw new IOException($"Failed to move '{path}' to Trash: {error}. Permanent deletion was prevented.");
                         }
                     }
                 }
@@ -753,6 +793,7 @@ public class FileSystemService
             catch (Exception ex)
             {
                 Debug.WriteLine($"Failed to delete {path}: {ex.Message}");
+                throw;
             }
         }
     }

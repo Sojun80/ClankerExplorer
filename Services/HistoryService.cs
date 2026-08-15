@@ -123,10 +123,13 @@ public class HistoryService
     public void RecordFolderVisit(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
-        path = path.TrimEnd('\\', '/');
+        path = path.Trim();
 
-        // Do not record root drive letters like C: or / on Unix
-        if (path.Length <= 3 && (path.Contains(':') || path == "/")) return;
+        // Do not record root paths like C:\, /, or drive roots
+        if (path == "/" || path == "\\" || (path.Length <= 3 && path.Contains(':'))) return;
+
+        path = path.TrimEnd('\\', '/');
+        if (string.IsNullOrWhiteSpace(path)) return;
 
         lock (_lock)
         {

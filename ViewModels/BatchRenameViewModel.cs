@@ -102,8 +102,15 @@ public partial class BatchRenameViewModel : ObservableObject
         ErrorMessage = null;
         try
         {
-            FileSystemService.Instance.ExecuteBatchRename(PreviewItems);
-            RequestClose?.Invoke();
+            var (success, message, renamedCount) = FileSystemService.Instance.ExecuteBatchRenameSafe(PreviewItems);
+            if (success)
+            {
+                RequestClose?.Invoke();
+            }
+            else
+            {
+                ErrorMessage = message;
+            }
         }
         catch (Exception ex)
         {

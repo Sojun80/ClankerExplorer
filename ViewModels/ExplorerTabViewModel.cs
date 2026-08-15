@@ -185,6 +185,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             else
             {
                 StatusMessage = string.Empty;
+                HistoryService.Instance.RecordFolderVisit(CurrentPath);
             }
 
             foreach (var item in list)

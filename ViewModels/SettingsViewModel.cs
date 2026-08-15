@@ -343,6 +343,12 @@ public partial class SettingsViewModel : ObservableObject
 
     public AppSettings GetOriginalState() => _originalSettings;
 
+    public void ReloadFromCurrent()
+    {
+        LoadFromSettings(SettingsService.Instance.CurrentSettings);
+        TriggerLivePreview();
+    }
+
     [RelayCommand]
     public void Save()
     {

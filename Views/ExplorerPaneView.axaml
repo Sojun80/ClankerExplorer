@@ -264,7 +264,7 @@
 
       <DataGrid.Columns>
         <!-- Name Column (Always Visible, Can be resized, moved, dynamic star or default) -->
-        <DataGridTemplateColumn Header="Name" Width="3*" MinWidth="150" SortMemberPath="Name">
+        <DataGridTemplateColumn Header="Name" Width="{Binding NameColumnWidthDisplay}" MinWidth="150" SortMemberPath="Name">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
@@ -293,7 +293,7 @@
         </DataGridTemplateColumn>
 
         <!-- Extension Column -->
-        <DataGridTemplateColumn Header="Ext" Width="65" MinWidth="45" SortMemberPath="Extension"
+        <DataGridTemplateColumn Header="Ext" Width="{Binding ExtColumnWidthDisplay}" MinWidth="45" SortMemberPath="Extension"
                                 IsVisible="{Binding ShowColumnExt}">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
@@ -305,42 +305,42 @@
         </DataGridTemplateColumn>
 
         <!-- Size Column -->
-        <DataGridTextColumn Header="Size" Width="95" MinWidth="60" Binding="{Binding SizeDisplay}"
+        <DataGridTextColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="60" Binding="{Binding SizeDisplay}"
                             IsVisible="{Binding ShowColumnSize}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
 
         <!-- Date Modified Column -->
-        <DataGridTextColumn Header="Date Modified" Width="150" MinWidth="100" Binding="{Binding FormattedModifiedTime}"
+        <DataGridTextColumn Header="Date Modified" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="100" Binding="{Binding FormattedModifiedTime}"
                             IsVisible="{Binding ShowColumnDateModified}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
 
         <!-- Date Created Column -->
-        <DataGridTextColumn Header="Date Created" Width="150" MinWidth="100" Binding="{Binding FormattedCreatedTime}"
+        <DataGridTextColumn Header="Date Created" Width="{Binding CreatedColumnWidthDisplay}" MinWidth="100" Binding="{Binding FormattedCreatedTime}"
                             IsVisible="{Binding ShowColumnDateCreated}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
 
         <!-- Date Accessed Column -->
-        <DataGridTextColumn Header="Date Accessed" Width="150" MinWidth="100" Binding="{Binding FormattedAccessedTime}"
+        <DataGridTextColumn Header="Date Accessed" Width="{Binding AccessedColumnWidthDisplay}" MinWidth="100" Binding="{Binding FormattedAccessedTime}"
                             IsVisible="{Binding ShowColumnDateAccessed}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
 
         <!-- Item Type Column -->
-        <DataGridTextColumn Header="Type" Width="110" MinWidth="70" Binding="{Binding ItemTypeDisplay}"
+        <DataGridTextColumn Header="Type" Width="{Binding TypeColumnWidthDisplay}" MinWidth="70" Binding="{Binding ItemTypeDisplay}"
                             IsVisible="{Binding ShowColumnItemType}"
                             FontFamily="{DynamicResource AppUiFont}" FontSize="11"/>
 
         <!-- Attributes (Windows) Column -->
-        <DataGridTextColumn Header="Attributes" Width="90" MinWidth="60" Binding="{Binding AttributesString}"
+        <DataGridTextColumn Header="Attributes" Width="{Binding AttributesColumnWidthDisplay}" MinWidth="60" Binding="{Binding AttributesString}"
                             IsVisible="{Binding ShowColumnAttributes}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
 
         <!-- Permissions (Linux / POSIX) Column -->
-        <DataGridTextColumn Header="Permissions" Width="110" MinWidth="80" Binding="{Binding PermissionsString}"
+        <DataGridTextColumn Header="Permissions" Width="{Binding PermissionsColumnWidthDisplay}" MinWidth="80" Binding="{Binding PermissionsString}"
                             IsVisible="{Binding ShowColumnPermissions}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5"/>
 
         <!-- Owner / Group (Linux / POSIX) Column -->
-        <DataGridTextColumn Header="Owner:Group" Width="110" MinWidth="80" Binding="{Binding OwnerGroupString}"
+        <DataGridTextColumn Header="Owner:Group" Width="{Binding OwnerGroupColumnWidthDisplay}" MinWidth="80" Binding="{Binding OwnerGroupString}"
                             IsVisible="{Binding ShowColumnOwnerGroup}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="10.5"/>
       </DataGrid.Columns>

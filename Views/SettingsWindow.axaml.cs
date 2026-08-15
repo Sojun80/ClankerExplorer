@@ -86,7 +86,8 @@ public partial class SettingsWindow : Window
                     var localPath = files[0].Path.LocalPath;
                     SettingsService.Instance.ImportSettings(localPath);
                     ThemeManager.ApplyTheme(SettingsService.Instance.CurrentSettings);
-                    DataContext = new SettingsViewModel { StatusMessage = $"Imported settings from {Path.GetFileName(localPath)}" };
+                    vm.ReloadFromCurrent();
+                    vm.StatusMessage = $"Imported settings from {Path.GetFileName(localPath)}";
                 }
             }
         };

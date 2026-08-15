@@ -3,97 +3,191 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ClankerExplorer.Services;
 
 public static class ClipboardFileService
 {
+    private static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     private static readonly List<string> _storedPaths = new();
     private static bool _isCut = false;
+    private static readonly object _lock = new();
 
     public static event Action? ClipboardChanged;
 
-    public static bool IsCutMode => _isCut;
-    public static IReadOnlyList<string> StoredPaths => _storedPaths;
+    public static bool IsCutMode
+    {
+        get { lock (_lock) { return _isCut; } }
+    }
+
+    public static IReadOnlyList<string> StoredPaths
+    {
+        get { lock (_lock) { return _storedPaths.ToList(); } }
+    }
 
     public static bool IsPathCut(string path)
     {
-        if (!_isCut || string.IsNullOrEmpty(path)) return false;
-        var normalized = path.TrimEnd('\\', '/');
-        return _storedPaths.Any(p => string.Equals(p.TrimEnd('\\', '/'), normalized, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrEmpty(path)) return false;
+        lock (_lock)
+        {
+            if (!_isCut) return false;
+            var normalized = path.TrimEnd('\\', '/');
+            return _storedPaths.Any(p => string.Equals(p.TrimEnd('\\', '/'), normalized, PathComparison));
+        }
     }
 
     public static void Copy(IEnumerable<string> paths)
     {
-        _storedPaths.Clear();
-        _storedPaths.AddRange(paths);
-        _isCut = false;
+        lock (_lock)
+        {
+            _storedPaths.Clear();
+            _storedPaths.AddRange(paths);
+            _isCut = false;
+        }
         ClipboardChanged?.Invoke();
     }
 
     public static void Cut(IEnumerable<string> paths)
     {
-        _storedPaths.Clear();
-        _storedPaths.AddRange(paths);
-        _isCut = true;
+        lock (_lock)
+        {
+            _storedPaths.Clear();
+            _storedPaths.AddRange(paths);
+            _isCut = true;
+        }
         ClipboardChanged?.Invoke();
     }
 
-    public static bool CanPaste => _storedPaths.Count > 0;
-
-    public static void Paste(string destinationDirectory)
+    public static bool CanPaste
     {
-        if (!Directory.Exists(destinationDirectory)) return;
+        get { lock (_lock) { return _storedPaths.Count > 0; } }
+    }
 
-        var sources = _storedPaths.ToList();
-        foreach (var source in sources)
+    public static async Task<(int successCount, List<string> failedPaths)> PasteAsync(string destinationDirectory, CancellationToken cancellationToken = default)
+    {
+        if (!Directory.Exists(destinationDirectory)) return (0, new List<string>());
+
+        List<string> sources;
+        bool isCutMode;
+
+        lock (_lock)
         {
-            try
-            {
-                if (File.Exists(source))
-                {
-                    var dest = Path.Combine(destinationDirectory, Path.GetFileName(source));
-                    if (_isCut)
-                    {
-                        File.Move(source, dest, true);
-                    }
-                    else
-                    {
-                        File.Copy(source, dest, true);
-                    }
-                }
-                else if (Directory.Exists(source))
-                {
-                    var dest = Path.Combine(destinationDirectory, Path.GetFileName(source));
-                    if (_isCut)
-                    {
-                        // Check if destination is inside source before moving
-                        if (IsDescendantOf(dest, source))
-                        {
-                            Debug.WriteLine($"Cannot move {source} into its own subdirectory {dest}");
-                            continue;
-                        }
-                        Directory.Move(source, dest);
-                    }
-                    else
-                    {
-                        CopyDirectorySafe(source, dest);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Failed to paste {source}: {ex.Message}");
-            }
+            sources = _storedPaths.ToList();
+            isCutMode = _isCut;
         }
 
-        if (_isCut)
+        var successfulPaths = new List<string>();
+        var failedPaths = new List<string>();
+
+        await Task.Run(() =>
         {
-            _storedPaths.Clear();
-            _isCut = false;
+            foreach (var source in sources)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    if (File.Exists(source))
+                    {
+                        var fileName = Path.GetFileName(source);
+                        var dest = GetNonConflictingPath(destinationDirectory, fileName, isCutMode);
+
+                        if (isCutMode)
+                        {
+                            File.Move(source, dest);
+                        }
+                        else
+                        {
+                            File.Copy(source, dest, false);
+                        }
+                        successfulPaths.Add(source);
+                    }
+                    else if (Directory.Exists(source))
+                    {
+                        var dirName = Path.GetFileName(source.TrimEnd('\\', '/'));
+                        var dest = GetNonConflictingPath(destinationDirectory, dirName, isCutMode);
+
+                        if (IsDescendantOf(dest, source))
+                        {
+                            Debug.WriteLine($"Cannot paste directory {source} into its own subdirectory {dest}");
+                            failedPaths.Add(source);
+                            continue;
+                        }
+
+                        if (isCutMode)
+                        {
+                            Directory.Move(source, dest);
+                        }
+                        else
+                        {
+                            CopyDirectorySafe(source, dest, cancellationToken);
+                        }
+                        successfulPaths.Add(source);
+                    }
+                    else
+                    {
+                        failedPaths.Add(source);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Failed to paste {source}: {ex.Message}");
+                    failedPaths.Add(source);
+                }
+            }
+        }, cancellationToken);
+
+        lock (_lock)
+        {
+            if (isCutMode)
+            {
+                // Only remove successfully moved items from cut list; keep failed ones
+                foreach (var succ in successfulPaths)
+                {
+                    _storedPaths.RemoveAll(p => string.Equals(p, succ, PathComparison));
+                }
+
+                if (_storedPaths.Count == 0)
+                {
+                    _isCut = false;
+                }
+            }
         }
 
         ClipboardChanged?.Invoke();
+        return (successfulPaths.Count, failedPaths);
+    }
+
+    public static void Paste(string destinationDirectory)
+    {
+        PasteAsync(destinationDirectory).GetAwaiter().GetResult();
+    }
+
+    private static string GetNonConflictingPath(string dir, string name, bool isMove)
+    {
+        var target = Path.Combine(dir, name);
+        if (isMove || (!File.Exists(target) && !Directory.Exists(target)))
+        {
+            return target;
+        }
+
+        // For copy operations, generate non-conflicting unique name e.g. "file (Copy).ext"
+        var ext = Path.GetExtension(name);
+        var baseName = Path.GetFileNameWithoutExtension(name);
+        int counter = 1;
+
+        while (File.Exists(target) || Directory.Exists(target))
+        {
+            string newName = counter == 1 ? $"{baseName} (Copy){ext}" : $"{baseName} (Copy {counter}){ext}";
+            target = Path.Combine(dir, newName);
+            counter++;
+        }
+
+        return target;
     }
 
     private static bool IsDescendantOf(string targetPath, string basePath)
@@ -102,7 +196,7 @@ public static class ClipboardFileService
         {
             var fullTarget = Path.GetFullPath(targetPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             var fullBase = Path.GetFullPath(basePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            return fullTarget.StartsWith(fullBase, StringComparison.OrdinalIgnoreCase);
+            return fullTarget.StartsWith(fullBase, PathComparison);
         }
         catch
         {
@@ -110,26 +204,25 @@ public static class ClipboardFileService
         }
     }
 
-    private static void CopyDirectorySafe(string sourceDir, string destDir)
+    private static void CopyDirectorySafe(string sourceDir, string destDir, CancellationToken cancellationToken = default)
     {
-        // 1. Guard against copying a folder into itself or its own descendants
         if (IsDescendantOf(destDir, sourceDir))
         {
             Debug.WriteLine($"Cannot copy directory {sourceDir} into its own descendant {destDir}");
             return;
         }
 
-        var visitedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visitedDirs = new HashSet<string>(PathComparer);
         var workQueue = new Queue<(string src, string dst)>();
         workQueue.Enqueue((Path.GetFullPath(sourceDir), Path.GetFullPath(destDir)));
 
         while (workQueue.Count > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var (currentSrc, currentDst) = workQueue.Dequeue();
 
             if (!visitedDirs.Add(currentSrc))
             {
-                // Prevent infinite cycle in case of symbolic link loop
                 continue;
             }
 
@@ -145,11 +238,12 @@ public static class ClipboardFileService
 
             var dirInfo = new DirectoryInfo(currentSrc);
 
-            // Copy files in current directory
+            // Copy files
             try
             {
                 foreach (var file in dirInfo.GetFiles())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     try
                     {
                         var targetFilePath = Path.Combine(currentDst, file.Name);
@@ -166,25 +260,22 @@ public static class ClipboardFileService
                 Debug.WriteLine($"Failed to read files from {currentSrc}: {ex.Message}");
             }
 
-            // Enqueue subdirectories (skipping reparse points / symlinks to prevent traversal outside tree)
+            // Enqueue subdirectories (skipping reparse points / symlinks to prevent infinite cycles)
             try
             {
                 foreach (var subDir in dirInfo.GetDirectories())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     try
                     {
-                        // Check for reparse points / junctions / symlinks
                         bool isReparsePoint = (subDir.Attributes & FileAttributes.ReparsePoint) != 0 || subDir.LinkTarget != null;
                         if (isReparsePoint)
                         {
-                            // Skip traversing into linked directory trees
                             Debug.WriteLine($"Skipping traversal into reparse point / link {subDir.FullName}");
                             continue;
                         }
 
                         var targetSubDir = Path.Combine(currentDst, subDir.Name);
-                        
-                        // Guard: ensure targetSubDir is not sourceDir
                         if (!IsDescendantOf(targetSubDir, subDir.FullName))
                         {
                             workQueue.Enqueue((subDir.FullName, targetSubDir));
