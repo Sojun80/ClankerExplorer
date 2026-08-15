@@ -25,9 +25,34 @@ public partial class FileItem : ObservableObject
     {
         if (dt == DateTime.MinValue || dt == default) return "—";
 
+        var now = DateTime.Now;
         var today = DateTime.Today;
         var date = dt.Date;
         string timeStr = dt.ToString("h:mm tt"); // e.g. "8:31 AM", "4:15 PM"
+
+        var elapsed = now - dt;
+
+        // If modified recently (within the last 60 minutes today)
+        if (date == today && elapsed.TotalSeconds >= -30 && elapsed.TotalMinutes < 60)
+        {
+            if (elapsed.TotalSeconds < 60)
+            {
+                return "Just now";
+            }
+
+            int exactMinutes = (int)elapsed.TotalMinutes;
+            if (exactMinutes <= 10)
+            {
+                return exactMinutes == 1 ? "1 min ago" : $"{exactMinutes} mins ago";
+            }
+
+            // 11 to 59 minutes: Round to nearest 5 minutes (About 15 mins ago, About 20 mins ago, etc.)
+            int roundedMinutes = (int)(Math.Round(elapsed.TotalMinutes / 5.0) * 5);
+            if (roundedMinutes < 60)
+            {
+                return $"About {roundedMinutes} mins ago";
+            }
+        }
 
         if (date == today)
         {
