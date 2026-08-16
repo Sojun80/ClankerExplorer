@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <WindowsSdkPackageVersion>10.0.19041.53</WindowsSdkPackageVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
@@ -13,9 +14,6 @@
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <!-- Single-File Self-Extraction Configuration -->
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <DebugType>embedded</DebugType>
   </PropertyGroup>
 
@@ -66,6 +64,17 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <!-- Explicit patched version to resolve security advisory GHSA-xrw6-gwf8-vvr9 -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- LibVLC Video Engine Direct DLL References (AnyCPU .NET 8) -->
+    <Reference Include="LibVLCSharp">
+      <HintPath>lib\LibVLCSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="LibVLCSharp.Avalonia">
+      <HintPath>lib\LibVLCSharp.Avalonia.dll</HintPath>
+    </Reference>
+    <None Include="libvlc\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="SyncNet8LegacyOutput" AfterTargets="Build">

@@ -33,7 +33,12 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
   - Middle-compact paths (e.g. `C:\...\Subfolder`).
   - Row-level `×` reset with instant `↩ Undo` restoration banner.
 - 🌐 **Network & WSL Browser**: Collapsible bottom section for network shares, local subnets, and WSL Linux distributions.
-- 🔍 **Quick Inspector (`F3`)**: Code/Text syntax viewer, Binary Hex dump (Offset / Hex / ASCII), and instant SHA-256 & MD5 hash calculator.
+- 🔍 **Multi-Format Quick Inspector (`F3`)**:
+  - 🎬 **Video Playback**: Hardware-accelerated 60fps LibVLC video engine with timeline scrubbing, instant Play/Pause, and persistent audio volume/mute preferences.
+  - 📄 **PDF Document Viewer**: Multi-page PDF renderer with page navigation (`Next`/`Prev`), zoom controls (`Ctrl+Wheel`), and fit-to-window mode.
+  - 🗜️ **Archive Inspector**: Instant ZIP, RAR, and compressed archive file tree viewer showing file names, uncompressed sizes, and compression ratios without manual extraction.
+  - 🖼️ **Image Viewer**: High-resolution image preview with fit/actual toggle, zoom slider, and mouse wheel controls.
+  - 💻 **Code & Hex Viewer**: Syntax viewer, Binary Hex dump (Offset / Hex / ASCII), and instant SHA-256 & MD5 hash calculator.
 - ⚡ **Live Quick Filter (`Ctrl+F`)**: Real-time wildcard (`*.cs`, `*test*`) and regular expression file search with 250ms catastrophic backtracking protection.
 - 🧠 **Per-Folder View Memory**: Each folder remembers Details/Thumbnails mode, thumbnail size, sort and direction, visible columns, widths/order, and the previous scroll location across navigation and restarts.
 - 💾 **Portability & Full Backup**:

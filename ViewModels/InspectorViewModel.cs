@@ -20,19 +20,48 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _hashingCts;
     private long _previewGeneration = 0;
     private string? _currentFilePath;
+    private bool _hasVideoMedia;
+    private bool _isSeeking;
     private bool _isDisposed;
 
     // Video Player
     private readonly NativeVideoPlayer _videoPlayer = new();
-    private readonly DispatcherTimer _videoPositionTimer;
 
     public InspectorViewModel()
     {
-        _videoPositionTimer = new DispatcherTimer
+        _videoPlayer.TimeChanged += pos =>
         {
-            Interval = TimeSpan.FromMilliseconds(100)
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (IsVideoPlaying && !_isSeeking)
+                {
+                    VideoPosition = pos;
+                }
+            });
         };
-        _videoPositionTimer.Tick += OnVideoTimerTick;
+
+        _videoPlayer.MediaOpened += () =>
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_videoPlayer.Duration > TimeSpan.Zero)
+                {
+                    VideoDuration = _videoPlayer.Duration;
+                }
+            });
+        };
+
+        _videoPlayer.MediaEnded += () =>
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                PauseVideo();
+                VideoPosition = VideoDuration;
+            });
+        };
+
+        _videoPlayer.SetMute(IsVideoMuted);
+        _videoPlayer.SetVolume(IsVideoMuted ? 0.0 : VideoVolume);
     }
 
     [ObservableProperty]
@@ -97,23 +126,29 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     private bool _isVideoPlaying;
 
     [ObservableProperty]
+    private bool _isVideoSessionActive;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FormattedVideoPosition))]
+    [NotifyPropertyChangedFor(nameof(VideoPositionSeconds))]
     private TimeSpan _videoPosition = TimeSpan.Zero;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FormattedVideoDuration))]
+    [NotifyPropertyChangedFor(nameof(VideoDurationSeconds))]
     private TimeSpan _videoDuration = TimeSpan.Zero;
 
     [ObservableProperty]
-    private double _videoVolume = 0.8;
+    private double _videoVolume = VideoPreferencesService.Instance.Volume;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(MuteButtonIcon))]
-    private bool _isVideoMuted;
+    private bool _isVideoMuted = VideoPreferencesService.Instance.IsMuted;
 
     [ObservableProperty]
     private bool _isVideoPlaybackAvailable = true;
 
+    public LibVLCSharp.Shared.MediaPlayer? VlcMediaPlayer => _videoPlayer.VlcMediaPlayer;
     public string PlayPauseButtonIcon => IsVideoPlaying ? "⏸" : "▶";
     public string MuteButtonIcon => IsVideoMuted ? "🔇" : "🔊";
     public bool IsVideoPreview => ActivePreviewType == "video";
@@ -346,7 +381,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     // ==========================================
 
     [RelayCommand]
-    public async Task TogglePlayPauseAsync()
+    public void TogglePlayPause()
     {
         if (IsVideoPlaying)
         {
@@ -354,22 +389,23 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
         }
         else
         {
-            await PlayVideoAsync();
+            PlayVideo();
         }
     }
 
-    public async Task PlayVideoAsync()
+    public void PlayVideo()
     {
         if (string.IsNullOrEmpty(_currentFilePath) || !File.Exists(_currentFilePath)) return;
 
-        if (!_videoPlayer.IsInitialized)
+        if (!_hasVideoMedia)
         {
-            bool ok = await _videoPlayer.OpenAsync(_currentFilePath);
+            bool ok = _videoPlayer.Open(_currentFilePath);
             if (!ok)
             {
                 IsVideoPlaybackAvailable = false;
                 return;
             }
+            _hasVideoMedia = true;
 
             if (VideoPosition > TimeSpan.Zero)
             {
@@ -377,10 +413,12 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
             }
         }
 
+        _videoPlayer.SetMute(IsVideoMuted);
         _videoPlayer.SetVolume(IsVideoMuted ? 0.0 : VideoVolume);
         _videoPlayer.Play();
         IsVideoPlaying = true;
-        _videoPositionTimer.Start();
+        IsVideoSessionActive = true;
+        OnPropertyChanged(nameof(VlcMediaPlayer));
     }
 
     public void PauseVideo()
@@ -390,86 +428,108 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
             _videoPlayer.Pause();
         }
         IsVideoPlaying = false;
-        _videoPositionTimer.Stop();
+        OnPropertyChanged(nameof(VlcMediaPlayer));
     }
 
     public void StopVideo()
     {
-        _videoPositionTimer.Stop();
-        if (_videoPlayer.IsInitialized)
-        {
-            _videoPlayer.Stop();
-            _videoPlayer.Close();
-        }
+        _videoPlayer.Stop();
+        _videoPlayer.Close();
+        _hasVideoMedia = false;
         IsVideoPlaying = false;
+        IsVideoSessionActive = false;
         VideoPosition = TimeSpan.Zero;
+        OnPropertyChanged(nameof(VlcMediaPlayer));
     }
 
     [RelayCommand]
-    public async Task SeekVideoAsync(double seconds)
+    public void SeekVideo(double seconds)
     {
         var target = TimeSpan.FromSeconds(Math.Clamp(seconds, 0, VideoDuration.TotalSeconds));
+        _isSeeking = true;
         VideoPosition = target;
-        if (_videoPlayer.IsInitialized)
+
+        if (string.IsNullOrEmpty(_currentFilePath) || !File.Exists(_currentFilePath))
         {
-            _videoPlayer.SetPosition(target);
+            _isSeeking = false;
+            return;
         }
 
-        if (!string.IsNullOrEmpty(_currentFilePath))
+        // If media isn't loaded yet, open it
+        if (!_hasVideoMedia)
         {
-            try
+            bool ok = _videoPlayer.Open(_currentFilePath);
+            if (!ok)
             {
-                var frameStream = await VideoThumbnailService.Instance.ExtractFrameDirectAsync(_currentFilePath, target, 640, 360);
-                if (frameStream != null && frameStream.Length > 0)
-                {
-                    frameStream.Position = 0;
-                    VideoPosterImage = new Bitmap(frameStream);
-                }
+                _isSeeking = false;
+                return;
             }
-            catch { }
+            _hasVideoMedia = true;
         }
+
+        IsVideoSessionActive = true;
+
+        if (!IsVideoPlaying)
+        {
+            // Start + immediately pause so the player is in a seekable state
+            _videoPlayer.Play();
+            _videoPlayer.Pause();
+        }
+
+        _videoPlayer.SetPosition(target);
+        _isSeeking = false;
     }
 
     [RelayCommand]
     public void ToggleMute()
     {
-        IsVideoMuted = !IsVideoMuted;
-        _videoPlayer.SetMute(IsVideoMuted);
+        if (IsVideoMuted)
+        {
+            // Unmute
+            IsVideoMuted = false;
+            if (VideoVolume <= 0.01)
+            {
+                VideoVolume = 0.5;
+            }
+            _videoPlayer.SetMute(false);
+            _videoPlayer.SetVolume(VideoVolume);
+            VideoPreferencesService.Instance.SetMuted(false);
+            VideoPreferencesService.Instance.SetVolume(VideoVolume);
+        }
+        else
+        {
+            // Mute
+            IsVideoMuted = true;
+            _videoPlayer.SetMute(true);
+            VideoPreferencesService.Instance.SetMuted(true);
+        }
     }
 
     partial void OnVideoVolumeChanged(double value)
     {
-        _videoPlayer.SetVolume(IsVideoMuted ? 0.0 : value);
-    }
-
-    private int _frameSkip = 0;
-    private async void OnVideoTimerTick(object? sender, EventArgs e)
-    {
-        if (!IsVideoPlaying) return;
-        var current = _videoPlayer.GetPosition();
-        if (current > TimeSpan.Zero)
+        if (value <= 0.001)
         {
-            VideoPosition = current;
-            if (VideoDuration > TimeSpan.Zero && current >= VideoDuration)
+            // Far left: automatically mute
+            if (!IsVideoMuted)
             {
-                PauseVideo();
-                VideoPosition = VideoDuration;
+                IsVideoMuted = true;
+                _videoPlayer.SetMute(true);
+                VideoPreferencesService.Instance.SetMuted(true);
             }
-
-            // Periodically refresh preview frame during playback
-            if (++_frameSkip % 5 == 0 && !string.IsNullOrEmpty(_currentFilePath))
+            _videoPlayer.SetVolume(0.0);
+            VideoPreferencesService.Instance.SetVolume(0.0);
+        }
+        else
+        {
+            // Non-zero: automatically unmute
+            if (IsVideoMuted)
             {
-                try
-                {
-                    var stream = await VideoThumbnailService.Instance.ExtractFrameDirectAsync(_currentFilePath, current, 640, 360);
-                    if (stream != null && stream.Length > 0 && IsVideoPlaying)
-                    {
-                        stream.Position = 0;
-                        VideoPosterImage = new Bitmap(stream);
-                    }
-                }
-                catch { }
+                IsVideoMuted = false;
+                _videoPlayer.SetMute(false);
+                VideoPreferencesService.Instance.SetMuted(false);
             }
+            _videoPlayer.SetVolume(value);
+            VideoPreferencesService.Instance.SetVolume(value);
         }
     }
 
@@ -642,7 +702,6 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
         _isDisposed = true;
         _previewCts?.Cancel();
         _hashingCts?.Cancel();
-        _videoPositionTimer.Stop();
         _videoPlayer.Dispose();
     }
 }

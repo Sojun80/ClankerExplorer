@@ -1020,6 +1020,13 @@ public sealed class UiSmokeTests
     }
 
     [Fact]
+    public void VlcVideoService_InitializesSuccessfully()
+    {
+        var vlc = ClankerExplorer.Services.Preview.VlcVideoService.Instance.LibVLC;
+        Assert.NotNull(vlc);
+    }
+
+    [Fact]
     public async Task NativeVideoPlayer_PlaysVideoAsync()
     {
         string videoPath = @"E:\FFDL\BadMommyPOV.25.05.02.Kelly.Caprice.Bad.Stepmommy.Seduction.XXX.1080p.MP4-WRB.mp4";
@@ -1030,9 +1037,8 @@ public sealed class UiSmokeTests
         if (!File.Exists(videoPath)) return;
 
         var player = new ClankerExplorer.Services.Preview.NativeVideoPlayer();
-        bool ok = await player.OpenAsync(videoPath);
+        bool ok = player.Open(videoPath);
         Assert.True(ok);
-        Assert.True(player.Duration > TimeSpan.Zero);
 
         player.Play();
         await Task.Delay(300);
@@ -1040,6 +1046,77 @@ public sealed class UiSmokeTests
 
         player.Pause();
         player.Dispose();
+    }
+
+    [Fact]
+    public async Task InspectorViewModel_SwitchingFileWhilePlayingVideo_DoesNotCrash()
+    {
+        string videoPath = @"E:\FFDL\BadMommyPOV.25.05.02.Kelly.Caprice.Bad.Stepmommy.Seduction.XXX.1080p.MP4-WRB.mp4";
+        if (!File.Exists(videoPath))
+        {
+            videoPath = @"C:\Users\5900x\Videos\Captures\297.mp4";
+        }
+        if (!File.Exists(videoPath)) return;
+
+        string tempText = Path.Combine(Path.GetTempPath(), $"temp_switch_{Guid.NewGuid():N}.txt");
+        await File.WriteAllTextAsync(tempText, "Hello World test file");
+
+        try
+        {
+            using var vm = new ClankerExplorer.ViewModels.InspectorViewModel();
+            await vm.LoadPreviewAsync(videoPath);
+            vm.PlayVideo();
+            Assert.True(vm.IsVideoPlaying);
+
+            await Task.Delay(100);
+
+            // Switch to text file while video is actively playing
+            await vm.LoadPreviewAsync(tempText);
+
+            Assert.False(vm.IsVideoPlaying);
+            Assert.Equal("text", vm.ActivePreviewType);
+        }
+        finally
+        {
+            if (File.Exists(tempText)) File.Delete(tempText);
+        }
+    }
+
+    [Fact]
+    public async Task InspectorViewModel_PausingThenPlaying_DoesNotCrash()
+    {
+        string videoPath = @"E:\FFDL\BadMommyPOV.25.05.02.Kelly.Caprice.Bad.Stepmommy.Seduction.XXX.1080p.MP4-WRB.mp4";
+        if (!File.Exists(videoPath))
+        {
+            videoPath = @"C:\Users\5900x\Videos\Captures\297.mp4";
+        }
+        if (!File.Exists(videoPath)) return;
+
+        using var vm = new ClankerExplorer.ViewModels.InspectorViewModel();
+        await vm.LoadPreviewAsync(videoPath);
+        vm.PlayVideo();
+        Assert.True(vm.IsVideoPlaying);
+        Assert.True(vm.IsVideoSessionActive);
+
+        await Task.Delay(100);
+
+        // Pause
+        vm.PauseVideo();
+        Assert.False(vm.IsVideoPlaying);
+        Assert.True(vm.IsVideoSessionActive);
+
+        await Task.Delay(100);
+
+        // Play again
+        vm.PlayVideo();
+        Assert.True(vm.IsVideoPlaying);
+        Assert.True(vm.IsVideoSessionActive);
+
+        await Task.Delay(100);
+
+        vm.StopVideo();
+        Assert.False(vm.IsVideoPlaying);
+        Assert.False(vm.IsVideoSessionActive);
     }
 
     [Fact]

@@ -6,6 +6,7 @@
              xmlns:views="clr-namespace:ClankerExplorer.Views"
              xmlns:models="clr-namespace:ClankerExplorer.Models"
              xmlns:preview="clr-namespace:ClankerExplorer.Services.Preview"
+             xmlns:vlc="clr-namespace:LibVLCSharp.Avalonia;assembly=LibVLCSharp.Avalonia"
              x:Class="ClankerExplorer.Views.InspectorPanelView"
              x:DataType="vm:InspectorViewModel"
              mc:Ignorable="d" d:DesignWidth="360" d:DesignHeight="600"
@@ -158,23 +159,31 @@
             <Grid RowDefinitions="*,Auto">
               <!-- Video Viewport -->
               <Panel Grid.Row="0">
-                <Image Source="{Binding VideoPosterImage}"
-                       Stretch="Uniform"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       RenderOptions.BitmapInterpolationMode="HighQuality"/>
+                <!-- LibVLC 60fps Hardware-Accelerated Video Surface (Active during playing & paused session) -->
+                <vlc:VideoView MediaPlayer="{Binding VlcMediaPlayer}"
+                               IsVisible="{Binding IsVideoSessionActive}"
+                               HorizontalAlignment="Stretch"
+                               VerticalAlignment="Stretch"/>
 
-                <!-- Big Central Play Button -->
-                <Button Command="{Binding TogglePlayPauseCommand}"
-                        Classes="power-btn"
-                        Width="56" Height="56" CornerRadius="28"
-                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Padding="0" Background="#99000000" BorderBrush="{DynamicResource AppHighlightBrush}" BorderThickness="2"
-                        ToolTip.Tip="Play Video"
-                        IsVisible="{Binding !IsVideoPlaying}">
-                  <TextBlock Text="▶" FontSize="22" Foreground="{DynamicResource AppHighlightBrush}"
-                             HorizontalAlignment="Center" VerticalAlignment="Center" Margin="3,0,0,0"/>
-                </Button>
+                <!-- Poster Frame / Static Thumbnail (Shown before first play on a file) -->
+                <Panel IsVisible="{Binding !IsVideoSessionActive}">
+                  <Image Source="{Binding VideoPosterImage}"
+                         Stretch="Uniform"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         RenderOptions.BitmapInterpolationMode="HighQuality"/>
+
+                  <!-- Big Central Play Button -->
+                  <Button Command="{Binding TogglePlayPauseCommand}"
+                          Classes="power-btn"
+                          Width="56" Height="56" CornerRadius="28"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Padding="0" Background="#99000000" BorderBrush="{DynamicResource AppHighlightBrush}" BorderThickness="2"
+                          ToolTip.Tip="Play Video">
+                    <TextBlock Text="▶" FontSize="22" Foreground="{DynamicResource AppHighlightBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                  </Button>
+                </Panel>
               </Panel>
 
               <!-- Video Media Controls Toolbar -->

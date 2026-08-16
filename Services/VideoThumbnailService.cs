@@ -171,7 +171,6 @@ public class VideoThumbnailService : IDisposable
             using var mem = new MemoryStream();
             await netStream.CopyToAsync(mem, cancellationToken).ConfigureAwait(false);
             mem.Position = 0;
-
             return new Bitmap(mem);
         }
         catch (OperationCanceledException)
@@ -180,7 +179,15 @@ public class VideoThumbnailService : IDisposable
         }
         catch
         {
-            return null;
+            // Fallback to LibVLC snapshot extraction for exotic codecs/containers
+            try
+            {
+                return await ClankerExplorer.Services.Preview.VlcVideoService.Instance.ExtractSnapshotAsync(filePath, timeOffset, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                return null;
+            }
         }
         finally
         {

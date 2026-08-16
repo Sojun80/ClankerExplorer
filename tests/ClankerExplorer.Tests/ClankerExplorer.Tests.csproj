@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <WindowsSdkPackageVersion>10.0.19041.53</WindowsSdkPackageVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -20,5 +21,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\ClankerExplorer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="LibVLCSharp">
+      <HintPath>..\..\lib\LibVLCSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="LibVLCSharp.Avalonia">
+      <HintPath>..\..\lib\LibVLCSharp.Avalonia.dll</HintPath>
+    </Reference>
+    <None Include="..\..\libvlc\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

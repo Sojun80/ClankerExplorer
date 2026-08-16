@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>LibVLCSharp.Avalonia</name>
+    </assembly>
+    <members>
+        <member name="T:LibVLCSharp.Avalonia.VideoView">
+            <summary>
+            Avalonia VideoView for Windows, Linux and Mac.
+            </summary>
+        </member>
+        <member name="F:LibVLCSharp.Avalonia.VideoView.MediaPlayerProperty">
+            <summary>
+            MediaPlayer Data Bound property
+            </summary>
+            <summary>
+            Defines the <see cref="P:LibVLCSharp.Avalonia.VideoView.MediaPlayer"/> property.
+            </summary>
+        </member>
+        <member name="F:LibVLCSharp.Avalonia.VideoView.ContentProperty">
+            <summary>
+            Defines the <see cref="P:LibVLCSharp.Avalonia.VideoView.Content"/> property.
+            </summary>
+        </member>
+        <member name="P:LibVLCSharp.Avalonia.VideoView.MediaPlayer">
+            <summary>
+            Gets or sets the MediaPlayer that will be displayed.
+            </summary>
+        </member>
+        <member name="P:LibVLCSharp.Avalonia.VideoView.Content">
+            <summary>
+            Gets or sets the content to display.
+            </summary>
+        </member>
+        <member name="M:LibVLCSharp.Avalonia.VideoView.#ctor">
+            <inheritdoc />
+        </member>
+        <member name="M:LibVLCSharp.Avalonia.VideoView.OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs)">
+            <inheritdoc />
+        </member>
+        <member name="M:LibVLCSharp.Avalonia.VideoView.OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs)">
+            <inheritdoc />
+        </member>
+        <member name="M:LibVLCSharp.Avalonia.VideoView.CreateNativeControlCore(Avalonia.Platform.IPlatformHandle)">
+            <inheritdoc />
+        </member>
+        <member name="M:LibVLCSharp.Avalonia.VideoView.DestroyNativeControlCore(Avalonia.Platform.IPlatformHandle)">
+            <inheritdoc />
+        </member>
+    </members>
+</doc>
