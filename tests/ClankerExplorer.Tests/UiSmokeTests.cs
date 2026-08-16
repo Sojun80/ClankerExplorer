@@ -610,4 +610,61 @@ public sealed class UiSmokeTests
         Assert.True(pane.SelectedTab.SortAscending);
         Assert.Equal(220, pane.ThumbnailSize);
     }
+
+    [AvaloniaFact]
+    public void FileIcon_ExtractsAndCachesAssociatedIconsForFiles()
+    {
+        var textFile = new FileItem
+        {
+            Name = "notes.txt",
+            Extension = ".txt",
+            FullPath = @"C:\Fake\notes.txt",
+            IsDirectory = false
+        };
+
+        var folder = new FileItem
+        {
+            Name = "MyFolder",
+            Extension = "",
+            FullPath = @"C:\Fake\MyFolder",
+            IsDirectory = true
+        };
+
+        // Folders return null for FileIcon and retain their folder vector icon
+        Assert.Null(folder.FileIcon);
+        Assert.False(folder.HasFileIcon);
+
+        // Files obtain an icon
+        var icon1 = textFile.FileIcon;
+        var icon2 = textFile.FileIcon;
+
+        // Caching returns identical image reference
+        Assert.Same(icon1, icon2);
+
+        // Same extension on another FileItem reuses cached icon from FileIconService
+        var textFile2 = new FileItem
+        {
+            Name = "todo.txt",
+            Extension = ".txt",
+            FullPath = @"C:\Another\todo.txt",
+            IsDirectory = false
+        };
+
+        Assert.Same(icon1, textFile2.FileIcon);
+
+        // Unknown extension gets generic file icon
+        var unknownFile = new FileItem
+        {
+            Name = "data.xyz123random",
+            Extension = ".xyz123random",
+            FullPath = @"C:\Fake\data.xyz123random",
+            IsDirectory = false
+        };
+
+        var unknownIcon = unknownFile.FileIcon;
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.NotNull(unknownIcon);
+        }
+    }
 }
