@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -988,17 +989,37 @@ public class FileSystemService
 
     public void OpenWith(string filePath)
     {
-        if (!File.Exists(filePath)) return;
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return;
         try
         {
             if (OperatingSystem.IsWindows())
             {
-                Process.Start(new ProcessStartInfo
+                var fullPath = Path.GetFullPath(filePath);
+                var openAsInfo = new OPENASINFO
                 {
-                    FileName = "rundll32.exe",
-                    Arguments = $"shell32.dll,OpenAs_RunDLL \"{filePath}\"",
-                    UseShellExecute = true
-                });
+                    pcszFile = fullPath,
+                    pcszClass = null,
+                    oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_EXEC
+                };
+
+                int hr = SHOpenWithDialog(IntPtr.Zero, ref openAsInfo);
+                // 0 = S_OK; 0x800704C7 = user cancelled dialog; otherwise try ShellExecute openas verb fallback
+                if (hr != 0 && hr != unchecked((int)0x800704C7) && hr != unchecked((int)0x80004005))
+                {
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = fullPath,
+                            UseShellExecute = true,
+                            Verb = "openas"
+                        });
+                    }
+                    catch (Exception exFallback)
+                    {
+                        Debug.WriteLine($"Open With verb fallback failed: {exFallback.Message}");
+                    }
+                }
             }
             else
             {
@@ -1008,6 +1029,26 @@ public class FileSystemService
         catch (Exception ex)
         {
             Debug.WriteLine($"Failed to launch Open With: {ex.Message}");
+            try
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = Path.GetFullPath(filePath),
+                        UseShellExecute = true,
+                        Verb = "openas"
+                    });
+                }
+                else
+                {
+                    OpenItem(filePath);
+                }
+            }
+            catch (Exception ex2)
+            {
+                Debug.WriteLine($"Open With secondary fallback failed: {ex2.Message}");
+            }
         }
     }
 
@@ -1105,4 +1146,20 @@ public class FileSystemService
 
     private static bool IsHexApplicable(string ext) =>
         new[] { ".exe", ".dll", ".so", ".bin", ".dat", ".iso", ".sys", ".db", ".sqlite", ".obj", ".class" }.Contains(ext);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct OPENASINFO
+    {
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string pcszFile;
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string? pcszClass;
+        public int oaifInFlags;
+    }
+
+    private const int OAIF_ALLOW_REGISTRATION = 0x00000001; // Allow "Always use this app" checkbox
+    private const int OAIF_EXEC = 0x00000004;               // Execute the chosen application with the file
+
+    [DllImport("shell32.dll", EntryPoint = "SHOpenWithDialog", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int SHOpenWithDialog(IntPtr hwndParent, ref OPENASINFO poainfo);
 }

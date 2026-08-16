@@ -115,4 +115,15 @@ public sealed class FileSystemServiceTests
         Assert.False(Directory.Exists(folder));
         Assert.True(Directory.Exists(fs.Root));
     }
+
+    [Fact]
+    public void OpenWith_NonExistentOrInvalidFile_DoesNotThrow()
+    {
+        var ex1 = Record.Exception(() => _service.OpenWith(""));
+        var ex2 = Record.Exception(() => _service.OpenWith(@"C:\non_existent_file_xyz_123.fake"));
+        var ex3 = Record.Exception(() => _service.OpenWith("   "));
+        Assert.Null(ex1);
+        Assert.Null(ex2);
+        Assert.Null(ex3);
+    }
 }

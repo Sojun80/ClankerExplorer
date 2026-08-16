@@ -993,9 +993,9 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    public void OpenWith()
+    public void OpenWith(FileItem? item = null)
     {
-        var target = SelectedTab?.SelectedItem;
+        var target = item ?? SelectedTab?.SelectedItem;
         if (target != null && !target.IsDirectory)
         {
             FileSystemService.Instance.OpenWith(target.FullPath);
