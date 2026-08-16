@@ -248,28 +248,9 @@
 
           <TextBlock Text="|" Foreground="{DynamicResource AppBorderBrush}" VerticalAlignment="Center" Margin="2,0"/>
 
-          <!-- View Mode Toggle Buttons -->
-          <Border Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
-                  BorderThickness="1" CornerRadius="4" Padding="2" VerticalAlignment="Center">
-            <StackPanel Orientation="Horizontal" Spacing="2">
-              <ToggleButton IsChecked="{Binding IsDetailsView, Mode=OneWay}"
-                            Command="{Binding SetDetailsViewCommand}"
-                            Classes="power-btn" Padding="6,2" Height="22"
-                            ToolTip.Tip="Details View (Sortable List)">
-                <TextBlock Text="📑 Details" FontSize="11" FontWeight="SemiBold"/>
-              </ToggleButton>
-              <ToggleButton IsChecked="{Binding IsThumbnailView, Mode=OneWay}"
-                            Command="{Binding SetThumbnailViewCommand}"
-                            Classes="power-btn" Padding="6,2" Height="22"
-                            ToolTip.Tip="Thumbnails View (Visual Grid)">
-                <TextBlock Text="🖼️ Thumbnails" FontSize="11" FontWeight="SemiBold"/>
-              </ToggleButton>
-            </StackPanel>
-          </Border>
-
           <!-- Thumbnail Controls: Size Slider + Sort Dropdown (Visible in Thumbnail Mode) -->
           <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
-                      IsVisible="{Binding IsThumbnailView}" Margin="4,0,0,0">
+                      IsVisible="{Binding IsThumbnailView}" Margin="0,0,2,0">
             <!-- Thumbnail Size Slider -->
             <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
               <TextBlock Text="🔍" FontSize="10" VerticalAlignment="Center" Foreground="{DynamicResource AppSubTextBrush}"/>
@@ -324,7 +305,28 @@
                 <TextBlock Text="▾" FontSize="9" VerticalAlignment="Center" Foreground="{DynamicResource AppSubTextBrush}"/>
               </StackPanel>
             </Button>
+
+            <TextBlock Text="|" Foreground="{DynamicResource AppBorderBrush}" VerticalAlignment="Center" Margin="2,0"/>
           </StackPanel>
+
+          <!-- View Mode Toggle Buttons (Far Right) -->
+          <Border Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                  BorderThickness="1" CornerRadius="4" Padding="2" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <ToggleButton IsChecked="{Binding IsDetailsView, Mode=OneWay}"
+                            Command="{Binding SetDetailsViewCommand}"
+                            Classes="power-btn" Padding="6,2" Height="22"
+                            ToolTip.Tip="Details View (Sortable List)">
+                <TextBlock Text="📑 Details" FontSize="11" FontWeight="SemiBold"/>
+              </ToggleButton>
+              <ToggleButton IsChecked="{Binding IsThumbnailView, Mode=OneWay}"
+                            Command="{Binding SetThumbnailViewCommand}"
+                            Classes="power-btn" Padding="6,2" Height="22"
+                            ToolTip.Tip="Thumbnails View (Visual Grid)">
+                <TextBlock Text="🖼️ Thumbnails" FontSize="11" FontWeight="SemiBold"/>
+              </ToggleButton>
+            </StackPanel>
+          </Border>
         </StackPanel>
       </Grid>
     </Border>
