@@ -516,7 +516,7 @@ public class ThumbnailService : IDisposable
         SIIGBF_INCACHEONLY = 0x10
     }
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern int SHCreateItemFromParsingName(
         [In, MarshalAs(UnmanagedType.LPWStr)] string pszPath,
         [In] IntPtr pbc,
