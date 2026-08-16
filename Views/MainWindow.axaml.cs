@@ -99,7 +99,7 @@ public partial class MainWindow : Window
                         var res = await dlg.ShowDialog<bool>(this);
                         if (res)
                         {
-                            int targetSize = (int)vm.ActivePane.ThumbnailSize;
+                            int targetSize = Math.Max(256, (int)vm.ActivePane.ThumbnailSize);
                             var newBmp = await VideoThumbnailService.Instance.ExtractFrameAtTimeAsync(item.FullPath, dlg.TargetTimeSpan, targetSize);
                             if (newBmp != null)
                             {

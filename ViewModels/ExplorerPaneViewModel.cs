@@ -1050,7 +1050,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         var target = item ?? SelectedTab?.SelectedItem;
         if (target == null || target.IsDirectory || string.IsNullOrEmpty(target.FullPath) || !VideoThumbnailService.IsVideoFile(target.FullPath)) return;
 
-        int targetSize = (int)ThumbnailSize;
+        int targetSize = Math.Max(256, (int)ThumbnailSize);
         var newBmp = await VideoThumbnailService.Instance.ExtractNextDepthFrameAsync(target.FullPath, targetSize);
         if (newBmp != null)
         {

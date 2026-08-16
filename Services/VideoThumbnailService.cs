@@ -2,18 +2,16 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform;
+using Windows.Media.Editing;
+using Windows.Storage;
 
 namespace ClankerExplorer.Services;
 
 /// <summary>
-/// Intelligent video thumbnail extraction service using Windows Media Foundation
-/// and Windows Shell Property System.
+/// Hardware-accelerated video thumbnail and frame extraction service using Windows MediaComposition.
 /// </summary>
 public class VideoThumbnailService : IDisposable
 {
@@ -29,22 +27,13 @@ public class VideoThumbnailService : IDisposable
         ".nsv", ".f4v", ".f4p", ".f4a", ".f4b"
     };
 
-    // Candidate seek percentage ratios: 10%, 25%, 40%, 55%, 70%
-    private static readonly double[] CandidateRatios = new[] { 0.10, 0.25, 0.40, 0.55, 0.70 };
-
     // Depth ratios used when cycling "New Thumbnail": 15%, 30%, 45%, 60%, 75%, 90%
     private static readonly double[] DepthRatios = new[] { 0.15, 0.30, 0.45, 0.60, 0.75, 0.90 };
     private readonly ConcurrentDictionary<string, int> _depthIndexByPath = new(StringComparer.OrdinalIgnoreCase);
 
-    // Throttle concurrent video decodes so large folders do not overwhelm CPU / disk / hardware decoders
-    private readonly SemaphoreSlim _decodeThrottle = new(2, 2);
-    private bool _mfInitialized;
+    // Throttle concurrent video decodes so disk/GPU are not overwhelmed
+    private readonly SemaphoreSlim _decodeThrottle = new(3, 3);
     private bool _isDisposed;
-
-    public VideoThumbnailService()
-    {
-        InitializeMediaFoundation();
-    }
 
     public static bool IsVideoFile(string filePath)
     {
@@ -111,71 +100,16 @@ public class VideoThumbnailService : IDisposable
     {
         if (!OperatingSystem.IsWindows() || !File.Exists(filePath)) return TimeSpan.Zero;
 
-        return await Task.Run(() =>
-        {
-            try
-            {
-                // Primary: Windows Shell Property System (PKEY_Media_Duration)
-                Guid shellItem2Guid = new("7e9fb0d3-919f-4307-ab2e-9b1860310c93");
-                if (SHCreateItemFromParsingName(filePath, IntPtr.Zero, ref shellItem2Guid, out IntPtr shellItem2Ptr) == 0 && shellItem2Ptr != IntPtr.Zero)
-                {
-                    try
-                    {
-                        IntPtr vtable = Marshal.ReadIntPtr(shellItem2Ptr);
-                        var getUInt64 = Marshal.GetDelegateForFunctionPointer<GetUInt64Delegate>(Marshal.ReadIntPtr(vtable, 17 * IntPtr.Size));
-                        PROPERTYKEY pkeyDuration = new() { fmtid = new Guid("64440490-4c8b-11d1-8b70-080036b11a03"), pid = 3 };
-
-                        if (getUInt64(shellItem2Ptr, ref pkeyDuration, out ulong duration100ns) == 0 && duration100ns > 0)
-                        {
-                            return TimeSpan.FromTicks((long)duration100ns);
-                        }
-                    }
-                    finally
-                    {
-                        var release = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(shellItem2Ptr), 2 * IntPtr.Size));
-                        release(shellItem2Ptr);
-                    }
-                }
-            }
-            catch { }
-            return TimeSpan.Zero;
-        }, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Retrieves native video dimensions (width, height) using Windows Shell Properties.
-    /// </summary>
-    public static (int Width, int Height) GetVideoDimensions(string filePath)
-    {
-        if (!OperatingSystem.IsWindows() || !File.Exists(filePath)) return (1920, 1080);
-
         try
         {
-            Guid shellItem2Guid = new("7e9fb0d3-919f-4307-ab2e-9b1860310c93");
-            if (SHCreateItemFromParsingName(filePath, IntPtr.Zero, ref shellItem2Guid, out IntPtr shellItem2Ptr) == 0 && shellItem2Ptr != IntPtr.Zero)
-            {
-                try
-                {
-                    IntPtr vtable = Marshal.ReadIntPtr(shellItem2Ptr);
-                    var getUInt32 = Marshal.GetDelegateForFunctionPointer<GetUInt32Delegate>(Marshal.ReadIntPtr(vtable, 16 * IntPtr.Size));
-                    PROPERTYKEY pkeyW = new() { fmtid = new Guid("64440490-4c8b-11d1-8b70-080036b11a03"), pid = 4 };
-                    PROPERTYKEY pkeyH = new() { fmtid = new Guid("64440490-4c8b-11d1-8b70-080036b11a03"), pid = 5 };
-
-                    getUInt32(shellItem2Ptr, ref pkeyW, out uint w);
-                    getUInt32(shellItem2Ptr, ref pkeyH, out uint h);
-
-                    if (w > 0 && h > 0) return ((int)w, (int)h);
-                }
-                finally
-                {
-                    var release = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(shellItem2Ptr), 2 * IntPtr.Size));
-                    release(shellItem2Ptr);
-                }
-            }
+            var storageFile = await StorageFile.GetFileFromPathAsync(filePath).AsTask(cancellationToken).ConfigureAwait(false);
+            var clip = await MediaClip.CreateFromFileAsync(storageFile).AsTask(cancellationToken).ConfigureAwait(false);
+            return clip.OriginalDuration;
         }
-        catch { }
-
-        return (1920, 1080);
+        catch
+        {
+            return TimeSpan.Zero;
+        }
     }
 
     /// <summary>
@@ -185,7 +119,7 @@ public class VideoThumbnailService : IDisposable
     {
         if (_isDisposed || !File.Exists(filePath)) return null;
 
-        var duration = await GetVideoDurationAsync(filePath, cancellationToken);
+        var duration = await GetVideoDurationAsync(filePath, cancellationToken).ConfigureAwait(false);
         if (duration <= TimeSpan.Zero)
         {
             duration = TimeSpan.FromSeconds(30);
@@ -195,7 +129,7 @@ public class VideoThumbnailService : IDisposable
         double ratio = DepthRatios[nextIndex];
         var targetTime = TimeSpan.FromTicks((long)(duration.Ticks * ratio));
 
-        return await ExtractFrameAtTimeAsync(filePath, targetTime, targetSize, cancellationToken);
+        return await ExtractFrameAtTimeAsync(filePath, targetTime, targetSize, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -203,14 +137,42 @@ public class VideoThumbnailService : IDisposable
     /// </summary>
     public async Task<Bitmap?> ExtractFrameAtTimeAsync(string filePath, TimeSpan timeOffset, int targetSize, CancellationToken cancellationToken = default)
     {
-        if (_isDisposed || !File.Exists(filePath)) return null;
+        if (_isDisposed || !OperatingSystem.IsWindows() || !File.Exists(filePath)) return null;
+
+        if (targetSize <= 0) targetSize = 256;
 
         await _decodeThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (cancellationToken.IsCancellationRequested) return null;
 
-            return await Task.Run(() => ExtractSingleFrame(filePath, timeOffset.Ticks, targetSize, cancellationToken), cancellationToken).ConfigureAwait(false);
+            var storageFile = await StorageFile.GetFileFromPathAsync(filePath).AsTask(cancellationToken).ConfigureAwait(false);
+            var clip = await MediaClip.CreateFromFileAsync(storageFile).AsTask(cancellationToken).ConfigureAwait(false);
+
+            if (timeOffset < TimeSpan.Zero) timeOffset = TimeSpan.Zero;
+            if (clip.OriginalDuration > TimeSpan.Zero && timeOffset > clip.OriginalDuration)
+            {
+                timeOffset = clip.OriginalDuration - TimeSpan.FromMilliseconds(100);
+                if (timeOffset < TimeSpan.Zero) timeOffset = TimeSpan.Zero;
+            }
+
+            var composition = new MediaComposition();
+            composition.Clips.Add(clip);
+
+            var imageStream = await composition.GetThumbnailAsync(
+                timeOffset,
+                targetSize,
+                0,
+                VideoFramePrecision.NearestFrame).AsTask(cancellationToken).ConfigureAwait(false);
+
+            if (imageStream == null || imageStream.Size == 0) return null;
+
+            using var netStream = imageStream.AsStreamForRead();
+            using var mem = new MemoryStream();
+            await netStream.CopyToAsync(mem, cancellationToken).ConfigureAwait(false);
+            mem.Position = 0;
+
+            return new Bitmap(mem);
         }
         catch (OperationCanceledException)
         {
@@ -227,354 +189,17 @@ public class VideoThumbnailService : IDisposable
     }
 
     /// <summary>
-    /// Asynchronously extracts the best representative video thumbnail using smart candidate scoring.
+    /// Asynchronously extracts the best representative video thumbnail using default offset (10% depth).
     /// </summary>
     public async Task<Bitmap?> ExtractSmartVideoThumbnailAsync(string filePath, int targetSize, CancellationToken cancellationToken = default)
     {
-        if (_isDisposed || !File.Exists(filePath)) return null;
-
-        await _decodeThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (cancellationToken.IsCancellationRequested) return null;
-
-            var duration = await GetVideoDurationAsync(filePath, cancellationToken).ConfigureAwait(false);
-            return await Task.Run(() => ExtractBestFrame(filePath, duration, targetSize, cancellationToken), cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return null;
-        }
-        catch
-        {
-            return null;
-        }
-        finally
-        {
-            _decodeThrottle.Release();
-        }
+        return await ExtractFrameAtTimeAsync(filePath, TimeSpan.FromSeconds(2), targetSize, cancellationToken).ConfigureAwait(false);
     }
 
-    private Bitmap? ExtractSingleFrame(string filePath, long seekTicks, int targetSize, CancellationToken cancellationToken)
-    {
-        if (!OperatingSystem.IsWindows() || !_mfInitialized) return null;
-
-        CoInitializeEx(IntPtr.Zero, 0 /* COINIT_MULTITHREADED */);
-
-        IntPtr readerPtr = IntPtr.Zero;
-        IntPtr attrPtr = IntPtr.Zero;
-        IntPtr mediaTypePtr = IntPtr.Zero;
-
-        try
-        {
-            int hr = MFCreateAttributes(out attrPtr, 1);
-            if (hr == 0 && attrPtr != IntPtr.Zero)
-            {
-                IntPtr attrVtbl = Marshal.ReadIntPtr(attrPtr);
-                var setUint32 = Marshal.GetDelegateForFunctionPointer<SetUINT32Delegate>(Marshal.ReadIntPtr(attrVtbl, 21 * IntPtr.Size));
-                Guid enableVideoProcGuid = new("fb394f3d-ccf1-42ee-bb0c-857852e0e6d6");
-                setUint32(attrPtr, ref enableVideoProcGuid, 1);
-            }
-
-            hr = MFCreateSourceReaderFromURL(filePath, attrPtr, out readerPtr);
-            if (hr != 0 || readerPtr == IntPtr.Zero) return null;
-
-            IntPtr readerVtbl = Marshal.ReadIntPtr(readerPtr);
-            var setMediaType = Marshal.GetDelegateForFunctionPointer<SetCurrentMediaTypeDelegate>(Marshal.ReadIntPtr(readerVtbl, 7 * IntPtr.Size));
-            var setPosition = Marshal.GetDelegateForFunctionPointer<SetCurrentPositionDelegate>(Marshal.ReadIntPtr(readerVtbl, 8 * IntPtr.Size));
-            var readSample = Marshal.GetDelegateForFunctionPointer<ReadSampleDelegate>(Marshal.ReadIntPtr(readerVtbl, 9 * IntPtr.Size));
-            var setStreamSelection = Marshal.GetDelegateForFunctionPointer<SetStreamSelectionDelegate>(Marshal.ReadIntPtr(readerVtbl, 4 * IntPtr.Size));
-
-            // Create RGB32 media type
-            hr = MFCreateMediaType(out mediaTypePtr);
-            if (hr == 0 && mediaTypePtr != IntPtr.Zero)
-            {
-                IntPtr typeVtbl = Marshal.ReadIntPtr(mediaTypePtr);
-                var setGuid = Marshal.GetDelegateForFunctionPointer<SetGUIDDelegate>(Marshal.ReadIntPtr(typeVtbl, 24 * IntPtr.Size));
-
-                Guid mfMtMajorType = new("48eba18e-f829-4679-a7e0-4924f7f40717");
-                Guid mfMediaTypeVideo = new("73646976-0000-0010-8000-00aa00389b71");
-                Guid mfMtSubType = new("f7e34c9a-4296-440b-8386-cc4a00c20f5d");
-                Guid mfVideoFormatRGB32 = new("00000016-0000-0010-8000-00aa00389b71");
-
-                setGuid(mediaTypePtr, ref mfMtMajorType, ref mfMediaTypeVideo);
-                setGuid(mediaTypePtr, ref mfMtSubType, ref mfVideoFormatRGB32);
-
-                setMediaType(readerPtr, 0xfffffffc, IntPtr.Zero, mediaTypePtr);
-            }
-
-            setStreamSelection(readerPtr, 0xfffffffc, true);
-
-            // Seek to target timestamp
-            var propVar = new PROPVARIANT { vt = 20 /* VT_I8 */, hVal = seekTicks };
-            Guid timeFormat = Guid.Empty;
-            try
-            {
-                setPosition(readerPtr, ref timeFormat, ref propVar);
-            }
-            catch { }
-
-            IntPtr samplePtr = IntPtr.Zero;
-            for (int retry = 0; retry < 30; retry++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int readHr = readSample(readerPtr, 0xfffffffc, 0, out _, out uint streamFlags, out _, out samplePtr);
-                if (readHr != 0 || (streamFlags & 0x00000200 /* MF_SOURCE_READERF_ENDOFSTREAM */) != 0) break;
-                if (samplePtr != IntPtr.Zero) break;
-            }
-
-            if (samplePtr != IntPtr.Zero)
-            {
-                try
-                {
-                    var candidate = ExtractCandidateFrameDirect(readerPtr, samplePtr, filePath);
-                    if (candidate != null)
-                    {
-                        return CreateBitmapFromCandidate(candidate.Value, targetSize);
-                    }
-                }
-                finally
-                {
-                    var sampleRel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(samplePtr), 2 * IntPtr.Size));
-                    sampleRel(samplePtr);
-                }
-            }
-        }
-        catch { }
-        finally
-        {
-            if (mediaTypePtr != IntPtr.Zero)
-            {
-                var typeRel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(mediaTypePtr), 2 * IntPtr.Size));
-                typeRel(mediaTypePtr);
-            }
-            if (readerPtr != IntPtr.Zero)
-            {
-                var readerRel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(readerPtr), 2 * IntPtr.Size));
-                readerRel(readerPtr);
-            }
-            if (attrPtr != IntPtr.Zero)
-            {
-                var attrRel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(attrPtr), 2 * IntPtr.Size));
-                attrRel(attrPtr);
-            }
-        }
-
-        return null;
-    }
-
-    private Bitmap? ExtractBestFrame(string filePath, TimeSpan duration, int targetSize, CancellationToken cancellationToken)
-    {
-        if (!OperatingSystem.IsWindows() || !_mfInitialized) return null;
-
-        CoInitializeEx(IntPtr.Zero, 0 /* COINIT_MULTITHREADED */);
-
-        IntPtr readerPtr = IntPtr.Zero;
-        IntPtr attrPtr = IntPtr.Zero;
-        IntPtr mediaTypePtr = IntPtr.Zero;
-
-        try
-        {
-            int hr = MFCreateAttributes(out attrPtr, 1);
-            if (hr == 0 && attrPtr != IntPtr.Zero)
-            {
-                IntPtr attrVtbl = Marshal.ReadIntPtr(attrPtr);
-                var setUint32 = Marshal.GetDelegateForFunctionPointer<SetUINT32Delegate>(Marshal.ReadIntPtr(attrVtbl, 21 * IntPtr.Size));
-                Guid enableVideoProcGuid = new("fb394f3d-ccf1-42ee-bb0c-857852e0e6d6");
-                setUint32(attrPtr, ref enableVideoProcGuid, 1);
-            }
-
-            hr = MFCreateSourceReaderFromURL(filePath, attrPtr, out readerPtr);
-            if (hr != 0 || readerPtr == IntPtr.Zero) return null;
-
-            IntPtr readerVtbl = Marshal.ReadIntPtr(readerPtr);
-            var setMediaType = Marshal.GetDelegateForFunctionPointer<SetCurrentMediaTypeDelegate>(Marshal.ReadIntPtr(readerVtbl, 7 * IntPtr.Size));
-            var setPosition = Marshal.GetDelegateForFunctionPointer<SetCurrentPositionDelegate>(Marshal.ReadIntPtr(readerVtbl, 8 * IntPtr.Size));
-            var readSample = Marshal.GetDelegateForFunctionPointer<ReadSampleDelegate>(Marshal.ReadIntPtr(readerVtbl, 9 * IntPtr.Size));
-            var setStreamSelection = Marshal.GetDelegateForFunctionPointer<SetStreamSelectionDelegate>(Marshal.ReadIntPtr(readerVtbl, 4 * IntPtr.Size));
-
-            // Create RGB32 media type
-            hr = MFCreateMediaType(out mediaTypePtr);
-            if (hr == 0 && mediaTypePtr != IntPtr.Zero)
-            {
-                IntPtr typeVtbl = Marshal.ReadIntPtr(mediaTypePtr);
-                var setGuid = Marshal.GetDelegateForFunctionPointer<SetGUIDDelegate>(Marshal.ReadIntPtr(typeVtbl, 24 * IntPtr.Size));
-
-                Guid mfMtMajorType = new("48eba18e-f829-4679-a7e0-4924f7f40717");
-                Guid mfMediaTypeVideo = new("73646976-0000-0010-8000-00aa00389b71");
-                Guid mfMtSubType = new("f7e34c9a-4296-440b-8386-cc4a00c20f5d");
-                Guid mfVideoFormatRGB32 = new("00000016-0000-0010-8000-00aa00389b71");
-
-                setGuid(mediaTypePtr, ref mfMtMajorType, ref mfMediaTypeVideo);
-                setGuid(mediaTypePtr, ref mfMtSubType, ref mfVideoFormatRGB32);
-
-                setMediaType(readerPtr, 0xfffffffc, IntPtr.Zero, mediaTypePtr);
-            }
-
-            setStreamSelection(readerPtr, 0xfffffffc, true);
-
-            // Duration in ticks
-            long durationTicks = duration > TimeSpan.Zero ? duration.Ticks : (30L * TimeSpan.TicksPerSecond);
-
-            CandidateFrame? bestCandidate = null;
-            double bestScore = double.MinValue;
-
-            foreach (double ratio in CandidateRatios)
-            {
-                if (cancellationToken.IsCancellationRequested) break;
-
-                long seekTicks = (long)(durationTicks * ratio);
-                var propVar = new PROPVARIANT { vt = 20 /* VT_I8 */, hVal = seekTicks };
-                Guid timeFormat = Guid.Empty;
-
-                try
-                {
-                    setPosition(readerPtr, ref timeFormat, ref propVar);
-                }
-                catch { }
-
-                IntPtr samplePtr = IntPtr.Zero;
-                for (int retry = 0; retry < 15; retry++)
-                {
-                    int readHr = readSample(readerPtr, 0xfffffffc, 0, out _, out uint streamFlags, out _, out samplePtr);
-                    if (readHr != 0 || (streamFlags & 0x00000200) != 0 || samplePtr != IntPtr.Zero) break;
-                }
-
-                if (samplePtr != IntPtr.Zero)
-                {
-                    try
-                    {
-                        var candidate = ExtractCandidateFrameDirect(readerPtr, samplePtr, filePath);
-                        if (candidate != null)
-                        {
-                            double score = ScoreCandidateFrame(candidate.Value.Pixels, candidate.Value.Width, candidate.Value.Height);
-                            if (score > bestScore)
-                            {
-                                bestScore = score;
-                                bestCandidate = candidate;
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        var sampleRel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(samplePtr), 2 * IntPtr.Size));
-                        sampleRel(samplePtr);
-                    }
-                }
-            }
-
-            if (bestCandidate.HasValue)
-            {
-                return CreateBitmapFromCandidate(bestCandidate.Value, targetSize);
-            }
-        }
-        catch { }
-        finally
-        {
-            if (mediaTypePtr != IntPtr.Zero)
-            {
-                var typeRel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(mediaTypePtr), 2 * IntPtr.Size));
-                typeRel(mediaTypePtr);
-            }
-            if (readerPtr != IntPtr.Zero)
-            {
-                var readerRel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(readerPtr), 2 * IntPtr.Size));
-                readerRel(readerPtr);
-            }
-            if (attrPtr != IntPtr.Zero)
-            {
-                var attrRel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(attrPtr), 2 * IntPtr.Size));
-                attrRel(attrPtr);
-            }
-        }
-
-        return null;
-    }
-
-    private static CandidateFrame? ExtractCandidateFrameDirect(IntPtr readerPtr, IntPtr samplePtr, string filePath)
-    {
-        IntPtr bufferPtr = IntPtr.Zero;
-        IntPtr curMediaTypePtr = IntPtr.Zero;
-
-        try
-        {
-            // Convert to contiguous buffer (slot 41)
-            IntPtr sampleVtbl = Marshal.ReadIntPtr(samplePtr);
-            var convertToBuffer = Marshal.GetDelegateForFunctionPointer<ConvertToContiguousBufferDelegate>(Marshal.ReadIntPtr(sampleVtbl, 41 * IntPtr.Size));
-            int hr = convertToBuffer(samplePtr, out bufferPtr);
-            if (hr != 0 || bufferPtr == IntPtr.Zero) return null;
-
-            IntPtr bufferVtbl = Marshal.ReadIntPtr(bufferPtr);
-            var lockBuffer = Marshal.GetDelegateForFunctionPointer<LockDelegate>(Marshal.ReadIntPtr(bufferVtbl, 3 * IntPtr.Size));
-            var unlockBuffer = Marshal.GetDelegateForFunctionPointer<UnlockDelegate>(Marshal.ReadIntPtr(bufferVtbl, 4 * IntPtr.Size));
-
-            hr = lockBuffer(bufferPtr, out IntPtr pData, out uint maxLen, out uint currentLen);
-            if (hr != 0 || pData == IntPtr.Zero || currentLen == 0) return null;
-
-            try
-            {
-                var dims = GetVideoDimensions(filePath);
-                int width = dims.Width;
-                int height = dims.Height;
-
-                if (width <= 0 || height <= 0)
-                {
-                    // Fallback to 16:9 ratio based on byte length
-                    int pixelCount = (int)(currentLen / 4);
-                    if (pixelCount > 0)
-                    {
-                        width = (int)Math.Sqrt(pixelCount * (16.0 / 9.0));
-                        height = pixelCount / Math.Max(1, width);
-                    }
-                }
-
-                if (width <= 0 || height <= 0) return null;
-
-                int byteCount = Math.Min((int)currentLen, width * height * 4);
-                byte[] pixelData = new byte[byteCount];
-                Marshal.Copy(pData, pixelData, 0, byteCount);
-
-                return new CandidateFrame(pixelData, width, height);
-            }
-            finally
-            {
-                unlockBuffer(bufferPtr);
-            }
-        }
-        catch
-        {
-            return null;
-        }
-        finally
-        {
-            if (curMediaTypePtr != IntPtr.Zero)
-            {
-                var rel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(curMediaTypePtr), 2 * IntPtr.Size));
-                rel(curMediaTypePtr);
-            }
-            if (bufferPtr != IntPtr.Zero)
-            {
-                var rel = Marshal.GetDelegateForFunctionPointer<ReleaseDelegate>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(bufferPtr), 2 * IntPtr.Size));
-                rel(bufferPtr);
-            }
-        }
-    }
-
-    private readonly struct CandidateFrame
-    {
-        public readonly byte[] Pixels;
-        public readonly int Width;
-        public readonly int Height;
-
-        public CandidateFrame(byte[] pixels, int width, int height)
-        {
-            Pixels = pixels;
-            Width = width;
-            Height = height;
-        }
-    }
-
+    /// <summary>
+    /// Scores a candidate frame based on luminance distribution, contrast/variance,
+    /// edge detail density, and penalties for solid black/white/blank frames.
+    /// </summary>
     public static double ScoreCandidateFrame(byte[] bgraPixels, int width, int height)
     {
         if (bgraPixels == null || bgraPixels.Length < 4 || width <= 0 || height <= 0) return double.MinValue;
@@ -652,191 +277,10 @@ public class VideoThumbnailService : IDisposable
         return contrastReward + detailReward - penalty - brightnessPenalty;
     }
 
-    private static Bitmap CreateBitmapFromCandidate(CandidateFrame frame, int targetSize)
-    {
-        int srcW = frame.Width;
-        int srcH = frame.Height;
-
-        if (srcW <= targetSize && srcH <= targetSize)
-        {
-            var direct = new WriteableBitmap(
-                new PixelSize(srcW, srcH),
-                new Vector(96, 96),
-                PixelFormat.Bgra8888,
-                AlphaFormat.Premul);
-
-            using (var fb = direct.Lock())
-            {
-                int copyLen = Math.Min(frame.Pixels.Length, srcW * srcH * 4);
-                Marshal.Copy(frame.Pixels, 0, fb.Address, copyLen);
-            }
-            return direct;
-        }
-
-        double scale = Math.Min((double)targetSize / srcW, (double)targetSize / srcH);
-        int dstW = Math.Max(1, (int)(srcW * scale));
-        int dstH = Math.Max(1, (int)(srcH * scale));
-
-        byte[] dstPixels = new byte[dstW * dstH * 4];
-        double scaleX = (double)srcW / dstW;
-        double scaleY = (double)srcH / dstH;
-
-        for (int dy = 0; dy < dstH; dy++)
-        {
-            int sy = Math.Clamp((int)(dy * scaleY), 0, srcH - 1);
-            int srcRowOffset = sy * srcW * 4;
-            int dstRowOffset = dy * dstW * 4;
-
-            for (int dx = 0; dx < dstW; dx++)
-            {
-                int sx = Math.Clamp((int)(dx * scaleX), 0, srcW - 1);
-                int srcPixelOffset = srcRowOffset + sx * 4;
-                int dstPixelOffset = dstRowOffset + dx * 4;
-
-                if (srcPixelOffset + 3 < frame.Pixels.Length && dstPixelOffset + 3 < dstPixels.Length)
-                {
-                    dstPixels[dstPixelOffset] = frame.Pixels[srcPixelOffset];
-                    dstPixels[dstPixelOffset + 1] = frame.Pixels[srcPixelOffset + 1];
-                    dstPixels[dstPixelOffset + 2] = frame.Pixels[srcPixelOffset + 2];
-                    dstPixels[dstPixelOffset + 3] = frame.Pixels[srcPixelOffset + 3];
-                }
-            }
-        }
-
-        var result = new WriteableBitmap(
-            new PixelSize(dstW, dstH),
-            new Vector(96, 96),
-            PixelFormat.Bgra8888,
-            AlphaFormat.Premul);
-
-        using (var fb = result.Lock())
-        {
-            Marshal.Copy(dstPixels, 0, fb.Address, dstPixels.Length);
-        }
-
-        return result;
-    }
-
-    private void InitializeMediaFoundation()
-    {
-        if (!OperatingSystem.IsWindows()) return;
-        try
-        {
-            CoInitializeEx(IntPtr.Zero, 0 /* COINIT_MULTITHREADED */);
-            int hr = MFStartup(0x00020070, 1);
-            _mfInitialized = (hr == 0);
-        }
-        catch
-        {
-            _mfInitialized = false;
-        }
-    }
-
     public void Dispose()
     {
         if (_isDisposed) return;
         _isDisposed = true;
-
-        if (_mfInitialized && OperatingSystem.IsWindows())
-        {
-            try { MFShutdown(); } catch { }
-            _mfInitialized = false;
-        }
-
         _decodeThrottle.Dispose();
     }
-
-    #region Native P/Invoke & COM Function Pointer Declarations
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct PROPERTYKEY
-    {
-        public Guid fmtid;
-        public uint pid;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct PROPVARIANT
-    {
-        [FieldOffset(0)] public ushort vt;
-        [FieldOffset(2)] public ushort wReserved1;
-        [FieldOffset(4)] public ushort wReserved2;
-        [FieldOffset(6)] public ushort wReserved3;
-        [FieldOffset(8)] public long hVal;
-        [FieldOffset(8)] public ulong uhVal;
-        [FieldOffset(8)] public IntPtr ptrVal;
-    }
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int ReleaseDelegate(IntPtr thisPtr);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int GetUInt64Delegate(IntPtr thisPtr, [In] ref PROPERTYKEY key, [Out] out ulong pull);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int GetUInt32Delegate(IntPtr thisPtr, [In] ref PROPERTYKEY key, [Out] out uint pull);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetUINT32Delegate(IntPtr thisPtr, [In] ref Guid guidKey, uint unValue);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetGUIDDelegate(IntPtr thisPtr, [In] ref Guid guidKey, [In] ref Guid guidValue);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetStreamSelectionDelegate(IntPtr thisPtr, uint dwStreamIndex, [MarshalAs(UnmanagedType.Bool)] bool fSelected);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetCurrentMediaTypeDelegate(IntPtr thisPtr, uint dwStreamIndex, IntPtr pdwReserved, IntPtr pMediaType);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetCurrentPositionDelegate(IntPtr thisPtr, [In] ref Guid guidTimeFormat, [In] ref PROPVARIANT varPosition);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int ReadSampleDelegate(
-        IntPtr thisPtr,
-        uint dwStreamIndex,
-        uint dwControlFlags,
-        out uint pdwActualStreamIndex,
-        out uint pdwStreamFlags,
-        out long pllTimestamp,
-        out IntPtr ppSample);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int ConvertToContiguousBufferDelegate(IntPtr thisPtr, out IntPtr ppBuffer);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int LockDelegate(IntPtr thisPtr, out IntPtr ppbBuffer, out uint pcbMaxLength, out uint pcbCurrentLength);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int UnlockDelegate(IntPtr thisPtr);
-
-    [DllImport("ole32.dll")]
-    private static extern int CoInitializeEx(IntPtr pvReserved, uint dwCoInit);
-
-    [DllImport("mfplat.dll", ExactSpelling = true)]
-    private static extern int MFStartup(uint Version, uint dwFlags);
-
-    [DllImport("mfplat.dll", ExactSpelling = true)]
-    private static extern int MFShutdown();
-
-    [DllImport("mfplat.dll", ExactSpelling = true)]
-    private static extern int MFCreateMediaType([Out] out IntPtr ppMFType);
-
-    [DllImport("mfplat.dll", ExactSpelling = true)]
-    private static extern int MFCreateAttributes([Out] out IntPtr ppMFAttributes, uint cInitialSize);
-
-    [DllImport("mfreadwrite.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
-    private static extern int MFCreateSourceReaderFromURL(
-        [In, MarshalAs(UnmanagedType.LPWStr)] string pwszURL,
-        [In] IntPtr pAttributes,
-        [Out] out IntPtr ppSourceReader);
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int SHCreateItemFromParsingName(
-        [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
-        IntPtr pbc,
-        ref Guid riid,
-        out IntPtr ppv);
-
-    #endregion
 }

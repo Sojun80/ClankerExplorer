@@ -1002,65 +1002,17 @@ public sealed class UiSmokeTests
         if (!File.Exists(videoPath)) return;
 
         var duration = await VideoThumbnailService.Instance.GetVideoDurationAsync(videoPath);
-        Assert.True(duration > TimeSpan.Zero, $"Duration should be > 0, got {duration}");
+        Assert.True(duration > TimeSpan.Zero, $"Duration was {duration}");
 
-        var bmp = await ThumbnailService.Instance.GetThumbnailAsync(videoPath, File.GetLastWriteTime(videoPath), 256);
-        Assert.NotNull(bmp);
-        Assert.True(bmp.PixelSize.Width > 0);
-        Assert.True(bmp.PixelSize.Height > 0);
+        var bmp5s = await VideoThumbnailService.Instance.ExtractFrameAtTimeAsync(videoPath, TimeSpan.FromSeconds(5), 256);
+        Assert.NotNull(bmp5s);
+
+        var depthBmp = await VideoThumbnailService.Instance.ExtractNextDepthFrameAsync(videoPath, 256);
+        Assert.NotNull(depthBmp);
+
+        var smartBmp = await VideoThumbnailService.Instance.ExtractSmartVideoThumbnailAsync(videoPath, 256);
+        Assert.NotNull(smartBmp);
     }
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int GetGUIDDelegateMF(IntPtr thisPtr, [In] ref Guid guidKey, out Guid pguidValue);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetStreamSelectionDelegate(IntPtr thisPtr, uint dwStreamIndex, [MarshalAs(UnmanagedType.Bool)] bool fSelected);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int ConvertToContiguousBufferDelegate(IntPtr thisPtr, out IntPtr ppBuffer);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int LockDelegate(IntPtr thisPtr, out IntPtr ppbBuffer, out uint pcbMaxLength, out uint pcbCurrentLength);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int UnlockDelegate(IntPtr thisPtr);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int GetCurrentMediaTypeDelegate(IntPtr thisPtr, uint dwStreamIndex, out IntPtr ppMediaType);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int GetUINT64DelegateMF(IntPtr thisPtr, [In] ref Guid guidKey, out ulong punValue);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetUINT32Delegate(IntPtr thisPtr, [In] ref Guid guidKey, uint unValue);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetGUIDDelegate(IntPtr thisPtr, [In] ref Guid guidKey, [In] ref Guid guidValue);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int GetNativeMediaTypeDelegate(IntPtr thisPtr, uint dwStreamIndex, uint dwMediaTypeIndex, out IntPtr ppMediaType);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetCurrentMediaTypeDelegate(IntPtr thisPtr, uint dwStreamIndex, IntPtr pdwReserved, IntPtr pMediaType);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int SetCurrentPositionDelegate(IntPtr thisPtr, [In] ref Guid guidTimeFormat, [In] ref PROPVARIANT varPosition);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int ReadSampleDelegate(
-        IntPtr thisPtr,
-        uint dwStreamIndex,
-        uint dwControlFlags,
-        out uint pdwActualStreamIndex,
-        out uint pdwStreamFlags,
-        out long pllTimestamp,
-        out IntPtr ppSample);
-
-    [DllImport("mfplat.dll", ExactSpelling = true)]
-    private static extern int MFCreateMediaType([Out] out IntPtr ppMFType);
-
-    [DllImport("mfplat.dll", ExactSpelling = true)]
-    private static extern int MFCreateAttributes([Out] out IntPtr ppMFAttributes, uint cInitialSize);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PROPERTYKEY
