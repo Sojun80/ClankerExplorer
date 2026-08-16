@@ -67,7 +67,7 @@ public static class ClipboardFileService
         get { lock (_lock) { return _storedPaths.Count > 0; } }
     }
 
-    public static async Task<(int successCount, List<string> failedPaths)> PasteAsync(string destinationDirectory, CancellationToken cancellationToken = default)
+    public static async Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)> PasteAsync(string destinationDirectory, CancellationToken cancellationToken = default)
     {
         List<string> sources;
         bool isCutMode;
@@ -78,10 +78,11 @@ public static class ClipboardFileService
             isCutMode = _isCut;
         }
 
-        if (!Directory.Exists(destinationDirectory)) return (0, sources);
+        if (!Directory.Exists(destinationDirectory)) return (0, sources, new List<string>());
 
         var successfulPaths = new List<string>();
         var failedPaths = new List<string>();
+        var createdDestinationPaths = new List<string>();
 
         await Task.Run(() =>
         {
@@ -105,6 +106,7 @@ public static class ClipboardFileService
                             File.Copy(source, dest, false);
                         }
                         successfulPaths.Add(source);
+                        createdDestinationPaths.Add(dest);
                     }
                     else if (Directory.Exists(source))
                     {
@@ -122,6 +124,7 @@ public static class ClipboardFileService
                         {
                             Directory.Move(source, dest);
                             successfulPaths.Add(source);
+                            createdDestinationPaths.Add(dest);
                         }
                         else
                         {
@@ -129,6 +132,7 @@ public static class ClipboardFileService
                             if (success)
                             {
                                 successfulPaths.Add(source);
+                                createdDestinationPaths.Add(dest);
                             }
                             else
                             {
@@ -167,7 +171,7 @@ public static class ClipboardFileService
         }
 
         ClipboardChanged?.Invoke();
-        return (successfulPaths.Count, failedPaths);
+        return (successfulPaths.Count, failedPaths, createdDestinationPaths);
     }
 
     private static string GetNonConflictingPath(string dir, string name, bool isMove)

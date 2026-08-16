@@ -23,10 +23,16 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     private DirectoryReadOptions _directoryReadOptions = DirectoryReadOptions.FromSettings(SettingsService.Instance.CurrentSettings);
 
     /// <summary>
-    /// After a back/up navigation, holds the path of the folder we came from
-    /// so it can be auto-selected once the directory listing loads.
+    /// Holds the paths of items to be auto-selected once the directory listing loads.
+    /// Used for navigation-context restoration and paste selection continuity.
     /// </summary>
-    public string? PendingSelectPath { get; set; }
+    public List<string>? PendingSelectPaths { get; set; }
+
+    public string? PendingSelectPath
+    {
+        get => PendingSelectPaths?.FirstOrDefault();
+        set => PendingSelectPaths = value != null ? new List<string> { value } : null;
+    }
 
     /// <summary>
     /// Raised when a navigation-context item should be scrolled into view.
@@ -230,20 +236,38 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             Items = new ObservableCollection<FileItem>(list);
             await ApplyFilterAsync(token);
 
-            // After the filtered list is ready, auto-select the folder we navigated from (if any)
-            var pendingPath = PendingSelectPath;
-            PendingSelectPath = null;
-            if (!string.IsNullOrEmpty(pendingPath))
+            // After the filtered list is ready, auto-select pending items (e.g. from back-navigation or paste)
+            var pendingPaths = PendingSelectPaths;
+            PendingSelectPaths = null;
+            if (pendingPaths != null && pendingPaths.Count > 0)
             {
                 var comparison = OperatingSystem.IsWindows()
                     ? StringComparison.OrdinalIgnoreCase
                     : StringComparison.Ordinal;
-                var match = FilteredItems.FirstOrDefault(f =>
-                    string.Equals(f.FullPath, pendingPath, comparison));
-                if (match != null)
+
+                var matches = new List<FileItem>();
+                foreach (var p in pendingPaths)
                 {
-                    SelectedItem = match;
-                    ScrollIntoViewRequested?.Invoke(match);
+                    var match = FilteredItems.FirstOrDefault(f => string.Equals(f.FullPath, p, comparison));
+                    if (match != null && !matches.Contains(match))
+                    {
+                        matches.Add(match);
+                    }
+                }
+
+                if (matches.Count > 0)
+                {
+                    ClearThumbnailSelection();
+                    foreach (var m in matches)
+                    {
+                        m.IsThumbnailSelected = true;
+                        SelectedItems.Add(m);
+                    }
+
+                    SelectedItem = matches.Last();
+                    var firstMatchIndex = FilteredItems.IndexOf(matches[0]);
+                    _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
+                    ScrollIntoViewRequested?.Invoke(matches[0]);
                 }
             }
         }

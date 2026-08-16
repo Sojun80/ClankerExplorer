@@ -1029,8 +1029,13 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     {
         if (SelectedTab != null)
         {
-            await ClipboardFileService.PasteAsync(SelectedTab.CurrentPath);
+            var (successCount, failedPaths, createdPaths) = await ClipboardFileService.PasteAsync(SelectedTab.CurrentPath);
+            if (createdPaths != null && createdPaths.Count > 0)
+            {
+                SelectedTab.PendingSelectPaths = createdPaths;
+            }
             await SelectedTab.RefreshAsync();
+            NotifyContextMenuProperties();
         }
     }
 

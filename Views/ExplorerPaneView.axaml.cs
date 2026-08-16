@@ -297,18 +297,33 @@ public partial class ExplorerPaneView : UserControl
         // Dispatch on Loaded priority so the DataGrid/ListBox has finished laying out the new items
         Dispatcher.UIThread.Post(() =>
         {
-            if (DataContext is not ExplorerPaneViewModel vm) return;
+            if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+            var tab = vm.SelectedTab;
 
-            // Details view: scroll the DataGrid
+            // Details view: scroll the DataGrid and sync selection
             if (FileDataGrid != null && !vm.IsThumbnailView)
             {
+                if (tab.SelectedItems.Count > 0)
+                {
+                    FileDataGrid.SelectedItems.Clear();
+                    foreach (var selected in tab.SelectedItems)
+                    {
+                        FileDataGrid.SelectedItems.Add(selected);
+                    }
+                }
+                else if (tab.SelectedItem != null)
+                {
+                    FileDataGrid.SelectedItems.Clear();
+                    FileDataGrid.SelectedItems.Add(tab.SelectedItem);
+                }
+
                 FileDataGrid.ScrollIntoView(item, null);
             }
 
             // Thumbnail view: scroll the ListBox row containing this item
-            if (ThumbnailListBox != null && vm.IsThumbnailView && vm.SelectedTab != null)
+            if (ThumbnailListBox != null && vm.IsThumbnailView)
             {
-                int index = vm.SelectedTab.FilteredItems.IndexOf(item);
+                int index = tab.FilteredItems.IndexOf(item);
                 int colCount = Math.Max(1, vm.ThumbnailColumnCount);
                 int rowIndex = index < 0 ? -1 : index / colCount;
                 if (rowIndex >= 0 && rowIndex < vm.ThumbnailRows.Count)

@@ -138,6 +138,24 @@ public sealed class ClipboardFileServiceTests : IDisposable
 
         Assert.Equal(1, result.successCount);
         Assert.Equal("nested", File.ReadAllText(Path.Combine(fs.FolderB, "FolderC", "Nested", "nested.txt")));
+        Assert.Equal(new[] { Path.Combine(fs.FolderB, "FolderC") }, result.createdDestinationPaths);
+    }
+
+    [Fact]
+    public async Task PasteAsync_ReturnsCreatedDestinationPaths_ForMultipleItems()
+    {
+        using var fs = new TemporaryFileSystem();
+        var file1 = Path.Combine(fs.FolderA, "alpha.txt");
+        var file2 = Path.Combine(fs.FolderA, "beta.txt");
+        ClipboardFileService.Copy(new[] { file1, file2, fs.FolderC });
+
+        var result = await ClipboardFileService.PasteAsync(fs.FolderB);
+
+        Assert.Equal(3, result.successCount);
+        Assert.Equal(3, result.createdDestinationPaths.Count);
+        Assert.Contains(Path.Combine(fs.FolderB, "alpha.txt"), result.createdDestinationPaths);
+        Assert.Contains(Path.Combine(fs.FolderB, "beta.txt"), result.createdDestinationPaths);
+        Assert.Contains(Path.Combine(fs.FolderB, "FolderC"), result.createdDestinationPaths);
     }
 
     public void Dispose() => ClipboardFileService.Copy(Array.Empty<string>());

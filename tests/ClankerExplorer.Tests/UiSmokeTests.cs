@@ -420,4 +420,42 @@ public sealed class UiSmokeTests
         ThemeManager.ApplyTheme(settings);
         Assert.True(Avalonia.Application.Current?.Resources.ContainsKey("AppThumbnailSelectedBgBrush"));
     }
+
+    [AvaloniaFact]
+    public async Task PasteFiles_SelectsSingleAndMultiplePastedItems_AndPreservesNonPastedItems()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+
+        var existingFile = Path.Combine(fs.FolderB, "existing.txt");
+        File.WriteAllText(existingFile, "already here");
+
+        var source1 = Path.Combine(fs.FolderA, "alpha.txt");
+        var source2 = Path.Combine(fs.FolderA, "beta.txt");
+
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderB, "PANE 1");
+        await pane.SelectedTab!.RefreshAsync();
+
+        // 1. Copy 2 files from FolderA
+        ClipboardFileService.Copy(new[] { source1, source2 });
+
+        // 2. Paste into FolderB
+        await pane.PasteFilesAsync();
+
+        // 3. Verify newly pasted items are selected in multi-selection
+        Assert.Equal(2, pane.SelectedTab.SelectedItems.Count);
+        Assert.Contains(pane.SelectedTab.SelectedItems, item => item.Name == "alpha.txt");
+        Assert.Contains(pane.SelectedTab.SelectedItems, item => item.Name == "beta.txt");
+        Assert.DoesNotContain(pane.SelectedTab.SelectedItems, item => item.Name == "existing.txt");
+        Assert.NotNull(pane.SelectedTab.SelectedItem);
+
+        // 4. Also verify thumbnail view selection flag
+        var alphaItem = pane.SelectedTab.FilteredItems.First(i => i.Name == "alpha.txt");
+        var betaItem = pane.SelectedTab.FilteredItems.First(i => i.Name == "beta.txt");
+        var existingItem = pane.SelectedTab.FilteredItems.First(i => i.Name == "existing.txt");
+
+        Assert.True(alphaItem.IsThumbnailSelected);
+        Assert.True(betaItem.IsThumbnailSelected);
+        Assert.False(existingItem.IsThumbnailSelected);
+    }
 }
