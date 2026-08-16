@@ -826,4 +826,62 @@ public sealed class UiSmokeTests
             try { Directory.Delete(tempRoot, true); } catch { }
         }
     }
+
+    [Fact]
+    public async Task WatcherReconcile_CreatingOrRenaming_PreservesSingleInstanceAndSelection()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "clanker_watcher_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        var fileA = Path.Combine(tempDir, "FileA.txt");
+        File.WriteAllText(fileA, "Content A");
+
+        try
+        {
+            using var tab = new ExplorerTabViewModel(tempDir);
+            await tab.RefreshAsync();
+
+            Assert.Single(tab.FilteredItems);
+            Assert.Equal("FileA.txt", tab.FilteredItems[0].Name);
+
+            // Select FileA
+            tab.SelectThumbnailItem(tab.FilteredItems[0], control: false, shift: false);
+            Assert.True(tab.FilteredItems[0].IsThumbnailSelected);
+
+            // 1. Rapid successive create / watcher event for existing file
+            tab.ReconcileItemCreatedOrChanged(fileA);
+            tab.ReconcileItemCreatedOrChanged(fileA);
+            Assert.Single(tab.FilteredItems);
+            Assert.True(tab.FilteredItems[0].IsThumbnailSelected);
+
+            // 2. Create a new file and reconcile
+            var fileB = Path.Combine(tempDir, "FileB.txt");
+            File.WriteAllText(fileB, "Content B");
+            tab.ReconcileItemCreatedOrChanged(fileB);
+            tab.ReconcileItemCreatedOrChanged(fileB); // Rapid duplicate event
+
+            Assert.Equal(2, tab.FilteredItems.Count);
+
+            // 3. Rename FileA to FileA_Renamed.txt
+            var fileARenamed = Path.Combine(tempDir, "FileA_Renamed.txt");
+            File.Move(fileA, fileARenamed);
+            tab.ReconcileItemRenamed(fileA, fileARenamed);
+
+            Assert.Equal(2, tab.FilteredItems.Count);
+            var renamedItem = tab.FilteredItems.FirstOrDefault(i => i.Name == "FileA_Renamed.txt");
+            Assert.NotNull(renamedItem);
+            Assert.True(renamedItem.IsThumbnailSelected);
+            Assert.Equal(renamedItem, tab.SelectedItem);
+            Assert.DoesNotContain(tab.FilteredItems, i => i.Name == "FileA.txt");
+
+            // 4. Delete FileB
+            File.Delete(fileB);
+            tab.ReconcileItemDeleted(fileB);
+            Assert.Single(tab.FilteredItems);
+            Assert.Equal("FileA_Renamed.txt", tab.FilteredItems[0].Name);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
 }

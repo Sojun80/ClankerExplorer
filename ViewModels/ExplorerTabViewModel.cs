@@ -16,6 +16,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 {
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _filterDebounceCts;
+    private FileSystemWatcher? _watcher;
     private long _loadGeneration = 0;
     private long _filterGeneration = 0;
     private int _selectionAnchorIndex = -1;
@@ -251,12 +252,19 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 HistoryService.Instance.RecordFolderVisit(CurrentPath);
             }
 
-            foreach (var item in list)
+            SetupWatcher(CurrentPath);
+
+            var deduplicatedList = list
+                .GroupBy(i => i.FullPath, comparer)
+                .Select(g => g.First())
+                .ToList();
+
+            foreach (var item in deduplicatedList)
             {
                 item.IsCut = ClipboardFileService.IsPathCut(item.FullPath);
             }
 
-            Items = new ObservableCollection<FileItem>(list);
+            Items = new ObservableCollection<FileItem>(deduplicatedList);
             await ApplyFilterAsync(token);
 
             // Determine selection targets: explicit navigation/paste vs ordinary refresh continuity
@@ -499,7 +507,11 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         string sortColumn,
         bool sortAscending)
     {
-        IEnumerable<FileItem> query = source;
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        IEnumerable<FileItem> query = source
+            .Where(i => i != null)
+            .GroupBy(i => !string.IsNullOrEmpty(i.FullPath) ? i.FullPath : (i.Name ?? string.Empty), comparer)
+            .Select(g => g.First());
 
         if (!string.IsNullOrWhiteSpace(filterText))
         {
@@ -684,12 +696,263 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         return cloned;
     }
 
+    private void SetupWatcher(string path)
+    {
+        try
+        {
+            _watcher?.Dispose();
+            _watcher = null;
+
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
+
+            _watcher = new FileSystemWatcher(path)
+            {
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.Size | NotifyFilters.LastWrite,
+                EnableRaisingEvents = true,
+                IncludeSubdirectories = false
+            };
+
+            _watcher.Created += OnWatcherCreated;
+            _watcher.Deleted += OnWatcherDeleted;
+            _watcher.Renamed += OnWatcherRenamed;
+            _watcher.Changed += OnWatcherChanged;
+        }
+        catch
+        {
+            // Restricted directories, unformatted drives, or unsupported schemes
+        }
+    }
+
+    private void OnWatcherCreated(object sender, FileSystemEventArgs e)
+    {
+        if (_isDisposed) return;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (_isDisposed) return;
+            ReconcileItemCreatedOrChanged(e.FullPath);
+        }, Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private void OnWatcherDeleted(object sender, FileSystemEventArgs e)
+    {
+        if (_isDisposed) return;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (_isDisposed) return;
+            ReconcileItemDeleted(e.FullPath);
+        }, Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private void OnWatcherRenamed(object sender, RenamedEventArgs e)
+    {
+        if (_isDisposed) return;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (_isDisposed) return;
+            ReconcileItemRenamed(e.OldFullPath, e.FullPath);
+        }, Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private void OnWatcherChanged(object sender, FileSystemEventArgs e)
+    {
+        if (_isDisposed) return;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (_isDisposed) return;
+            ReconcileItemCreatedOrChanged(e.FullPath);
+        }, Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    public void ReconcileItemCreatedOrChanged(string fullPath)
+    {
+        if (_isDisposed || string.IsNullOrWhiteSpace(fullPath) || Items == null) return;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        bool isDir = Directory.Exists(fullPath);
+        bool isFile = File.Exists(fullPath);
+        if (!isDir && !isFile) return;
+
+        var existing = Items.FirstOrDefault(i => string.Equals(i.FullPath, fullPath, comparison));
+        if (existing != null)
+        {
+            try
+            {
+                if (isDir)
+                {
+                    var di = new DirectoryInfo(fullPath);
+                    existing.ModifiedTime = di.LastWriteTime;
+                }
+                else
+                {
+                    var fi = new FileInfo(fullPath);
+                    existing.SizeBytes = fi.Length;
+                    existing.ModifiedTime = fi.LastWriteTime;
+                }
+            }
+            catch { }
+            return;
+        }
+
+        try
+        {
+            FileItem newItem;
+            if (isDir)
+            {
+                var di = new DirectoryInfo(fullPath);
+                newItem = new FileItem
+                {
+                    Name = di.Name,
+                    FullPath = di.FullName,
+                    IsDirectory = true,
+                    Extension = string.Empty,
+                    ModifiedTime = di.LastWriteTime,
+                    CreatedTime = di.CreationTime,
+                    AccessedTime = di.LastAccessTime,
+                    AttributesString = di.Attributes.ToString(),
+                    SizeBytes = 0
+                };
+            }
+            else
+            {
+                var fi = new FileInfo(fullPath);
+                newItem = new FileItem
+                {
+                    Name = fi.Name,
+                    FullPath = fi.FullName,
+                    IsDirectory = false,
+                    Extension = fi.Extension,
+                    ModifiedTime = fi.LastWriteTime,
+                    CreatedTime = fi.CreationTime,
+                    AccessedTime = fi.LastAccessTime,
+                    AttributesString = fi.Attributes.ToString(),
+                    SizeBytes = fi.Length
+                };
+            }
+
+            newItem.IsCut = ClipboardFileService.IsPathCut(newItem.FullPath);
+            Items.Add(newItem);
+            ApplyFilter();
+        }
+        catch { }
+    }
+
+    public void ReconcileItemDeleted(string fullPath)
+    {
+        if (_isDisposed || string.IsNullOrWhiteSpace(fullPath) || Items == null) return;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        var existing = Items.FirstOrDefault(i => string.Equals(i.FullPath, fullPath, comparison));
+        if (existing != null)
+        {
+            Items.Remove(existing);
+            SelectedItems.Remove(existing);
+            if (SelectedItem == existing)
+            {
+                SelectedItem = SelectedItems.LastOrDefault();
+            }
+            ApplyFilter();
+        }
+    }
+
+    public void ReconcileItemRenamed(string oldFullPath, string newFullPath)
+    {
+        if (_isDisposed || string.IsNullOrWhiteSpace(newFullPath) || Items == null) return;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        bool wasSelected = false;
+        bool wasFocused = false;
+
+        var oldItem = Items.FirstOrDefault(i => string.Equals(i.FullPath, oldFullPath, comparison));
+        if (oldItem != null)
+        {
+            wasSelected = SelectedItems.Contains(oldItem) || oldItem.IsThumbnailSelected;
+            wasFocused = SelectedItem == oldItem;
+            Items.Remove(oldItem);
+            SelectedItems.Remove(oldItem);
+        }
+
+        var existingNew = Items.FirstOrDefault(i => string.Equals(i.FullPath, newFullPath, comparison));
+        if (existingNew != null)
+        {
+            Items.Remove(existingNew);
+            SelectedItems.Remove(existingNew);
+        }
+
+        bool isDir = Directory.Exists(newFullPath);
+        bool isFile = File.Exists(newFullPath);
+        if (!isDir && !isFile)
+        {
+            ApplyFilter();
+            return;
+        }
+
+        try
+        {
+            FileItem newItem;
+            if (isDir)
+            {
+                var di = new DirectoryInfo(newFullPath);
+                newItem = new FileItem
+                {
+                    Name = di.Name,
+                    FullPath = di.FullName,
+                    IsDirectory = true,
+                    Extension = string.Empty,
+                    ModifiedTime = di.LastWriteTime,
+                    CreatedTime = di.CreationTime,
+                    AccessedTime = di.LastAccessTime,
+                    AttributesString = di.Attributes.ToString(),
+                    SizeBytes = 0
+                };
+            }
+            else
+            {
+                var fi = new FileInfo(newFullPath);
+                newItem = new FileItem
+                {
+                    Name = fi.Name,
+                    FullPath = fi.FullName,
+                    IsDirectory = false,
+                    Extension = fi.Extension,
+                    ModifiedTime = fi.LastWriteTime,
+                    CreatedTime = fi.CreationTime,
+                    AccessedTime = fi.LastAccessTime,
+                    AttributesString = fi.Attributes.ToString(),
+                    SizeBytes = fi.Length
+                };
+            }
+
+            newItem.IsCut = ClipboardFileService.IsPathCut(newItem.FullPath);
+            Items.Add(newItem);
+            ApplyFilter();
+
+            if (wasSelected)
+            {
+                var matched = FilteredItems.FirstOrDefault(i => string.Equals(i.FullPath, newFullPath, comparison));
+                if (matched != null)
+                {
+                    matched.IsThumbnailSelected = true;
+                    if (!SelectedItems.Contains(matched)) SelectedItems.Add(matched);
+                    if (wasFocused) SelectedItem = matched;
+                }
+            }
+        }
+        catch { }
+    }
+
     public void Dispose()
     {
         if (_isDisposed) return;
         _isDisposed = true;
 
         ClipboardFileService.ClipboardChanged -= UpdateCutStatus;
+
+        try
+        {
+            _watcher?.Dispose();
+            _watcher = null;
+        }
+        catch { }
 
         try
         {
@@ -704,6 +967,5 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             _filterDebounceCts?.Dispose();
         }
         catch { }
-
     }
 }
