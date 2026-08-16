@@ -1055,7 +1055,10 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         if (newBmp != null)
         {
             ThumbnailService.Instance.SetCustomThumbnail(target.FullPath, target.ModifiedTime, newBmp, targetSize);
-            target.ThumbnailImage = newBmp;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                target.ThumbnailImage = newBmp;
+            });
         }
     }
 

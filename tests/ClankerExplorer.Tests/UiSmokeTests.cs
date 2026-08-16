@@ -1001,10 +1001,156 @@ public sealed class UiSmokeTests
         string videoPath = @"C:\Users\5900x\Videos\Captures\297.mp4";
         if (!File.Exists(videoPath)) return;
 
-        ThumbnailService.Instance.ClearCache();
-        var bmp = await ThumbnailService.Instance.GetThumbnailAsync(videoPath, File.GetLastWriteTimeUtc(videoPath), 256);
+        var duration = await VideoThumbnailService.Instance.GetVideoDurationAsync(videoPath);
+        Assert.True(duration > TimeSpan.Zero, $"Duration should be > 0, got {duration}");
+
+        var bmp = await ThumbnailService.Instance.GetThumbnailAsync(videoPath, File.GetLastWriteTime(videoPath), 256);
         Assert.NotNull(bmp);
         Assert.True(bmp.PixelSize.Width > 0);
         Assert.True(bmp.PixelSize.Height > 0);
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetGUIDDelegateMF(IntPtr thisPtr, [In] ref Guid guidKey, out Guid pguidValue);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SetStreamSelectionDelegate(IntPtr thisPtr, uint dwStreamIndex, [MarshalAs(UnmanagedType.Bool)] bool fSelected);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ConvertToContiguousBufferDelegate(IntPtr thisPtr, out IntPtr ppBuffer);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int LockDelegate(IntPtr thisPtr, out IntPtr ppbBuffer, out uint pcbMaxLength, out uint pcbCurrentLength);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int UnlockDelegate(IntPtr thisPtr);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetCurrentMediaTypeDelegate(IntPtr thisPtr, uint dwStreamIndex, out IntPtr ppMediaType);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetUINT64DelegateMF(IntPtr thisPtr, [In] ref Guid guidKey, out ulong punValue);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SetUINT32Delegate(IntPtr thisPtr, [In] ref Guid guidKey, uint unValue);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SetGUIDDelegate(IntPtr thisPtr, [In] ref Guid guidKey, [In] ref Guid guidValue);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetNativeMediaTypeDelegate(IntPtr thisPtr, uint dwStreamIndex, uint dwMediaTypeIndex, out IntPtr ppMediaType);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SetCurrentMediaTypeDelegate(IntPtr thisPtr, uint dwStreamIndex, IntPtr pdwReserved, IntPtr pMediaType);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SetCurrentPositionDelegate(IntPtr thisPtr, [In] ref Guid guidTimeFormat, [In] ref PROPVARIANT varPosition);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ReadSampleDelegate(
+        IntPtr thisPtr,
+        uint dwStreamIndex,
+        uint dwControlFlags,
+        out uint pdwActualStreamIndex,
+        out uint pdwStreamFlags,
+        out long pllTimestamp,
+        out IntPtr ppSample);
+
+    [DllImport("mfplat.dll", ExactSpelling = true)]
+    private static extern int MFCreateMediaType([Out] out IntPtr ppMFType);
+
+    [DllImport("mfplat.dll", ExactSpelling = true)]
+    private static extern int MFCreateAttributes([Out] out IntPtr ppMFAttributes, uint cInitialSize);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROPERTYKEY
+    {
+        public Guid fmtid;
+        public uint pid;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetUInt32Delegate(IntPtr thisPtr, [In] ref PROPERTYKEY key, [Out] out uint pull);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetUInt64Delegate(IntPtr thisPtr, [In] ref PROPERTYKEY key, [Out] out ulong pull);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int SHCreateItemFromParsingName(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+        IntPtr pbc,
+        ref Guid riid,
+        out IntPtr ppv);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ReleaseDelegate(IntPtr thisPtr);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetPresentationAttributeDelegate(
+        IntPtr thisPtr,
+        uint dwStreamIndex,
+        [In] ref Guid guidAttribute,
+        [Out] out PROPVARIANT pvarAttribute);
+
+    [DllImport("mfplat.dll", ExactSpelling = true)]
+    private static extern int MFGetAttributeSize([In] IntPtr pAttributes, [In] ref Guid guidKey, [Out] out uint punWidth, [Out] out uint punHeight);
+
+    [DllImport("ole32.dll")]
+    private static extern int CoInitializeEx(IntPtr pvReserved, uint dwCoInit);
+
+    [DllImport("mfplat.dll", ExactSpelling = true)]
+    private static extern int MFStartup(uint Version, uint dwFlags);
+    [DllImport("mfreadwrite.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+    private static extern int MFCreateSourceReaderFromURL([In, MarshalAs(UnmanagedType.LPWStr)] string pwszURL, [In] IntPtr pAttributes, [Out] out IntPtr ppSourceReader);
+
+    [ComImport, Guid("70ae66f2-c809-4e4f-aa91-40c211047fde"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMFSourceReader
+    {
+        void GetStreamSelection([In] uint dwStreamIndex, [Out, MarshalAs(UnmanagedType.Bool)] out bool pfSelected);
+        void SetStreamSelection([In] uint dwStreamIndex, [In, MarshalAs(UnmanagedType.Bool)] bool fSelected);
+        void GetNativeMediaType([In] uint dwStreamIndex, [In] uint dwMediaTypeIndex, [Out] out IntPtr ppMediaType);
+        int GetCurrentMediaType([In] uint dwStreamIndex, [Out] out IntPtr ppMediaType);
+        void SetCurrentMediaType([In] uint dwStreamIndex, [In] IntPtr pdwReserved, [In] IntPtr pMediaType);
+        void SetCurrentPosition([In, MarshalAs(UnmanagedType.LPStruct)] Guid guidTimeFormat, [In] ref PROPVARIANT varPosition);
+        int ReadSample([In] uint dwStreamIndex, [In] uint dwControlFlags, [Out] out uint pdwActualStreamIndex, [Out] out uint pdwStreamFlags, [Out] out long pllTimestamp, [Out] out IntPtr ppSample);
+        void Flush([In] uint dwStreamIndex);
+        void GetServiceForStream([In] uint dwStreamIndex, [In, MarshalAs(UnmanagedType.LPStruct)] Guid guidService, [In, MarshalAs(UnmanagedType.LPStruct)] Guid riid, [Out] out IntPtr ppvObject);
+        int GetPresentationAttribute([In] uint dwStreamIndex, [In, MarshalAs(UnmanagedType.LPStruct)] Guid guidAttribute, [Out] out PROPVARIANT pvarAttribute);
+    }
+
+    [ComImport, Guid("2cd2d921-c447-44a7-a13c-4ad570c600a3"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMFAttributes
+    {
+        void GetItem();
+        void GetItemType();
+        void CompareItem();
+        void Compare();
+        void GetUINT32();
+        void GetUINT64();
+        void GetDouble();
+        void GetGUID();
+        void GetStringLength();
+        void GetString();
+        void GetAllocatedString();
+        void GetBlobSize();
+        void GetBlob();
+        void GetAllocatedBlob();
+        void GetUnknown();
+        void SetItem();
+        void DeleteItem();
+        void DeleteAllItems();
+        void SetUINT32([In, MarshalAs(UnmanagedType.LPStruct)] Guid guidKey, [In] uint unValue);
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct PROPVARIANT
+    {
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(2)] public ushort wReserved1;
+        [FieldOffset(4)] public ushort wReserved2;
+        [FieldOffset(6)] public ushort wReserved3;
+        [FieldOffset(8)] public long hVal;
+        [FieldOffset(8)] public ulong uhVal;
+        [FieldOffset(8)] public IntPtr ptrVal;
     }
 }

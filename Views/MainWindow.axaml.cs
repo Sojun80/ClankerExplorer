@@ -104,7 +104,10 @@ public partial class MainWindow : Window
                             if (newBmp != null)
                             {
                                 ThumbnailService.Instance.SetCustomThumbnail(item.FullPath, item.ModifiedTime, newBmp, targetSize);
-                                item.ThumbnailImage = newBmp;
+                                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                                {
+                                    item.ThumbnailImage = newBmp;
+                                });
                             }
                         }
                     }
