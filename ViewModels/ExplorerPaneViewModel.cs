@@ -177,6 +177,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public bool IsArchiveSelected => SelectedTab?.SelectedItem is { IsDirectory: false, FullPath: { Length: > 0 } path } && ArchiveService.Instance.IsArchive(path);
     public bool IsNormalFileSelected => SelectedTab?.SelectedItem is { IsDirectory: false, FullPath: { Length: > 0 } path } && !ArchiveService.Instance.IsArchive(path);
     public bool IsTextFileSelected => SelectedTab?.SelectedItem is { IsDirectory: false, FullPath: { Length: > 0 } path } && FileSystemService.Instance.IsTextLikeFile(path);
+    public bool IsVideoFileSelected => SelectedTab?.SelectedItem is { IsDirectory: false, FullPath: { Length: > 0 } path } && VideoThumbnailService.IsVideoFile(path);
 
     public bool IsSelectedFolderPinned => SelectedTab?.SelectedItem is { IsDirectory: true, FullPath: { Length: > 0 } path } && QuickAccessService.Instance.IsPinned(path);
     public string PinFolderLabel => IsSelectedFolderPinned ? "⭐ Unpin from Quick Access" : "⭐ Add to Quick Access";
@@ -280,6 +281,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Action<string, string>? RequestCreateItem; // "folder" / "file", parentPath
     public event Action<string>? RequestOpenInOtherPane;
     public event Action<FileItem?>? RequestProperties;
+    public event Action<FileItem>? RequestVideoThumbnailAtTime;
     public event Action<string>? RequestSetClipboardText;
     public event Action<FileItem>? RequestScrollItemIntoView;
     public event Action? RequestSyncSelection;
@@ -889,6 +891,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsArchiveSelected));
         OnPropertyChanged(nameof(IsNormalFileSelected));
         OnPropertyChanged(nameof(IsTextFileSelected));
+        OnPropertyChanged(nameof(IsVideoFileSelected));
         OnPropertyChanged(nameof(IsSelectedFolderPinned));
         OnPropertyChanged(nameof(PinFolderLabel));
         OnPropertyChanged(nameof(ExtractSubfolderLabel));
@@ -1039,6 +1042,29 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         {
             RequestCreateItem?.Invoke("file", SelectedTab.CurrentPath);
         }
+    }
+
+    [RelayCommand]
+    public async Task GenerateNewThumbnailAsync(FileItem? item = null)
+    {
+        var target = item ?? SelectedTab?.SelectedItem;
+        if (target == null || target.IsDirectory || string.IsNullOrEmpty(target.FullPath) || !VideoThumbnailService.IsVideoFile(target.FullPath)) return;
+
+        int targetSize = (int)ThumbnailSize;
+        var newBmp = await VideoThumbnailService.Instance.ExtractNextDepthFrameAsync(target.FullPath, targetSize);
+        if (newBmp != null)
+        {
+            ThumbnailService.Instance.SetCustomThumbnail(target.FullPath, target.ModifiedTime, newBmp, targetSize);
+            target.ThumbnailImage = newBmp;
+        }
+    }
+
+    [RelayCommand]
+    public void GenerateThumbnailAtTime(FileItem? item = null)
+    {
+        var target = item ?? SelectedTab?.SelectedItem;
+        if (target == null || target.IsDirectory || string.IsNullOrEmpty(target.FullPath) || !VideoThumbnailService.IsVideoFile(target.FullPath)) return;
+        RequestVideoThumbnailAtTime?.Invoke(target);
     }
 
     [RelayCommand]

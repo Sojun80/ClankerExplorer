@@ -145,6 +145,24 @@ public class ThumbnailService : IDisposable
         return 512;
     }
 
+    /// <summary>
+    /// Explicitly caches a custom-generated thumbnail for a file, updating memory and disk cache.
+    /// </summary>
+    public void SetCustomThumbnail(string path, DateTime modifiedTime, Bitmap bitmap, int targetSize)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path) || bitmap == null) return;
+        try
+        {
+            var fileInfo = new FileInfo(path);
+            int sizeBucket = GetCanonicalSize(targetSize);
+            string key = GetCacheKey(path, fileInfo.Length, modifiedTime.Ticks, sizeBucket);
+
+            AddMemoryEntry(key, bitmap);
+            _ = Task.Run(() => SaveDiskEntry(GetDiskPath(key), bitmap));
+        }
+        catch { }
+    }
+
     private async Task<Bitmap?> LoadOrGenerateAsync(string path, string key, int sizeBucket, CancellationToken cancellationToken)
     {
         string diskPath = GetDiskPath(key);

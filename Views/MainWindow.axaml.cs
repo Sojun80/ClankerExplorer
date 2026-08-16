@@ -90,6 +90,30 @@ public partial class MainWindow : Window
                     await dlg.ShowDialog(this);
                 };
 
+                vm.RequestVideoThumbnailAtTime += async item =>
+                {
+                    if (item == null || string.IsNullOrEmpty(item.FullPath)) return;
+                    try
+                    {
+                        var dlg = new VideoThumbnailTimeWindow(item.FullPath);
+                        var res = await dlg.ShowDialog<bool>(this);
+                        if (res)
+                        {
+                            int targetSize = (int)vm.ActivePane.ThumbnailSize;
+                            var newBmp = await VideoThumbnailService.Instance.ExtractFrameAtTimeAsync(item.FullPath, dlg.TargetTimeSpan, targetSize);
+                            if (newBmp != null)
+                            {
+                                ThumbnailService.Instance.SetCustomThumbnail(item.FullPath, item.ModifiedTime, newBmp, targetSize);
+                                item.ThumbnailImage = newBmp;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        await ShowErrorDialogAsync("Thumbnail Extraction Failed", ex.Message);
+                    }
+                };
+
                 vm.RequestDeleteWithConfirmation += async (item, perm) =>
                 {
                     if (item == null) return;

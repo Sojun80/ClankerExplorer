@@ -33,6 +33,10 @@ public class VideoThumbnailService : IDisposable
     // Candidate seek percentage ratios: 10%, 25%, 40%, 55%, 70%
     private static readonly double[] CandidateRatios = new[] { 0.10, 0.25, 0.40, 0.55, 0.70 };
 
+    // Depth ratios used when cycling "New Thumbnail": 15%, 30%, 45%, 60%, 75%, 90%
+    private static readonly double[] DepthRatios = new[] { 0.15, 0.30, 0.45, 0.60, 0.75, 0.90 };
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _depthIndexByPath = new(StringComparer.OrdinalIgnoreCase);
+
     // Throttle concurrent video decodes so large folders do not overwhelm CPU / disk / hardware decoders
     private readonly SemaphoreSlim _decodeThrottle = new(2, 2);
     private bool _mfInitialized;
@@ -48,6 +52,219 @@ public class VideoThumbnailService : IDisposable
         if (string.IsNullOrWhiteSpace(filePath)) return false;
         var ext = Path.GetExtension(filePath);
         return VideoExtensions.Contains(ext);
+    }
+
+    /// <summary>
+    /// Parses timestamp strings formatted as "mm:ss", "hh:mm:ss", or raw seconds into a TimeSpan.
+    /// </summary>
+    public static bool TryParseTimestamp(string input, out TimeSpan timeSpan)
+    {
+        timeSpan = TimeSpan.Zero;
+        if (string.IsNullOrWhiteSpace(input)) return false;
+
+        string trimmed = input.Trim();
+
+        // Standard TimeSpan parser
+        if (TimeSpan.TryParseExact(trimmed, new[] { @"h\:m\:s", @"h\:mm\:ss", @"hh\:mm\:ss", @"m\:s", @"mm\:ss", @"%s" }, System.Globalization.CultureInfo.InvariantCulture, out timeSpan))
+        {
+            return true;
+        }
+
+        // Custom colon parsing
+        var parts = trimmed.Split(':');
+        if (parts.Length == 1 && double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double totalSeconds))
+        {
+            if (totalSeconds >= 0)
+            {
+                timeSpan = TimeSpan.FromSeconds(totalSeconds);
+                return true;
+            }
+        }
+        else if (parts.Length == 2 &&
+                 int.TryParse(parts[0], out int minutes) &&
+                 double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double seconds))
+        {
+            if (minutes >= 0 && seconds >= 0 && seconds < 60)
+            {
+                timeSpan = TimeSpan.FromMinutes(minutes) + TimeSpan.FromSeconds(seconds);
+                return true;
+            }
+        }
+        else if (parts.Length == 3 &&
+                 int.TryParse(parts[0], out int hours) &&
+                 int.TryParse(parts[1], out int mins) &&
+                 double.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double secs))
+        {
+            if (hours >= 0 && mins >= 0 && mins < 60 && secs >= 0 && secs < 60)
+            {
+                timeSpan = TimeSpan.FromHours(hours) + TimeSpan.FromMinutes(mins) + TimeSpan.FromSeconds(secs);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Asynchronously retrieves the total duration of a video file.
+    /// </summary>
+    public async Task<TimeSpan> GetVideoDurationAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsWindows() || !_mfInitialized || !File.Exists(filePath)) return TimeSpan.Zero;
+
+        await _decodeThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await Task.Run(() =>
+            {
+                IMFSourceReader? reader = null;
+                try
+                {
+                    int hr = MFCreateSourceReaderFromURL(filePath, null, out reader);
+                    if (hr != 0 || reader == null) return TimeSpan.Zero;
+
+                    var durationVar = new PROPVARIANT();
+                    if (reader.GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE, MF_PD_DURATION, out durationVar) == 0)
+                    {
+                        long ticks = (long)durationVar.uhVal;
+                        if (ticks > 0) return TimeSpan.FromTicks(ticks);
+                    }
+                }
+                catch { }
+                finally
+                {
+                    if (reader != null) { try { Marshal.ReleaseComObject(reader); } catch { } }
+                }
+                return TimeSpan.Zero;
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            return TimeSpan.Zero;
+        }
+        finally
+        {
+            _decodeThrottle.Release();
+        }
+    }
+
+    /// <summary>
+    /// Extracts the next depth frame across the video duration (e.g. 15%, 30%, 45%, 60%, 75%, 90%).
+    /// </summary>
+    public async Task<Bitmap?> ExtractNextDepthFrameAsync(string filePath, int targetSize, CancellationToken cancellationToken = default)
+    {
+        if (_isDisposed || !File.Exists(filePath)) return null;
+
+        var duration = await GetVideoDurationAsync(filePath, cancellationToken);
+        if (duration <= TimeSpan.Zero)
+        {
+            duration = TimeSpan.FromSeconds(30);
+        }
+
+        int nextIndex = _depthIndexByPath.AddOrUpdate(filePath, 0, (_, current) => (current + 1) % DepthRatios.Length);
+        double ratio = DepthRatios[nextIndex];
+        var targetTime = TimeSpan.FromTicks((long)(duration.Ticks * ratio));
+
+        return await ExtractFrameAtTimeAsync(filePath, targetTime, targetSize, cancellationToken);
+    }
+
+    /// <summary>
+    /// Asynchronously extracts a video thumbnail at a specific timestamp.
+    /// </summary>
+    public async Task<Bitmap?> ExtractFrameAtTimeAsync(string filePath, TimeSpan timeOffset, int targetSize, CancellationToken cancellationToken = default)
+    {
+        if (_isDisposed || !File.Exists(filePath)) return null;
+
+        await _decodeThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (cancellationToken.IsCancellationRequested) return null;
+
+            return await Task.Run(() => ExtractSingleFrame(filePath, timeOffset.Ticks, targetSize, cancellationToken), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            _decodeThrottle.Release();
+        }
+    }
+
+    private Bitmap? ExtractSingleFrame(string filePath, long seekTicks, int targetSize, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows() || !_mfInitialized) return null;
+
+        IMFSourceReader? reader = null;
+        IMFAttributes? attributes = null;
+        IMFMediaType? mediaType = null;
+
+        try
+        {
+            int hr = MFCreateAttributes(out attributes, 1);
+            if (hr == 0 && attributes != null)
+            {
+                attributes.SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, 1);
+            }
+
+            hr = MFCreateSourceReaderFromURL(filePath, attributes, out reader);
+            if (hr != 0 || reader == null) return null;
+
+            hr = MFCreateMediaType(out mediaType);
+            if (hr == 0 && mediaType != null)
+            {
+                mediaType.SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+                mediaType.SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+                reader.SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, IntPtr.Zero, mediaType);
+            }
+
+            reader.SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, true);
+
+            var propVar = new PROPVARIANT { vt = 20 /* VT_I8 */, hVal = seekTicks };
+            try
+            {
+                reader.SetCurrentPosition(Guid.Empty, ref propVar);
+            }
+            catch { }
+
+            int readHr = reader.ReadSample(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                0,
+                out _,
+                out _,
+                out _,
+                out IMFSample sample);
+
+            if (readHr == 0 && sample != null)
+            {
+                try
+                {
+                    var candidate = ExtractCandidateFrame(reader, sample);
+                    if (candidate != null)
+                    {
+                        return CreateBitmapFromCandidate(candidate.Value, targetSize);
+                    }
+                }
+                finally
+                {
+                    Marshal.ReleaseComObject(sample);
+                }
+            }
+        }
+        catch { }
+        finally
+        {
+            if (mediaType != null) { try { Marshal.ReleaseComObject(mediaType); } catch { } }
+            if (attributes != null) { try { Marshal.ReleaseComObject(attributes); } catch { } }
+            if (reader != null) { try { Marshal.ReleaseComObject(reader); } catch { } }
+        }
+
+        return null;
     }
 
     private void InitializeMediaFoundation()

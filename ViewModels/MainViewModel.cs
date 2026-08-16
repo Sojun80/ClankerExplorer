@@ -91,6 +91,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public event Action? RequestOpenNetworkShare;
     public event Action? RequestOpenSettings;
     public event Action<FileItem?>? RequestProperties;
+    public event Action<FileItem>? RequestVideoThumbnailAtTime;
     public event Action<FileItem, bool>? RequestDeleteWithConfirmation;
     public event Action<List<FileItem>, bool>? RequestDeleteMultipleWithConfirmation;
 
@@ -256,6 +257,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             targetPane.AddNewTab(path);
         };
         pane.RequestProperties += item => RequestProperties?.Invoke(item);
+        pane.RequestVideoThumbnailAtTime += item => RequestVideoThumbnailAtTime?.Invoke(item);
         pane.RequestDeleteWithConfirmation += (item, perm) => RequestDeleteWithConfirmation?.Invoke(item, perm);
         pane.RequestDeleteMultipleWithConfirmation += (items, perm) => RequestDeleteMultipleWithConfirmation?.Invoke(items, perm);
     }

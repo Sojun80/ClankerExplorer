@@ -399,6 +399,9 @@
           <MenuItem Header="{Binding EditActionLabel}" Command="{Binding EditItemCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
           <MenuItem Header="Open With..." Command="{Binding OpenWithCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
           <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="🎬 New Thumbnail" Command="{Binding GenerateNewThumbnailCommand}" IsVisible="{Binding IsVideoFileSelected}"/>
+          <MenuItem Header="⏱️ New Thumbnail at Time..." Command="{Binding GenerateThumbnailAtTimeCommand}" IsVisible="{Binding IsVideoFileSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsVideoFileSelected}"/>
           <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
           <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
           <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
@@ -711,6 +714,9 @@
             <MenuItem Header="{Binding EditActionLabel}" Command="{Binding EditItemCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <MenuItem Header="Open With..." Command="{Binding OpenWithCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsNormalFileSelected}"/>
+            <MenuItem Header="🎬 New Thumbnail" Command="{Binding GenerateNewThumbnailCommand}" IsVisible="{Binding IsVideoFileSelected}"/>
+            <MenuItem Header="⏱️ New Thumbnail at Time..." Command="{Binding GenerateThumbnailAtTimeCommand}" IsVisible="{Binding IsVideoFileSelected}"/>
+            <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsVideoFileSelected}"/>
             <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
