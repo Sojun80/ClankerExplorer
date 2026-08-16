@@ -157,6 +157,10 @@ public partial class FileItem : ObservableObject
     [ObservableProperty]
     private string _editingName = string.Empty;
 
+    // Drop Target Hover State
+    [ObservableProperty]
+    private bool _isDragOver;
+
     // File / Folder Icon (Windows-associated / extension cached)
     private IImage? _fileIcon;
     public IImage? FileIcon

@@ -44,6 +44,12 @@ public partial class ExplorerPaneView : UserControl
     private bool _hasMovedDuringMiddleScroll;
     private ScrollViewer? _activeMiddleScrollViewer;
 
+    // Drag-and-Drop State
+    private Point _dragStartPoint;
+    private FileItem? _dragCandidateItem;
+    private bool _isDragActive;
+    private FileItem? _hoveredDragTarget;
+
     public ExplorerPaneView()
     {
         InitializeComponent();
@@ -60,6 +66,11 @@ public partial class ExplorerPaneView : UserControl
             _folderScrollSaveTimer.Stop();
             SaveFolderScrollState(persist: true);
         };
+
+        AddHandler(DragDrop.DragEnterEvent, OnDragEnter);
+        AddHandler(DragDrop.DragOverEvent, OnDragOver);
+        AddHandler(DragDrop.DragLeaveEvent, OnDragLeave);
+        AddHandler(DragDrop.DropEvent, OnDrop);
 
         Loaded += (s, e) =>
         {
@@ -528,7 +539,14 @@ public partial class ExplorerPaneView : UserControl
         }
         else
         {
-            tab.SelectThumbnailItem(item, ctrl, shift);
+            _dragStartPoint = e.GetPosition(this);
+            _dragCandidateItem = item;
+            _isDragActive = false;
+
+            if (!item.IsThumbnailSelected || ctrl || shift)
+            {
+                tab.SelectThumbnailItem(item, ctrl, shift);
+            }
         }
 
         vm.NotifyContextMenuProperties();
@@ -1077,14 +1095,26 @@ public partial class ExplorerPaneView : UserControl
             }
 
             bool isRowOrCell = false;
+            FileItem? rowItem = null;
             while (source != null && source != FileGridContainer)
             {
+                if (source is Control { DataContext: FileItem fi })
+                {
+                    rowItem = fi;
+                }
                 if (source is DataGridRow || source is DataGridCell)
                 {
                     isRowOrCell = true;
                     break;
                 }
                 source = source.GetVisualParent();
+            }
+
+            if (rowItem != null)
+            {
+                _dragStartPoint = e.GetPosition(this);
+                _dragCandidateItem = rowItem;
+                _isDragActive = false;
             }
 
             var interaction = PointerGestureClassifier.ClassifyPress(
@@ -1113,6 +1143,20 @@ public partial class ExplorerPaneView : UserControl
                 _hasMovedDuringMiddleScroll = true;
             }
             return;
+        }
+
+        if (_dragCandidateItem != null && !_isDragActive && e.GetCurrentPoint(FileGridContainer).Properties.IsLeftButtonPressed)
+        {
+            var dragDelta = e.GetPosition(this) - _dragStartPoint;
+            if (Math.Abs(dragDelta.X) >= 4 || Math.Abs(dragDelta.Y) >= 4)
+            {
+                _isDragActive = true;
+                _isMouseDownForMarquee = false;
+                _isMarqueeActive = false;
+                if (MarqueeBox != null) MarqueeBox.IsVisible = false;
+                StartDragAsync(e, _dragCandidateItem);
+                return;
+            }
         }
 
         if (!_isMouseDownForMarquee || FileGridContainer == null || FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm) return;
@@ -1167,6 +1211,9 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnFileGridPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        _dragCandidateItem = null;
+        _isDragActive = false;
+
         if (_isMiddleAutoScrolling)
         {
             var props = e.GetCurrentPoint(FileGridContainer).Properties;
@@ -1176,47 +1223,42 @@ public partial class ExplorerPaneView : UserControl
                 StopMiddleAutoScroll();
                 e.Pointer.Capture(null);
                 e.Handled = true;
-                return;
             }
             return;
         }
 
-        _autoScrollTimer.Stop();
-        _autoScrollVelocity = 0;
-        if (MarqueeBox != null) MarqueeBox.IsVisible = false;
-
-        if (DataContext is ExplorerPaneViewModel vm)
+        if (_isMouseDownForMarquee)
         {
-            vm.IsSuppressingPreview = false;
-        }
-
-        if (_isMarqueeActive)
-        {
-            e.Pointer.Capture(null);
-            _isMarqueeActive = false;
-            if (DataContext is ExplorerPaneViewModel vmPane)
+            _isMouseDownForMarquee = false;
+            if (_isMarqueeActive)
             {
-                vmPane.TriggerPreviewForSelectedItem();
-            }
-        }
-        else if (_isMouseDownForMarquee)
-        {
-            // Click on blank background space without dragging
-            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
-            {
-                if (FileDataGrid != null) FileDataGrid.SelectedItems.Clear();
-                if (DataContext is ExplorerPaneViewModel vmEmpty && vmEmpty.SelectedTab != null)
+                _isMarqueeActive = false;
+                _autoScrollTimer.Stop();
+                _autoScrollVelocity = 0;
+                e.Pointer.Capture(null);
+                if (MarqueeBox != null) MarqueeBox.IsVisible = false;
+                if (DataContext is ExplorerPaneViewModel vm)
                 {
-                    vmEmpty.SelectedTab.ClearThumbnailSelection();
-                    vmEmpty.SelectedTab.SelectedItems.Clear();
-                    vmEmpty.SelectedTab.SelectedItem = null;
-                    vmEmpty.NotifyContextMenuProperties();
-                    vmEmpty.TriggerPreviewForSelectedItem();
+                    vm.IsSuppressingPreview = false;
+                }
+            }
+            else
+            {
+                // Click on blank background space without dragging
+                if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+                {
+                    if (FileDataGrid != null) FileDataGrid.SelectedItems.Clear();
+                    if (DataContext is ExplorerPaneViewModel vmEmpty && vmEmpty.SelectedTab != null)
+                    {
+                        vmEmpty.SelectedTab.ClearThumbnailSelection();
+                        vmEmpty.SelectedTab.SelectedItems.Clear();
+                        vmEmpty.SelectedTab.SelectedItem = null;
+                        vmEmpty.NotifyContextMenuProperties();
+                        vmEmpty.TriggerPreviewForSelectedItem();
+                    }
                 }
             }
         }
-
-        _isMouseDownForMarquee = false;
     }
 
     private void OnFileGridPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
@@ -1596,4 +1638,178 @@ public partial class ExplorerPaneView : UserControl
             }
         }
     }
+
+    #region Windows Drag-and-Drop Implementation
+
+    private async void StartDragAsync(PointerEventArgs triggerEvent, FileItem triggerItem)
+    {
+        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+        var tab = vm.SelectedTab;
+
+        List<string> dragPaths;
+        bool isAlreadySelected = (vm.IsThumbnailView && triggerItem.IsThumbnailSelected) ||
+                                 (!vm.IsThumbnailView && tab.SelectedItems.Contains(triggerItem));
+
+        if (isAlreadySelected)
+        {
+            dragPaths = tab.SelectedItems
+                .Where(i => !string.IsNullOrEmpty(i.FullPath))
+                .Select(i => i.FullPath)
+                .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+                .ToList();
+        }
+        else
+        {
+            if (vm.IsThumbnailView)
+            {
+                tab.SelectThumbnailItem(triggerItem, control: false, shift: false);
+            }
+            else
+            {
+                tab.SelectedItems.Clear();
+                tab.SelectedItems.Add(triggerItem);
+                tab.SelectedItem = triggerItem;
+            }
+            dragPaths = new List<string> { triggerItem.FullPath };
+        }
+
+        if (dragPaths.Count == 0) return;
+
+        var dataObject = new DataObject();
+        var storageProvider = TopLevel.GetTopLevel(this)?.StorageProvider;
+        var storageItems = new List<Avalonia.Platform.Storage.IStorageItem>();
+
+        if (storageProvider != null)
+        {
+            foreach (var p in dragPaths)
+            {
+                try
+                {
+                    if (Directory.Exists(p))
+                    {
+                        var f = await storageProvider.TryGetFolderFromPathAsync(new Uri(p, UriKind.Absolute));
+                        if (f != null) storageItems.Add(f);
+                    }
+                    else if (File.Exists(p))
+                    {
+                        var f = await storageProvider.TryGetFileFromPathAsync(new Uri(p, UriKind.Absolute));
+                        if (f != null) storageItems.Add(f);
+                    }
+                }
+                catch { }
+            }
+        }
+
+        if (storageItems.Count > 0)
+        {
+            dataObject.Set(DataFormats.Files, storageItems);
+        }
+        dataObject.Set(DataFormats.FileNames, dragPaths);
+        dataObject.Set(DataFormats.Text, string.Join(Environment.NewLine, dragPaths));
+
+        try
+        {
+            await DragDrop.DoDragDrop(triggerEvent, dataObject, DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link);
+        }
+        catch { }
+        finally
+        {
+            _dragCandidateItem = null;
+            _isDragActive = false;
+        }
+    }
+
+    private void OnDragEnter(object? sender, DragEventArgs e)
+    {
+        UpdateDragOverState(e);
+    }
+
+    private void OnDragOver(object? sender, DragEventArgs e)
+    {
+        UpdateDragOverState(e);
+    }
+
+    private void OnDragLeave(object? sender, DragEventArgs e)
+    {
+        ClearDragOverHighlight();
+    }
+
+    private void ClearDragOverHighlight()
+    {
+        if (_hoveredDragTarget != null)
+        {
+            _hoveredDragTarget.IsDragOver = false;
+            _hoveredDragTarget = null;
+        }
+    }
+
+    private void UpdateDragOverState(DragEventArgs e)
+    {
+        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null)
+        {
+            e.DragEffects = DragDropEffects.None;
+            ClearDragOverHighlight();
+            return;
+        }
+
+        var sourcePaths = FileDragDropService.ExtractPaths(e.Data);
+        if (sourcePaths.Count == 0)
+        {
+            e.DragEffects = DragDropEffects.None;
+            ClearDragOverHighlight();
+            return;
+        }
+
+        // Find folder under cursor if any
+        FileItem? targetFolder = null;
+        if (e.Source is Visual visual)
+        {
+            var element = visual;
+            while (element != null && element != this)
+            {
+                if (element is Control { DataContext: FileItem item } && item.IsDirectory)
+                {
+                    targetFolder = item;
+                    break;
+                }
+                element = element.GetVisualParent();
+            }
+        }
+
+        if (targetFolder != _hoveredDragTarget)
+        {
+            ClearDragOverHighlight();
+            if (targetFolder != null)
+            {
+                _hoveredDragTarget = targetFolder;
+                _hoveredDragTarget.IsDragOver = true;
+            }
+        }
+
+        string destDir = targetFolder?.FullPath ?? vm.SelectedTab.CurrentPath;
+        e.DragEffects = FileDragDropService.ResolveEffect(sourcePaths, destDir, e.KeyModifiers);
+        e.Handled = true;
+    }
+
+    private async void OnDrop(object? sender, DragEventArgs e)
+    {
+        var targetFolder = _hoveredDragTarget;
+        ClearDragOverHighlight();
+
+        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+
+        var sourcePaths = FileDragDropService.ExtractPaths(e.Data);
+        if (sourcePaths.Count == 0) return;
+
+        string destDir = targetFolder?.FullPath ?? vm.SelectedTab.CurrentPath;
+        var effect = FileDragDropService.ResolveEffect(sourcePaths, destDir, e.KeyModifiers);
+        if (effect == DragDropEffects.None) return;
+
+        bool isMove = effect.HasFlag(DragDropEffects.Move);
+        e.Handled = true;
+
+        await vm.ExecuteDropAsync(sourcePaths, destDir, isMove);
+    }
+
+    #endregion
 }

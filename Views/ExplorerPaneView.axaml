@@ -66,6 +66,11 @@
       <Setter Property="BorderBrush" Value="{DynamicResource AppHighlightBrush}"/>
       <Setter Property="BorderThickness" Value="1.5"/>
     </Style>
+    <Style Selector="Border.thumbnail-card.drag-over">
+      <Setter Property="Background" Value="#2A3D5A"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppHighlightBrush}"/>
+      <Setter Property="BorderThickness" Value="2"/>
+    </Style>
   </UserControl.Styles>
 
   <Grid RowDefinitions="Auto,Auto,*,Auto">
@@ -369,6 +374,7 @@
 
       <!-- Main File DataGrid (Details View) -->
       <DataGrid x:Name="FileDataGrid" Grid.Column="1"
+                DragDrop.AllowDrop="True"
                 ItemsSource="{Binding SelectedTab.FilteredItems}"
                 SelectedItem="{Binding SelectedTab.SelectedItem, Mode=TwoWay}"
                 IsVisible="{Binding IsDetailsView}"
@@ -686,6 +692,7 @@
       <!-- Thumbnail mode: vertically virtualized logical rows. A plain WrapPanel
            realizes every item and is intentionally avoided for large folders. -->
       <ListBox x:Name="ThumbnailListBox" Grid.Column="1"
+               DragDrop.AllowDrop="True"
                Classes="thumbnail-grid"
                ItemsSource="{Binding ThumbnailRows}"
                IsVisible="{Binding IsThumbnailView}"
@@ -785,6 +792,7 @@
                 <DataTemplate DataType="models:FileItem">
             <Border Classes="thumbnail-card"
                     Classes.selected="{Binding IsThumbnailSelected}"
+                    Classes.drag-over="{Binding IsDragOver}"
                     Width="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailCellWidth}"
                     Height="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailCellHeight}"
                     Padding="6"

@@ -1164,6 +1164,32 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         }
     }
 
+    public async Task ExecuteDropAsync(IEnumerable<string> sourcePaths, string destinationDirectory, bool isMove)
+    {
+        if (string.IsNullOrWhiteSpace(destinationDirectory) || !Directory.Exists(destinationDirectory))
+        {
+            destinationDirectory = SelectedTab?.CurrentPath ?? string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(destinationDirectory) || !Directory.Exists(destinationDirectory)) return;
+
+        var (successful, failed, createdPaths) = await ClipboardFileService.TransferFilesAsync(
+            sourcePaths,
+            destinationDirectory,
+            isMove,
+            CancellationToken.None);
+
+        if (SelectedTab != null && string.Equals(SelectedTab.CurrentPath.TrimEnd('\\', '/'), destinationDirectory.TrimEnd('\\', '/'), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            if (createdPaths != null && createdPaths.Count > 0)
+            {
+                SelectedTab.PendingSelectPaths = createdPaths;
+            }
+            await SelectedTab.RefreshAsync();
+        }
+        NotifyContextMenuProperties();
+    }
+
     [RelayCommand]
     public void CopyPath()
     {

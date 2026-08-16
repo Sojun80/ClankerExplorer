@@ -78,7 +78,40 @@ public static class ClipboardFileService
             isCutMode = _isCut;
         }
 
-        if (!Directory.Exists(destinationDirectory)) return (0, sources, new List<string>());
+        var result = await TransferFilesAsync(sources, destinationDirectory, isCutMode, cancellationToken);
+
+        lock (_lock)
+        {
+            if (isCutMode)
+            {
+                // Only remove successfully moved items from cut list; keep failed ones
+                foreach (var succ in result.successfulSourcePaths)
+                {
+                    _storedPaths.RemoveAll(p => string.Equals(p, succ, PathComparison));
+                }
+
+                if (_storedPaths.Count == 0)
+                {
+                    _isCut = false;
+                }
+            }
+        }
+
+        ClipboardChanged?.Invoke();
+        return (result.successfulSourcePaths.Count, result.failedPaths, result.createdDestinationPaths);
+    }
+
+    public static async Task<(List<string> successfulSourcePaths, List<string> failedPaths, List<string> createdDestinationPaths)> TransferFilesAsync(
+        IEnumerable<string> sourcePaths,
+        string destinationDirectory,
+        bool isMove,
+        CancellationToken cancellationToken = default)
+    {
+        var sources = sourcePaths?.ToList() ?? new List<string>();
+        if (!Directory.Exists(destinationDirectory) || sources.Count == 0)
+        {
+            return (new List<string>(), sources, new List<string>());
+        }
 
         var successfulPaths = new List<string>();
         var failedPaths = new List<string>();
@@ -95,9 +128,9 @@ public static class ClipboardFileService
                     if (File.Exists(source))
                     {
                         var fileName = Path.GetFileName(source);
-                        var dest = GetNonConflictingPath(destinationDirectory, fileName, isCutMode);
+                        var dest = GetNonConflictingPath(destinationDirectory, fileName, isMove);
 
-                        if (isCutMode)
+                        if (isMove)
                         {
                             File.Move(source, dest);
                         }
@@ -111,16 +144,16 @@ public static class ClipboardFileService
                     else if (Directory.Exists(source))
                     {
                         var dirName = Path.GetFileName(source.TrimEnd('\\', '/'));
-                        var dest = GetNonConflictingPath(destinationDirectory, dirName, isCutMode);
+                        var dest = GetNonConflictingPath(destinationDirectory, dirName, isMove);
 
                         if (IsDescendantOf(dest, source))
                         {
-                            Debug.WriteLine($"Cannot paste directory {source} into its own subdirectory {dest}");
+                            Debug.WriteLine($"Cannot transfer directory {source} into its own subdirectory {dest}");
                             failedPaths.Add(source);
                             continue;
                         }
 
-                        if (isCutMode)
+                        if (isMove)
                         {
                             Directory.Move(source, dest);
                             successfulPaths.Add(source);
@@ -147,31 +180,13 @@ public static class ClipboardFileService
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Failed to paste {source}: {ex.Message}");
+                    Debug.WriteLine($"Failed to transfer {source}: {ex.Message}");
                     failedPaths.Add(source);
                 }
             }
         }, cancellationToken).ConfigureAwait(false);
 
-        lock (_lock)
-        {
-            if (isCutMode)
-            {
-                // Only remove successfully moved items from cut list; keep failed ones
-                foreach (var succ in successfulPaths)
-                {
-                    _storedPaths.RemoveAll(p => string.Equals(p, succ, PathComparison));
-                }
-
-                if (_storedPaths.Count == 0)
-                {
-                    _isCut = false;
-                }
-            }
-        }
-
-        ClipboardChanged?.Invoke();
-        return (successfulPaths.Count, failedPaths, createdDestinationPaths);
+        return (successfulPaths, failedPaths, createdDestinationPaths);
     }
 
     private static string GetNonConflictingPath(string dir, string name, bool isMove)

@@ -922,4 +922,53 @@ public sealed class UiSmokeTests
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }
+
+    [Fact]
+    public void FileDragDropService_DeterminesCorrectEffect_SameVsDifferentVolume()
+    {
+        var sameVolSources = new[] { @"C:\Folder1\file.txt", @"C:\Folder1\image.png" };
+        var sameVolDest = @"C:\Folder2";
+
+        // Same volume default = Move
+        var moveEffect = FileDragDropService.ResolveEffect(sameVolSources, sameVolDest, Avalonia.Input.KeyModifiers.None);
+        Assert.Equal(Avalonia.Input.DragDropEffects.Move, moveEffect);
+
+        // Same volume with Ctrl = Copy
+        var ctrlEffect = FileDragDropService.ResolveEffect(sameVolSources, sameVolDest, Avalonia.Input.KeyModifiers.Control);
+        Assert.Equal(Avalonia.Input.DragDropEffects.Copy, ctrlEffect);
+
+        // Different volume default = Copy
+        var diffVolSources = new[] { @"C:\Folder1\file.txt" };
+        var diffVolDest = @"D:\Folder2";
+        var diffVolEffect = FileDragDropService.ResolveEffect(diffVolSources, diffVolDest, Avalonia.Input.KeyModifiers.None);
+        Assert.Equal(Avalonia.Input.DragDropEffects.Copy, diffVolEffect);
+
+        // Different volume with Shift = Move
+        var shiftEffect = FileDragDropService.ResolveEffect(diffVolSources, diffVolDest, Avalonia.Input.KeyModifiers.Shift);
+        Assert.Equal(Avalonia.Input.DragDropEffects.Move, shiftEffect);
+    }
+
+    [Fact]
+    public void FileDragDropService_PreventsRecursiveFolderDrop()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "clanker_drag_rec_" + Guid.NewGuid().ToString("N"));
+        var parentDir = Path.Combine(tempRoot, "Parent");
+        var childDir = Path.Combine(parentDir, "Child");
+        Directory.CreateDirectory(childDir);
+
+        try
+        {
+            // Moving Parent into Child -> None (illegal)
+            var effect = FileDragDropService.ResolveEffect(new[] { parentDir }, childDir, Avalonia.Input.KeyModifiers.None);
+            Assert.Equal(Avalonia.Input.DragDropEffects.None, effect);
+
+            // Dropping directory onto itself -> None (illegal)
+            var selfEffect = FileDragDropService.ResolveEffect(new[] { parentDir }, parentDir, Avalonia.Input.KeyModifiers.None);
+            Assert.Equal(Avalonia.Input.DragDropEffects.None, selfEffect);
+        }
+        finally
+        {
+            try { Directory.Delete(tempRoot, true); } catch { }
+        }
+    }
 }
