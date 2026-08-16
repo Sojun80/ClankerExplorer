@@ -280,4 +280,34 @@ public sealed class UiSmokeTests
             window.Close();
         }
     }
+
+    [AvaloniaFact]
+    public void MainWindow_RendersBuildNumberAndTimestampInBottomRight()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+        using var main = new MainViewModel(loadSidebarData: false);
+
+        Assert.False(string.IsNullOrWhiteSpace(main.BuildDisplayString));
+        Assert.StartsWith("Build #", main.BuildDisplayString);
+        Assert.Contains(BuildInfoService.ShortDateTime, main.BuildDisplayString);
+
+        var window = new MainWindow { DataContext = main };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var buildTextBlock = window.GetVisualDescendants()
+                .OfType<TextBlock>()
+                .FirstOrDefault(tb => tb.Text == main.BuildDisplayString);
+
+            Assert.NotNull(buildTextBlock);
+            Assert.True(buildTextBlock.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
 }

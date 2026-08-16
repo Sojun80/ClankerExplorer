@@ -84,6 +84,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private DriveModel? _currentDrive;
 
+    public string BuildDisplayString => BuildInfoService.DisplayString;
+    public string BuildTooltipString => BuildInfoService.TooltipString;
+
     public event Action<string, string>? RequestCreateItem;
     public event Action? RequestOpenNetworkShare;
     public event Action? RequestOpenSettings;

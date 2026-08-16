@@ -562,7 +562,17 @@
                        Foreground="{DynamicResource AppTextBrush}" FontSize="11" FontFamily="{DynamicResource AppMonoFont}" FontWeight="Bold"/>
           </StackPanel>
 
-          <!-- Middle: Shortcuts Helper -->
+          <!-- Far Right: Build number and build timestamp -->
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="8,0,0,0">
+            <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}"/>
+            <Border Background="{DynamicResource AppSurfaceBrush}" CornerRadius="3" Padding="5,1"
+                    ToolTip.Tip="{Binding BuildTooltipString}">
+              <TextBlock Text="{Binding BuildDisplayString}"
+                         Foreground="{DynamicResource AppSubTextBrush}" FontSize="10" FontFamily="{DynamicResource AppMonoFont}"/>
+            </Border>
+          </StackPanel>
+
+          <!-- Middle / Right: Drive telemetry & Shortcuts Helper -->
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
             <!-- Drive telemetry -->
             <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding CurrentDrive, Converter={x:Static ObjectConverters.IsNotNull}}">

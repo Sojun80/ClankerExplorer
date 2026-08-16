@@ -24,6 +24,37 @@
     <Compile Remove="tools\**\*.cs" />
   </ItemGroup>
 
+  <Target Name="GenerateBuildMetadata" BeforeTargets="BeforeCompile;CoreCompile">
+    <PropertyGroup>
+      <BuildDateUtc>$([System.DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"))</BuildDateUtc>
+      <BuildDateShort>$([System.DateTime]::Now.ToString("yyyy-MM-dd HH:mm"))</BuildDateShort>
+      <BuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</BuildInfoFile>
+    </PropertyGroup>
+    <Exec Command="git rev-list --count HEAD" ConsoleToMSBuild="true" StandardOutputImportance="low" IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitCount" />
+    </Exec>
+    <PropertyGroup>
+      <ResolvedBuildNumber Condition="'$(GitCommitCount)' != ''">$([System.String]::Copy('$(GitCommitCount)').Trim())</ResolvedBuildNumber>
+      <ResolvedBuildNumber Condition="'$(ResolvedBuildNumber)' == ''">1</ResolvedBuildNumber>
+    </PropertyGroup>
+    <ItemGroup>
+      <_BuildInfoLine Include="// &lt;auto-generated /&gt;" />
+      <_BuildInfoLine Include="namespace ClankerExplorer%3B" />
+      <_BuildInfoLine Include="public static class BuildInfo" />
+      <_BuildInfoLine Include="{" />
+      <_BuildInfoLine Include="    public const string BuildNumber = &quot;$(ResolvedBuildNumber)&quot;%3B" />
+      <_BuildInfoLine Include="    public const string BuildTimestamp = &quot;$(BuildDateUtc)&quot;%3B" />
+      <_BuildInfoLine Include="    public const string ShortDateTime = &quot;$(BuildDateShort)&quot;%3B" />
+      <_BuildInfoLine Include="    public const string DisplayString = &quot;Build $(ResolvedBuildNumber) • $(BuildDateShort)&quot;%3B" />
+      <_BuildInfoLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(BuildInfoFile)" Lines="@(_BuildInfoLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(BuildInfoFile)" />
+      <FileWrites Include="$(BuildInfoFile)" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.2.3" />
     <PackageReference Include="Avalonia.Controls.ColorPicker" Version="11.2.3" />
