@@ -557,4 +557,57 @@ public sealed class UiSmokeTests
         Assert.False(item1.IsThumbnailSelected);
         Assert.False(item2.IsThumbnailSelected);
     }
+
+    [AvaloniaFact]
+    public async Task ThumbnailSorting_FieldAndDirectionControls_PreservesSortState()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderA, "PANE 1");
+        await pane.SelectedTab!.RefreshAsync();
+
+        // 1. Initial default sort is Name Ascending
+        Assert.Equal("Name", pane.SelectedTab.SortColumn);
+        Assert.True(pane.SelectedTab.SortAscending);
+        Assert.Equal("Sort: Name ↑", pane.ThumbnailSortDisplay);
+        Assert.True(pane.IsSortByName);
+        Assert.True(pane.IsSortAscending);
+
+        // 2. Change sort to Date Modified
+        pane.SetThumbnailSort("Modified");
+        Assert.Equal("Modified", pane.SelectedTab.SortColumn);
+        Assert.True(pane.SelectedTab.SortAscending);
+        Assert.Equal("Sort: Date Modified ↑", pane.ThumbnailSortDisplay);
+        Assert.True(pane.IsSortByModified);
+
+        // 3. Change direction to Descending
+        pane.SetThumbnailSort("desc");
+        Assert.False(pane.SelectedTab.SortAscending);
+        Assert.Equal("Sort: Date Modified ↓", pane.ThumbnailSortDisplay);
+        Assert.True(pane.IsSortDescending);
+
+        // 4. Change sort to Size
+        pane.SetThumbnailSort("Size");
+        Assert.Equal("Size", pane.SelectedTab.SortColumn);
+        Assert.True(pane.SelectedTab.SortAscending);
+        Assert.Equal("Sort: Size ↑", pane.ThumbnailSortDisplay);
+        Assert.True(pane.IsSortBySize);
+
+        // 5. Change thumbnail size (must not reset sort)
+        pane.ThumbnailSize = 220;
+        Assert.Equal("Size", pane.SelectedTab.SortColumn);
+        Assert.True(pane.SelectedTab.SortAscending);
+
+        // 6. Navigate away and back to test folder view state restoration
+        pane.SelectedTab.NavigateTo(fs.FolderB);
+        await pane.SelectedTab.RefreshAsync();
+
+        pane.SelectedTab.NavigateTo(fs.FolderA);
+        await pane.SelectedTab.RefreshAsync();
+
+        Assert.Equal("Size", pane.SelectedTab.SortColumn);
+        Assert.True(pane.SelectedTab.SortAscending);
+        Assert.Equal(220, pane.ThumbnailSize);
+    }
 }

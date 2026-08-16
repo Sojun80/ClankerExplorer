@@ -327,6 +327,65 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     private string BuildColumnHeader(string title, string sortColumn) =>
         SelectedTab?.SortColumn == sortColumn ? $"{title} {(SelectedTab.SortAscending ? "↑" : "↓")}" : title;
 
+    public string ThumbnailSortDisplay
+    {
+        get
+        {
+            var col = SelectedTab?.SortColumn;
+            var name = col switch
+            {
+                "Modified" or "Date Modified" => "Date Modified",
+                "Type" or "Extension" => "Type",
+                "Size" => "Size",
+                "Created" or "Date Created" => "Date Created",
+                "Accessed" or "Date Accessed" => "Date Accessed",
+                _ => "Name"
+            };
+            var arrow = (SelectedTab?.SortAscending ?? true) ? "↑" : "↓";
+            return $"Sort: {name} {arrow}";
+        }
+    }
+
+    public bool IsSortByName => SelectedTab?.SortColumn is "Name" or null;
+    public bool IsSortByType => SelectedTab?.SortColumn is "Type" or "Extension";
+    public bool IsSortBySize => SelectedTab?.SortColumn is "Size";
+    public bool IsSortByModified => SelectedTab?.SortColumn is "Modified" or "Date Modified";
+    public bool IsSortAscending => SelectedTab?.SortAscending ?? true;
+    public bool IsSortDescending => !(SelectedTab?.SortAscending ?? true);
+
+    [RelayCommand]
+    public void SetThumbnailSort(string column)
+    {
+        if (SelectedTab == null || string.IsNullOrWhiteSpace(column)) return;
+        if (column.Equals("asc", StringComparison.OrdinalIgnoreCase))
+        {
+            SelectedTab.SortAscending = true;
+        }
+        else if (column.Equals("desc", StringComparison.OrdinalIgnoreCase))
+        {
+            SelectedTab.SortAscending = false;
+        }
+        else if (column.Equals("toggle", StringComparison.OrdinalIgnoreCase))
+        {
+            SelectedTab.SortAscending = !SelectedTab.SortAscending;
+        }
+        else
+        {
+            if (SelectedTab.SortColumn.Equals(column, StringComparison.OrdinalIgnoreCase))
+            {
+                SelectedTab.SortAscending = !SelectedTab.SortAscending;
+            }
+            else
+            {
+                SelectedTab.SortColumn = column;
+                SelectedTab.SortAscending = true;
+            }
+        }
+        _ = SelectedTab.ApplyFilterAsync();
+        NotifySortHeadersChanged();
+        PersistCurrentFolderViewState();
+    }
+
     public void NotifySortHeadersChanged()
     {
         OnPropertyChanged(nameof(NameColumnHeader));
@@ -339,6 +398,13 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(AttributesColumnHeader));
         OnPropertyChanged(nameof(PermissionsColumnHeader));
         OnPropertyChanged(nameof(OwnerGroupColumnHeader));
+        OnPropertyChanged(nameof(ThumbnailSortDisplay));
+        OnPropertyChanged(nameof(IsSortByName));
+        OnPropertyChanged(nameof(IsSortByType));
+        OnPropertyChanged(nameof(IsSortBySize));
+        OnPropertyChanged(nameof(IsSortByModified));
+        OnPropertyChanged(nameof(IsSortAscending));
+        OnPropertyChanged(nameof(IsSortDescending));
     }
 
     public void NotifyColumnWidthsChanged()

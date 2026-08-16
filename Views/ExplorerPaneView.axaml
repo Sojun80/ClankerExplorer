@@ -262,14 +262,63 @@
             </StackPanel>
           </Border>
 
-          <!-- Thumbnail Size Slider (Visible in Thumbnail Mode) -->
-          <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+          <!-- Thumbnail Controls: Size Slider + Sort Dropdown (Visible in Thumbnail Mode) -->
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
                       IsVisible="{Binding IsThumbnailView}" Margin="4,0,0,0">
-            <TextBlock Text="🔍" FontSize="10" VerticalAlignment="Center" Foreground="{DynamicResource AppSubTextBrush}"/>
-            <Slider Value="{Binding ThumbnailSize, Mode=TwoWay}"
-                    Minimum="64" Maximum="320" SmallChange="16" LargeChange="32"
-                    Width="85" Height="20" VerticalAlignment="Center"
-                    ToolTip.Tip="{Binding ThumbnailSize, StringFormat='Thumbnail Size: {0:0}px'}"/>
+            <!-- Thumbnail Size Slider -->
+            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+              <TextBlock Text="🔍" FontSize="10" VerticalAlignment="Center" Foreground="{DynamicResource AppSubTextBrush}"/>
+              <Slider Value="{Binding ThumbnailSize, Mode=TwoWay}"
+                      Minimum="64" Maximum="320" SmallChange="16" LargeChange="32"
+                      Width="85" Height="20" VerticalAlignment="Center"
+                      ToolTip.Tip="{Binding ThumbnailSize, StringFormat='Thumbnail Size: {0:0}px'}"/>
+            </StackPanel>
+
+            <TextBlock Text="|" Foreground="{DynamicResource AppBorderBrush}" VerticalAlignment="Center" Margin="2,0"/>
+
+            <!-- Compact Thumbnail Sort Dropdown -->
+            <Button Classes="power-btn" Height="22" Padding="6,2"
+                    ToolTip.Tip="Change Sort Field &amp; Direction (Name, Date, Type, Size)">
+              <Button.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                  <MenuItem Header="Name" Command="{Binding SetThumbnailSortCommand}" CommandParameter="Name">
+                    <MenuItem.Icon>
+                      <TextBlock Text="✓" IsVisible="{Binding IsSortByName}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <MenuItem Header="Date Modified" Command="{Binding SetThumbnailSortCommand}" CommandParameter="Modified">
+                    <MenuItem.Icon>
+                      <TextBlock Text="✓" IsVisible="{Binding IsSortByModified}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <MenuItem Header="Type" Command="{Binding SetThumbnailSortCommand}" CommandParameter="Type">
+                    <MenuItem.Icon>
+                      <TextBlock Text="✓" IsVisible="{Binding IsSortByType}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <MenuItem Header="Size" Command="{Binding SetThumbnailSortCommand}" CommandParameter="Size">
+                    <MenuItem.Icon>
+                      <TextBlock Text="✓" IsVisible="{Binding IsSortBySize}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <Separator Background="{DynamicResource AppBorderBrush}"/>
+                  <MenuItem Header="↑ Ascending" Command="{Binding SetThumbnailSortCommand}" CommandParameter="asc">
+                    <MenuItem.Icon>
+                      <TextBlock Text="✓" IsVisible="{Binding IsSortAscending}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+                    </MenuItem.Icon>
+                  </MenuItem>
+                  <MenuItem Header="↓ Descending" Command="{Binding SetThumbnailSortCommand}" CommandParameter="desc">
+                    <MenuItem.Icon>
+                      <TextBlock Text="✓" IsVisible="{Binding IsSortDescending}" Foreground="{DynamicResource AppHighlightBrush}" FontWeight="Bold"/>
+                    </MenuItem.Icon>
+                  </MenuItem>
+                </MenuFlyout>
+              </Button.Flyout>
+              <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                <TextBlock Text="{Binding ThumbnailSortDisplay}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBlock Text="▾" FontSize="9" VerticalAlignment="Center" Foreground="{DynamicResource AppSubTextBrush}"/>
+              </StackPanel>
+            </Button>
           </StackPanel>
         </StackPanel>
       </Grid>
