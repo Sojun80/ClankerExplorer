@@ -230,26 +230,22 @@
                       Background="Transparent"
                       HeadersVisibility="Column">
               <DataGrid.Columns>
-                <DataGridTemplateColumn Header="Name" Width="2*">
+                <DataGridTemplateColumn Header="Name" Width="*">
                   <DataGridTemplateColumn.CellTemplate>
                     <DataTemplate DataType="preview:ZipEntryItem">
                       <StackPanel Orientation="Horizontal" Spacing="6" Margin="4,2">
                         <TextBlock Text="{Binding IndentPadding}"/>
                         <Image Source="{Binding Icon}" Width="16" Height="16" VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding Name}" FontWeight="{Binding IsDirectory, Converter={x:Static ObjectConverters.IsNull}, FallbackValue='Normal'}"
-                                   VerticalAlignment="Center" Foreground="{DynamicResource AppTextBrush}"/>
+                                   VerticalAlignment="Center" Foreground="{DynamicResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
                       </StackPanel>
                     </DataTemplate>
                   </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
 
-                <DataGridTextColumn Header="Size" Binding="{Binding FormattedSize}" Width="70"
+                <DataGridTextColumn Header="Size" Binding="{Binding FormattedSize}" Width="75"
                                     FontFamily="{DynamicResource AppMonoFont}"/>
-                <DataGridTextColumn Header="Packed" Binding="{Binding FormattedCompressedSize}" Width="70"
-                                    FontFamily="{DynamicResource AppMonoFont}"/>
-                <DataGridTextColumn Header="Ratio" Binding="{Binding CompressionRatio}" Width="50"
-                                    FontFamily="{DynamicResource AppMonoFont}"/>
-                <DataGridTextColumn Header="Modified" Binding="{Binding ModifiedTime}" Width="105"
+                <DataGridTextColumn Header="Ratio" Binding="{Binding CompressionRatio}" Width="55"
                                     FontFamily="{DynamicResource AppMonoFont}"/>
               </DataGrid.Columns>
             </DataGrid>

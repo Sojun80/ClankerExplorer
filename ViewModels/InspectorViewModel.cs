@@ -309,21 +309,21 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
                     PreviewErrorMessage = pdfInfo.ErrorMessage ?? "Failed to load PDF document.";
                 }
             }
-            // 4. ZIP Preview
-            else if (ZipPreviewService.Instance.IsZipFile(filePath))
+            // 4. ZIP / RAR / Archive Preview
+            else if (ZipPreviewService.Instance.IsArchiveFile(filePath))
             {
                 ActivePreviewType = "zip";
-                var zipResult = await ZipPreviewService.Instance.LoadZipPreviewAsync(filePath, token);
+                var zipResult = await ZipPreviewService.Instance.LoadArchivePreviewAsync(filePath, token);
                 if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
 
                 if (zipResult.Success)
                 {
                     ZipEntries = new ObservableCollection<ZipEntryItem>(zipResult.Entries);
-                    ZipSummaryDisplay = $"{zipResult.TotalFileCount} files, {zipResult.TotalFolderCount} folders ({zipResult.FormattedTotalSize})";
+                    ZipSummaryDisplay = $"{zipResult.TotalFileCount} items • {zipResult.FormattedTotalSize} • {zipResult.OverallRatio}";
                 }
                 else
                 {
-                    PreviewErrorMessage = zipResult.ErrorMessage ?? "Unable to inspect ZIP archive.";
+                    PreviewErrorMessage = zipResult.ErrorMessage ?? "Unable to inspect archive.";
                 }
             }
             // 5. Text / Binary / Directory Fallback

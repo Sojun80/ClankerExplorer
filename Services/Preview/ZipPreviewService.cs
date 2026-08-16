@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -20,7 +21,6 @@ public class ZipEntryItem
     public long UncompressedSizeBytes { get; set; }
     public long CompressedSizeBytes { get; set; }
     public string FormattedSize => IsDirectory ? "<DIR>" : FileSystemService.FormatBytes(UncompressedSizeBytes);
-    public string FormattedCompressedSize => IsDirectory ? "-" : FileSystemService.FormatBytes(CompressedSizeBytes);
     public string CompressionRatio
     {
         get
@@ -30,7 +30,6 @@ public class ZipEntryItem
             return $"{Math.Clamp(ratio, 0, 100):F0}%";
         }
     }
-    public string ModifiedTime { get; set; } = string.Empty;
     public int Depth { get; set; }
     public string IndentPadding => new string(' ', Depth * 4);
     public IImage? Icon { get; set; }
@@ -45,7 +44,6 @@ public class ZipPreviewResult
     public long TotalUncompressedBytes { get; set; }
     public long TotalCompressedBytes { get; set; }
     public string FormattedTotalSize => FileSystemService.FormatBytes(TotalUncompressedBytes);
-    public string FormattedTotalCompressedSize => FileSystemService.FormatBytes(TotalCompressedBytes);
     public string OverallRatio
     {
         get
@@ -59,30 +57,49 @@ public class ZipPreviewResult
 }
 
 /// <summary>
-/// Fast asynchronous preview reader for ZIP archives without extracting files.
+/// Fast asynchronous preview reader for ZIP, RAR, 7Z and compressed archives without extraction.
 /// </summary>
 public class ZipPreviewService
 {
     private static readonly Lazy<ZipPreviewService> _instance = new(() => new ZipPreviewService());
     public static ZipPreviewService Instance => _instance.Value;
 
-    public bool IsZipFile(string? filePath)
+    private static readonly HashSet<string> ArchiveExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz", ".txz", ".cab", ".iso", ".wim"
+    };
+
+    public bool IsArchiveFile(string? filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath)) return false;
         var ext = Path.GetExtension(filePath);
-        return string.Equals(ext, ".zip", StringComparison.OrdinalIgnoreCase);
+        return ArchiveExtensions.Contains(ext);
     }
 
     /// <summary>
-    /// Asynchronously parses the central directory of a ZIP archive to build an entry list.
+    /// Asynchronously parses archive metadata to build entry list with Name, Size, and Compression %.
     /// </summary>
-    public async Task<ZipPreviewResult> LoadZipPreviewAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task<ZipPreviewResult> LoadArchivePreviewAsync(string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
         {
             return new ZipPreviewResult { Success = false, ErrorMessage = "Archive file not found." };
         }
 
+        string ext = Path.GetExtension(filePath).ToLowerInvariant();
+
+        if (ext == ".zip")
+        {
+            return await LoadZipEntriesAsync(filePath, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            return await LoadExternalArchiveEntriesAsync(filePath, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<ZipPreviewResult> LoadZipEntriesAsync(string filePath, CancellationToken cancellationToken)
+    {
         return await Task.Run(() =>
         {
             try
@@ -113,7 +130,6 @@ public class ZipPreviewService
                     }
                     else
                     {
-                        // Collect implicit parent directories if not already recorded
                         string[] parts = normalized.Split('/');
                         string currentPath = "";
                         for (int i = 0; i < parts.Length - 1; i++)
@@ -124,7 +140,6 @@ public class ZipPreviewService
                     }
                 }
 
-                // Add directory items
                 foreach (var folder in folderSet.OrderBy(f => f))
                 {
                     string folderName = folder.Contains('/') ? folder.Substring(folder.LastIndexOf('/') + 1) : folder;
@@ -137,14 +152,12 @@ public class ZipPreviewService
                         IsDirectory = true,
                         UncompressedSizeBytes = 0,
                         CompressedSizeBytes = 0,
-                        ModifiedTime = "-",
                         Depth = depth,
                         Icon = FileIconService.Instance.GetFolderIcon()
                     });
                     folderCount++;
                 }
 
-                // Add file items
                 foreach (var entry in archive.Entries)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -168,7 +181,6 @@ public class ZipPreviewService
                         IsDirectory = false,
                         UncompressedSizeBytes = entry.Length,
                         CompressedSizeBytes = entry.CompressedLength,
-                        ModifiedTime = entry.LastWriteTime.ToString("yyyy-MM-dd HH:mm"),
                         Depth = depth,
                         Icon = FileIconService.Instance.GetExtensionIcon(Path.GetExtension(fileName))
                     });
@@ -178,7 +190,6 @@ public class ZipPreviewService
                     totalCompressed += entry.CompressedLength;
                 }
 
-                // Order by: directories first, then files, grouped hierarchically
                 var sorted = entries
                     .OrderBy(e => e.FullPath.Contains('/') ? e.FullPath.Substring(0, e.FullPath.LastIndexOf('/')) : "")
                     .ThenByDescending(e => e.IsDirectory)
@@ -206,6 +217,134 @@ public class ZipPreviewService
             catch (Exception ex)
             {
                 return new ZipPreviewResult { Success = false, ErrorMessage = $"Cannot open archive: {ex.Message}" };
+            }
+        }, cancellationToken);
+    }
+
+    private async Task<ZipPreviewResult> LoadExternalArchiveEntriesAsync(string filePath, CancellationToken cancellationToken)
+    {
+        return await Task.Run(() =>
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Check for 7z CLI in Program Files
+                string cli = @"C:\Program Files\7-Zip\7z.exe";
+                if (!File.Exists(cli)) cli = @"C:\Program Files (x86)\7-Zip\7z.exe";
+
+                if (!File.Exists(cli))
+                {
+                    // Fallback to basic file info
+                    var fi = new FileInfo(filePath);
+                    return new ZipPreviewResult
+                    {
+                        Success = true,
+                        Entries = new List<ZipEntryItem>
+                        {
+                            new()
+                            {
+                                Name = Path.GetFileName(filePath),
+                                FullPath = Path.GetFileName(filePath),
+                                IsDirectory = false,
+                                UncompressedSizeBytes = fi.Length,
+                                CompressedSizeBytes = fi.Length,
+                                Icon = FileIconService.Instance.GetExtensionIcon(Path.GetExtension(filePath))
+                            }
+                        },
+                        TotalFileCount = 1,
+                        TotalUncompressedBytes = fi.Length,
+                        TotalCompressedBytes = fi.Length
+                    };
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = cli,
+                    Arguments = $"l -slt \"{filePath}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var proc = Process.Start(psi);
+                if (proc == null) throw new InvalidOperationException("Failed to spawn 7z reader");
+
+                string output = proc.StandardOutput.ReadToEnd();
+                proc.WaitForExit();
+
+                var entries = new List<ZipEntryItem>();
+                int fileCount = 0;
+                int folderCount = 0;
+                long totalUncompressed = 0;
+                long totalCompressed = 0;
+
+                var blocks = output.Split(new[] { "\r\n\r\n", "\n\n" }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var block in blocks)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var lines = block.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                    var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var line in lines)
+                    {
+                        int eq = line.IndexOf('=');
+                        if (eq > 0)
+                        {
+                            string key = line.Substring(0, eq).Trim();
+                            string val = line.Substring(eq + 1).Trim();
+                            dict[key] = val;
+                        }
+                    }
+
+                    if (dict.TryGetValue("Path", out var path) && !string.IsNullOrEmpty(path))
+                    {
+                        bool isDir = dict.TryGetValue("Folder", out var f) && f == "+";
+                        long size = dict.TryGetValue("Size", out var sz) && long.TryParse(sz, out var sVal) ? sVal : 0;
+                        long packed = dict.TryGetValue("Packed Size", out var psz) && long.TryParse(psz, out var pVal) ? pVal : size;
+
+                        string name = path.Contains('\\') ? path.Substring(path.LastIndexOf('\\') + 1) : path;
+                        int depth = path.Count(c => c == '\\');
+
+                        entries.Add(new ZipEntryItem
+                        {
+                            Name = isDir ? name + "/" : name,
+                            FullPath = path.Replace('\\', '/'),
+                            IsDirectory = isDir,
+                            UncompressedSizeBytes = size,
+                            CompressedSizeBytes = packed,
+                            Depth = depth,
+                            Icon = isDir ? FileIconService.Instance.GetFolderIcon() : FileIconService.Instance.GetExtensionIcon(Path.GetExtension(name))
+                        });
+
+                        if (isDir) folderCount++;
+                        else
+                        {
+                            fileCount++;
+                            totalUncompressed += size;
+                            totalCompressed += packed;
+                        }
+                    }
+                }
+
+                return new ZipPreviewResult
+                {
+                    Success = true,
+                    Entries = entries,
+                    TotalFileCount = fileCount,
+                    TotalFolderCount = folderCount,
+                    TotalUncompressedBytes = totalUncompressed,
+                    TotalCompressedBytes = totalCompressed
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return new ZipPreviewResult { Success = false, ErrorMessage = ex.Message };
             }
         }, cancellationToken);
     }

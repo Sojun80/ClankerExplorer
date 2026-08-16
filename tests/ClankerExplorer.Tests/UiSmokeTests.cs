@@ -1044,7 +1044,7 @@ public sealed class UiSmokeTests
                 }
             }
 
-            var result = await ClankerExplorer.Services.Preview.ZipPreviewService.Instance.LoadZipPreviewAsync(tempZip);
+            var result = await ClankerExplorer.Services.Preview.ZipPreviewService.Instance.LoadArchivePreviewAsync(tempZip);
             Assert.True(result.Success);
             Assert.Equal(2, result.TotalFileCount);
             Assert.True(result.TotalFolderCount >= 2);
