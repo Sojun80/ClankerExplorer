@@ -16,6 +16,9 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
 
 - 📑 **Tabs & Dual-Pane Navigation**: Multi-tab browsing with independent address bars and file grids; side-by-side Dual Pane split (`Ctrl+Shift+D`).
 - 🖱️ **Hardware Mouse Navigation**: Native hardware thumb buttons (`XButton1` / `XButton2`) for instant Back and Forward history navigation.
+- 🔀 **System-Wide Drag & Drop**: Full Windows OLE drag-and-drop — drag files out of ClankerExplorer into Explorer, Desktop, browsers, email clients, chat apps, editors, or any application that accepts file drops. Likewise, drop files from any external app into ClankerExplorer with automatic Copy/Move resolution based on drive and modifier keys.
+- 🖼️ **Rich Thumbnails & Video Previews**: Native Windows shell thumbnail extraction for images, videos (MP4, MKV, AVI, MOV, WMV, etc.), PDFs, and other thumbnail-capable file types. Video files show actual frame previews — not generic icons.
+- 🎨 **High-Resolution File Icons**: True 256×256 Jumbo shell icons via `SHGetImageList(SHIL_JUMBO)` for crystal-clear file type icons in Thumbnail/Grid view. No more blurry upscaled 32px icons — PDF, ZIP, EXE, folder, and all other file type icons render at native Windows quality.
 - 📋 **Permanent Directory Path**: Always-visible path with a 1-click **"Copy Path"** button (`Ctrl+Shift+C`), plus full path copy on right-click.
 - 👁️ **Zero File Hiding**: File extensions (`.exe`, `.tar.gz`, `.cs`, `.json`) are always displayed. Hidden and system files are clearly highlighted.
 - 📊 **Configurable Data Columns**:
