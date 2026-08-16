@@ -88,6 +88,30 @@
           <TextBlock DockPanel.Dock="Right" Text="{Binding ZipSummaryDisplay}" FontSize="10"
                      FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppHighlightBrush}"
                      VerticalAlignment="Center" IsVisible="{Binding IsZipPreview}" TextTrimming="CharacterEllipsis"/>
+
+          <!-- 3D / STL Navigation & View Toolbar on Right (Visible when viewing an STL) -->
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
+                      IsVisible="{Binding IsStlPreview}">
+            <Button Command="{Binding ZoomStlOutCommand}" ToolTip.Tip="Zoom Out (Wheel Down)"
+                    Classes="power-btn" Padding="5,2" FontSize="10" MinWidth="20">
+              <TextBlock Text="−" FontWeight="Bold" HorizontalAlignment="Center"/>
+            </Button>
+            <Button Command="{Binding ResetStlViewCommand}" ToolTip.Tip="Reset View / Recenter (Double-Click)"
+                    Classes="power-btn" Padding="6,2" FontSize="9.5">
+              <TextBlock Text="⟲ Reset" FontSize="9" FontWeight="SemiBold"
+                         FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppHighlightBrush}"/>
+            </Button>
+            <Button Command="{Binding ZoomStlInCommand}" ToolTip.Tip="Zoom In (Wheel Up)"
+                    Classes="power-btn" Padding="5,2" FontSize="10" MinWidth="20">
+              <TextBlock Text="+" FontWeight="Bold" HorizontalAlignment="Center"/>
+            </Button>
+            <ToggleButton IsChecked="{Binding StlWireframe, Mode=TwoWay}"
+                          Command="{Binding ToggleStlWireframeCommand}"
+                          ToolTip.Tip="Toggle Wireframe Mode"
+                          Classes="power-btn" Padding="5,2" FontSize="9.5">
+              <TextBlock Text="🌐" FontSize="9" HorizontalAlignment="Center"/>
+            </ToggleButton>
+          </StackPanel>
         </DockPanel>
       </Border>
 
@@ -308,7 +332,49 @@
             </DataGrid>
           </Border>
 
-          <!-- 5. TEXT PREVIEW -->
+          <!-- 5. 3D STL PREVIEW -->
+          <Border Grid.Row="0" Background="#080C14" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Margin="0,0,0,8" ClipToBounds="True"
+                  IsVisible="{Binding IsStlPreview}">
+            <Panel Background="Transparent"
+                   PointerPressed="On3DPointerPressed"
+                   PointerMoved="On3DPointerMoved"
+                   PointerReleased="On3DPointerReleased"
+                   PointerWheelChanged="On3DPointerWheelChanged"
+                   DoubleTapped="On3DDoubleTapped">
+              <!-- 3D Rendered Bitmap -->
+              <Image Source="{Binding StlBitmap}"
+                     Stretch="Uniform"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     RenderOptions.BitmapInterpolationMode="HighQuality"/>
+
+              <!-- Interaction Hint Overlay (Top Left) -->
+              <Border Background="#99000000" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                      CornerRadius="3" Padding="5,2" Margin="6"
+                      HorizontalAlignment="Left" VerticalAlignment="Top"
+                      IsHitTestVisible="False">
+                <TextBlock Text="🖱️ Drag: Rotate • Right-Drag: Pan • Wheel: Zoom" FontSize="9"
+                           Foreground="{DynamicResource AppSubTextBrush}"/>
+              </Border>
+
+              <!-- Dimension & Triangle Badge Overlay (Bottom Right) -->
+              <Border Background="#DD0D1520" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                      CornerRadius="4" Padding="6,2" Margin="8"
+                      HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                      IsHitTestVisible="False">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{Binding StlTrianglesDisplay}" FontSize="10"
+                             Foreground="{DynamicResource AppTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                  <TextBlock Text="•" FontSize="10" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <TextBlock Text="{Binding StlDimensionsDisplay}" FontSize="10"
+                             Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}" FontWeight="Bold"/>
+                </StackPanel>
+              </Border>
+            </Panel>
+          </Border>
+
+          <!-- 6. TEXT PREVIEW -->
           <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
                   CornerRadius="4" Padding="6" Margin="0,0,0,8"
                   IsVisible="{Binding IsTextPreview}">

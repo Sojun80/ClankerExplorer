@@ -37,6 +37,7 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
   - 🎬 **Video Playback**: Hardware-accelerated 60fps LibVLC video engine with timeline scrubbing, instant Play/Pause, and persistent audio volume/mute preferences.
   - 📄 **PDF Document Viewer**: Multi-page PDF renderer with page navigation (`Next`/`Prev`), zoom controls (`Ctrl+Wheel`), and fit-to-window mode.
   - 🗜️ **Archive Inspector**: Instant ZIP, RAR, and compressed archive file tree viewer showing file names, uncompressed sizes, and compression ratios without manual extraction.
+  - 🧊 **3D Model Viewer & Thumbnails**: Interactive 3D preview for Binary & ASCII `.stl` files. High-performance software Z-buffer rasterizer with directional + specular lighting, orbit rotation (Left Drag), pan (Right Drag), wheel zoom, wireframe toggle, auto-framing, and dimensions/triangle count badges. Also generates 3D rendered thumbnails for STL files in the file grid.
   - 🖼️ **Image Viewer**: High-resolution image preview with fit/actual toggle, zoom slider, and mouse wheel controls.
   - 💻 **Code & Hex Viewer**: Syntax viewer, Binary Hex dump (Offset / Hex / ASCII), and instant SHA-256 & MD5 hash calculator.
 - ⚡ **Live Quick Filter (`Ctrl+F`)**: Real-time wildcard (`*.cs`, `*test*`) and regular expression file search with 250ms catastrophic backtracking protection.

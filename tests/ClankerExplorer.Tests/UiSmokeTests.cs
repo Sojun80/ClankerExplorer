@@ -1210,6 +1210,225 @@ public sealed class UiSmokeTests
         }
     }
 
+    [Fact]
+    public async Task StlLoader_ParsesBinaryStlSuccessfully()
+    {
+        string tempStl = Path.Combine(Path.GetTempPath(), $"test_binary_{Guid.NewGuid():N}.stl");
+        try
+        {
+            // Create a valid binary STL file with 2 triangles (a quad)
+            using (var fs = new FileStream(tempStl, FileMode.Create))
+            using (var bw = new BinaryWriter(fs))
+            {
+                // 80 bytes header
+                bw.Write(new byte[80]);
+                // Triangle count: 2
+                bw.Write((uint)2);
+
+                // Triangle 1: normal (0,0,1), (0,0,0), (10,0,0), (10,10,0), attr 0
+                bw.Write(0f); bw.Write(0f); bw.Write(1f); // normal
+                bw.Write(0f); bw.Write(0f); bw.Write(0f); // v0
+                bw.Write(10f); bw.Write(0f); bw.Write(0f); // v1
+                bw.Write(10f); bw.Write(10f); bw.Write(0f); // v2
+                bw.Write((ushort)0); // attr
+
+                // Triangle 2: normal (0,0,1), (0,0,0), (10,10,0), (0,10,0), attr 0
+                bw.Write(0f); bw.Write(0f); bw.Write(1f); // normal
+                bw.Write(0f); bw.Write(0f); bw.Write(0f); // v0
+                bw.Write(10f); bw.Write(10f); bw.Write(0f); // v1
+                bw.Write(0f); bw.Write(10f); bw.Write(0f); // v2
+                bw.Write((ushort)0); // attr
+            }
+
+            var result = await ClankerExplorer.Services.Preview.StlLoader.LoadAsync(tempStl);
+            Assert.True(result.Success);
+            Assert.True(result.IsBinary);
+            Assert.NotNull(result.Model);
+            Assert.Equal(2, result.Model.TriangleCount);
+            Assert.Equal(10f, result.Model.Width, 2);
+            Assert.Equal(10f, result.Model.Depth, 2);
+            Assert.Equal(0f, result.Model.Height, 2);
+        }
+        finally
+        {
+            if (File.Exists(tempStl)) File.Delete(tempStl);
+        }
+    }
+
+    [Fact]
+    public async Task StlLoader_ParsesAsciiStlSuccessfully()
+    {
+        string tempStl = Path.Combine(Path.GetTempPath(), $"test_ascii_{Guid.NewGuid():N}.stl");
+        try
+        {
+            string asciiContent = @"solid cube
+  facet normal 0.0 0.0 1.0
+    outer loop
+      vertex 0.0 0.0 0.0
+      vertex 25.4 0.0 0.0
+      vertex 25.4 25.4 0.0
+    endloop
+  endfacet
+  facet normal 0.0 0.0 1.0
+    outer loop
+      vertex 0.0 0.0 0.0
+      vertex 25.4 25.4 0.0
+      vertex 0.0 25.4 0.0
+    endloop
+  endfacet
+endsolid cube";
+            await File.WriteAllTextAsync(tempStl, asciiContent);
+
+            var result = await ClankerExplorer.Services.Preview.StlLoader.LoadAsync(tempStl);
+            Assert.True(result.Success);
+            Assert.False(result.IsBinary);
+            Assert.NotNull(result.Model);
+            Assert.Equal(2, result.Model.TriangleCount);
+            Assert.Equal(25.4f, result.Model.Width, 2);
+            Assert.Equal(25.4f, result.Model.Depth, 2);
+        }
+        finally
+        {
+            if (File.Exists(tempStl)) File.Delete(tempStl);
+        }
+    }
+
+    [Fact]
+    public async Task StlLoader_AutoComputesMissingNormals()
+    {
+        string tempStl = Path.Combine(Path.GetTempPath(), $"test_zero_norm_{Guid.NewGuid():N}.stl");
+        try
+        {
+            string asciiContent = @"solid triangle
+  facet normal 0.0 0.0 0.0
+    outer loop
+      vertex 0.0 0.0 0.0
+      vertex 1.0 0.0 0.0
+      vertex 0.0 1.0 0.0
+    endloop
+  endfacet
+endsolid triangle";
+            await File.WriteAllTextAsync(tempStl, asciiContent);
+
+            var result = await ClankerExplorer.Services.Preview.StlLoader.LoadAsync(tempStl);
+            Assert.True(result.Success);
+            Assert.NotNull(result.Model);
+            var tri = result.Model.Triangles[0];
+            Assert.True(tri.Normal.LengthSquared() > 0.9f);
+            Assert.Equal(1f, tri.Normal.Z, 2);
+        }
+        finally
+        {
+            if (File.Exists(tempStl)) File.Delete(tempStl);
+        }
+    }
+
+    [Fact]
+    public async Task StlLoader_HandlesCorruptOrTruncatedGracefully()
+    {
+        string tempStl = Path.Combine(Path.GetTempPath(), $"test_corrupt_{Guid.NewGuid():N}.stl");
+        try
+        {
+            // Truncated binary file (header claiming 100 triangles, but only 20 bytes)
+            byte[] corruptData = new byte[88];
+            BitConverter.GetBytes((uint)100).CopyTo(corruptData, 80);
+            await File.WriteAllBytesAsync(tempStl, corruptData);
+
+            var result = await ClankerExplorer.Services.Preview.StlLoader.LoadAsync(tempStl);
+            Assert.False(result.Success);
+            Assert.NotNull(result.ErrorMessage);
+        }
+        finally
+        {
+            if (File.Exists(tempStl)) File.Delete(tempStl);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StlLoader_HandlesExtremeCoordinateRanges()
+    {
+        string tempStl = Path.Combine(Path.GetTempPath(), $"test_extreme_{Guid.NewGuid():N}.stl");
+        try
+        {
+            // Model with tiny micrometer and huge kilometer ranges
+            string asciiContent = @"solid extreme
+  facet normal 0 0 1
+    outer loop
+      vertex 0.000001 0.000001 0.000001
+      vertex 100000.0 0.000001 0.000001
+      vertex 0.000001 100000.0 0.000001
+    endloop
+  endfacet
+endsolid extreme";
+            await File.WriteAllTextAsync(tempStl, asciiContent);
+
+            var result = await ClankerExplorer.Services.Preview.StlLoader.LoadAsync(tempStl);
+            Assert.True(result.Success);
+            Assert.NotNull(result.Model);
+            Assert.True(result.Model.Bounds.BoundingRadius > 50000f);
+
+            // Rasterizer framing test
+            var bmp = ClankerExplorer.Services.Preview.Rasterizer3D.RenderToBitmap(result.Model, 256, 256);
+            Assert.NotNull(bmp);
+            Assert.Equal(256, bmp.PixelSize.Width);
+            Assert.Equal(256, bmp.PixelSize.Height);
+        }
+        finally
+        {
+            if (File.Exists(tempStl)) File.Delete(tempStl);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task InspectorViewModel_LoadsStlPreviewAndInteracts()
+    {
+        string tempStl = Path.Combine(Path.GetTempPath(), $"test_vm_stl_{Guid.NewGuid():N}.stl");
+        using var vm = new InspectorViewModel();
+        try
+        {
+            string asciiContent = @"solid box
+  facet normal 0 0 1
+    outer loop
+      vertex 0 0 0
+      vertex 10 0 0
+      vertex 10 10 0
+    endloop
+  endfacet
+endsolid box";
+            await File.WriteAllTextAsync(tempStl, asciiContent);
+
+            await vm.LoadPreviewAsync(tempStl);
+            Assert.True(vm.IsStlPreview);
+            Assert.NotNull(vm.StlModel);
+            Assert.NotNull(vm.StlBitmap);
+            Assert.Contains("1 triangles", vm.StlTrianglesDisplay);
+
+            // Test interaction commands
+            await vm.RotateStlAsync(15.0, 10.0);
+            Assert.Equal(60f, vm.StlYaw, 1);
+            Assert.Equal(-15f, vm.StlPitch, 1);
+
+            await vm.PanStlAsync(5.0, -5.0);
+            Assert.Equal(5f, vm.StlPan.X, 1);
+            Assert.Equal(-5f, vm.StlPan.Y, 1);
+
+            await vm.ZoomStlInAsync();
+            Assert.True(vm.StlZoom > 1.0f);
+
+            await vm.ToggleStlWireframeAsync();
+            Assert.True(vm.StlWireframe);
+
+            await vm.ResetStlViewAsync();
+            Assert.Equal(45f, vm.StlYaw, 1);
+            Assert.Equal(-25f, vm.StlPitch, 1);
+            Assert.Equal(1.0f, vm.StlZoom, 1);
+        }
+        finally
+        {
+            if (File.Exists(tempStl)) File.Delete(tempStl);
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct PROPERTYKEY
     {

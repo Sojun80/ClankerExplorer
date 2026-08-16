@@ -186,8 +186,13 @@ public class ThumbnailService : IDisposable
         {
             result = await VideoThumbnailService.Instance.ExtractSmartVideoThumbnailAsync(path, sizeBucket, cancellationToken);
         }
+        // 3. 3D Model Provider (STL)
+        else if (Preview.StlPreviewService.Instance.IsStlFile(path))
+        {
+            result = await Preview.StlPreviewService.Instance.GenerateThumbnailAsync(path, sizeBucket, cancellationToken);
+        }
 
-        // 3. Windows Shell Provider (for PDFs, 3D models, Documents, and fallback)
+        // 4. Windows Shell Provider (for PDFs, 3D models, Documents, and fallback)
         if (result == null && OperatingSystem.IsWindows())
         {
             result = await Task.Run(() => ExtractWindowsShellThumbnail(path, sizeBucket), cancellationToken);

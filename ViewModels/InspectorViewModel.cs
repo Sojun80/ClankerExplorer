@@ -73,6 +73,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsVideoPreview))]
     [NotifyPropertyChangedFor(nameof(IsPdfPreview))]
     [NotifyPropertyChangedFor(nameof(IsZipPreview))]
+    [NotifyPropertyChangedFor(nameof(IsStlPreview))]
     private FilePreviewData? _previewData;
 
     [ObservableProperty]
@@ -80,6 +81,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsVideoPreview))]
     [NotifyPropertyChangedFor(nameof(IsPdfPreview))]
     [NotifyPropertyChangedFor(nameof(IsZipPreview))]
+    [NotifyPropertyChangedFor(nameof(IsStlPreview))]
     [NotifyPropertyChangedFor(nameof(IsTextPreview))]
     [NotifyPropertyChangedFor(nameof(IsBinaryPreview))]
     private string _activePreviewType = "none";
@@ -197,6 +199,39 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     public bool IsZipPreview => ActivePreviewType == "zip";
 
     // ==========================================
+    // 3D / STL PREVIEW STATE
+    // ==========================================
+
+    [ObservableProperty]
+    private WriteableBitmap? _stlBitmap;
+
+    [ObservableProperty]
+    private Model3D? _stlModel;
+
+    [ObservableProperty]
+    private string _stlDimensionsDisplay = string.Empty;
+
+    [ObservableProperty]
+    private string _stlTrianglesDisplay = string.Empty;
+
+    [ObservableProperty]
+    private float _stlYaw = 45f;
+
+    [ObservableProperty]
+    private float _stlPitch = -25f;
+
+    [ObservableProperty]
+    private float _stlZoom = 1.0f;
+
+    [ObservableProperty]
+    private System.Numerics.Vector2 _stlPan = System.Numerics.Vector2.Zero;
+
+    [ObservableProperty]
+    private bool _stlWireframe;
+
+    public bool IsStlPreview => ActivePreviewType == "stl" || ActivePreviewType == "3d";
+
+    // ==========================================
     // FALLBACK / TEXT / BINARY / HASHES STATE
     // ==========================================
 
@@ -243,6 +278,15 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
         PdfCurrentPageBitmap = null;
         ZipEntries.Clear();
         ZipSummaryDisplay = string.Empty;
+        StlBitmap = null;
+        StlModel = null;
+        StlDimensionsDisplay = string.Empty;
+        StlTrianglesDisplay = string.Empty;
+        StlYaw = 45f;
+        StlPitch = -25f;
+        StlZoom = 1.0f;
+        StlPan = System.Numerics.Vector2.Zero;
+        StlWireframe = false;
         PreviewErrorMessage = null;
         ActivePreviewType = "none";
         IsFitMode = true;
@@ -358,7 +402,32 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
                     PreviewErrorMessage = zipResult.ErrorMessage ?? "Unable to inspect archive.";
                 }
             }
-            // 5. Text / Binary / Directory Fallback
+            // 5. 3D Model (STL) Preview
+            else if (StlPreviewService.Instance.IsStlFile(filePath))
+            {
+                ActivePreviewType = "stl";
+                var stlResult = await StlPreviewService.Instance.LoadStlAsync(filePath, token);
+                if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
+
+                if (stlResult.Success && stlResult.Model != null)
+                {
+                    StlModel = stlResult.Model;
+                    StlDimensionsDisplay = stlResult.Model.FormattedDimensions;
+                    StlTrianglesDisplay = stlResult.Model.FormattedTriangleCount;
+                    StlYaw = 45f;
+                    StlPitch = -25f;
+                    StlZoom = 1.0f;
+                    StlPan = System.Numerics.Vector2.Zero;
+                    StlWireframe = false;
+
+                    await RenderCurrentStlAsync();
+                }
+                else
+                {
+                    PreviewErrorMessage = stlResult.ErrorMessage ?? "Unable to preview this STL file.";
+                }
+            }
+            // 6. Text / Binary / Directory Fallback
             else
             {
                 ActivePreviewType = data.PreviewType;
@@ -593,6 +662,78 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     {
         IsFitMode = false;
         ZoomLevel = Math.Clamp(ZoomLevel / 1.25, 0.1, 10.0);
+    }
+
+    [RelayCommand]
+    public void SetPdfZoom(double scale)
+    {
+        ZoomLevel = Math.Clamp(scale, 0.25, 4.0);
+        IsFitMode = false;
+    }
+
+    // ==========================================
+    // 3D / STL CONTROLS
+    // ==========================================
+
+    public async Task RenderCurrentStlAsync()
+    {
+        if (StlModel == null) return;
+        var bmp = await StlPreviewService.Instance.RenderPreviewAsync(
+            StlModel, 640, 640, StlYaw, StlPitch, StlZoom, StlPan, StlWireframe);
+        if (bmp != null)
+        {
+            StlBitmap = bmp;
+        }
+    }
+
+    public async Task RotateStlAsync(double deltaYaw, double deltaPitch)
+    {
+        if (StlModel == null) return;
+        StlYaw = (float)((StlYaw + deltaYaw) % 360.0);
+        StlPitch = Math.Clamp((float)(StlPitch + deltaPitch), -89f, 89f);
+        await RenderCurrentStlAsync();
+    }
+
+    public async Task PanStlAsync(double deltaX, double deltaY)
+    {
+        if (StlModel == null) return;
+        StlPan = new System.Numerics.Vector2((float)(StlPan.X + deltaX), (float)(StlPan.Y + deltaY));
+        await RenderCurrentStlAsync();
+    }
+
+    [RelayCommand]
+    public async Task ZoomStlInAsync()
+    {
+        if (StlModel == null) return;
+        StlZoom = Math.Clamp(StlZoom * 1.25f, 0.05f, 20f);
+        await RenderCurrentStlAsync();
+    }
+
+    [RelayCommand]
+    public async Task ZoomStlOutAsync()
+    {
+        if (StlModel == null) return;
+        StlZoom = Math.Clamp(StlZoom / 1.25f, 0.05f, 20f);
+        await RenderCurrentStlAsync();
+    }
+
+    [RelayCommand]
+    public async Task ResetStlViewAsync()
+    {
+        if (StlModel == null) return;
+        StlYaw = 45f;
+        StlPitch = -25f;
+        StlZoom = 1.0f;
+        StlPan = System.Numerics.Vector2.Zero;
+        await RenderCurrentStlAsync();
+    }
+
+    [RelayCommand]
+    public async Task ToggleStlWireframeAsync()
+    {
+        if (StlModel == null) return;
+        StlWireframe = !StlWireframe;
+        await RenderCurrentStlAsync();
     }
 
     [RelayCommand]
