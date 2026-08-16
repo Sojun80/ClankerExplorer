@@ -1143,20 +1143,38 @@ public partial class ExplorerPaneView : UserControl
                 return;
             }
 
+            bool isInteractiveChrome = false;
             bool isRowOrCell = false;
             FileItem? rowItem = null;
-            while (source != null && source != FileGridContainer)
+            var curr = source;
+            while (curr != null && curr != FileGridContainer)
             {
-                if (source is Control { DataContext: FileItem fi })
+                if (curr is ScrollBar || curr is Avalonia.Controls.Primitives.Thumb || curr is Avalonia.Controls.Primitives.Track ||
+                    curr is DataGridColumnHeader || curr is DataGridRowHeader || curr is Button || curr is GridSplitter)
+                {
+                    isInteractiveChrome = true;
+                    break;
+                }
+                if (curr is Control { DataContext: FileItem fi })
                 {
                     rowItem = fi;
                 }
-                if (source is DataGridRow || source is DataGridCell)
+                if (curr is DataGridRow || curr is DataGridCell)
                 {
                     isRowOrCell = true;
                     break;
                 }
-                source = source.GetVisualParent();
+                curr = curr.GetVisualParent();
+            }
+
+            if (isInteractiveChrome)
+            {
+                // Clicking scrollbars, column headers, thumbs, or buttons must NOT trigger marquee, drag-drop, or selection clearing!
+                _isMouseDownForMarquee = false;
+                _isMarqueeActive = false;
+                _dragCandidateItem = null;
+                _isDragActive = false;
+                return;
             }
 
             if (rowItem != null)
@@ -1641,9 +1659,30 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnRowDoubleTapped(object? sender, TappedEventArgs e)
     {
-        if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab?.SelectedItem != null)
+        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab?.SelectedItem == null) return;
+
+        // Ensure double-tap actually occurred on a row/cell, and NOT on the ScrollBar, ColumnHeader, or empty area
+        var source = e.Source as Visual;
+        bool isRow = false;
+        var curr = source;
+        while (curr != null && curr != FileDataGrid)
+        {
+            if (curr is ScrollBar || curr is Avalonia.Controls.Primitives.Thumb || curr is DataGridColumnHeader || curr is Button)
+            {
+                return;
+            }
+            if (curr is DataGridRow || curr is DataGridCell)
+            {
+                isRow = true;
+                break;
+            }
+            curr = curr.GetVisualParent();
+        }
+
+        if (isRow)
         {
             vm.OpenItem(vm.SelectedTab.SelectedItem);
+            e.Handled = true;
         }
     }
 

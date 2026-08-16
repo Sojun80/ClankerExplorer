@@ -329,7 +329,7 @@
       </Grid>
     </Border>
 
-    <!-- Row 2: File Grid with Dual 14px Background Gutters (Left & Right) and Selection Marquee Overlay -->
+    <!-- Row 2: File Grid with Dedicated 14px Left Background Gutter and Selection Marquee Overlay -->
     <Grid x:Name="FileGridContainer" Grid.Row="2" Background="{DynamicResource AppBgBrush}"
           PointerPressed="OnFileGridPointerPressed"
           PointerMoved="OnFileGridPointerMoved"
@@ -338,7 +338,6 @@
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="14"/>
         <ColumnDefinition Width="*"/>
-        <ColumnDefinition Width="14"/>
       </Grid.ColumnDefinitions>
 
       <!-- 14px Dedicated Left Folder Background Gutter -->
@@ -900,45 +899,14 @@
         </ListBox.ItemTemplate>
       </ListBox>
 
-      <!-- 14px Dedicated Right Folder Background Gutter -->
-      <Border Grid.Column="2" Background="{DynamicResource AppBgBrush}"
-              BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1,0,0,0"
-              PointerPressed="OnFolderBackgroundStripPointerPressed"
-              ToolTip.Tip="Folder Background Margin (Right-click for Folder Actions)">
-        <Border.ContextMenu>
-          <ContextMenu Background="{DynamicResource AppSurfaceBrush}" Foreground="{DynamicResource AppTextBrush}"
-                       BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
-            <MenuItem Header="📁 New Folder" Command="{Binding TriggerNewFolderCommand}"/>
-            <MenuItem Header="📄 New Text File" Command="{Binding TriggerNewFileCommand}"/>
-            <Separator Background="{DynamicResource AppBorderBrush}"/>
-            <MenuItem Header="📋 Paste" Command="{Binding PasteFilesCommand}" IsEnabled="{Binding CanPaste}"/>
-            <MenuItem Header=">_ Open PowerShell Here" Command="{Binding OpenTerminalCommand}"/>
-            <MenuItem Header="🛡️ Open PowerShell as Administrator" Command="{Binding OpenTerminalAdminCommand}"/>
-            <MenuItem Header="Open Command Prompt (CMD) Here" Command="{Binding OpenCmdCommand}"/>
-            <MenuItem Header="🛡️ Open Command Prompt as Administrator" Command="{Binding OpenCmdAdminCommand}"/>
-            <MenuItem Header="Open in VS Code" Command="{Binding OpenVSCodeCommand}"/>
-            <Separator Background="{DynamicResource AppBorderBrush}"/>
-            <MenuItem Header="⟳ Refresh" Command="{Binding RefreshCommand}"/>
-            <MenuItem Header="📋 Copy Current Path" Command="{Binding CopyCurrentPathCommand}"/>
-            <Separator Background="{DynamicResource AppBorderBrush}"/>
-            <MenuItem Header="ℹ️ Folder Properties" Command="{Binding TriggerPropertiesCommand}"/>
-          </ContextMenu>
-        </Border.ContextMenu>
-        <Border.Styles>
-          <Style Selector="Border:hover">
-            <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
-          </Style>
-        </Border.Styles>
-      </Border>
-
       <!-- Marquee Selection Canvas Overlay -->
-      <Canvas x:Name="MarqueeCanvas" Grid.ColumnSpan="3" IsHitTestVisible="False" ZIndex="100">
+      <Canvas x:Name="MarqueeCanvas" Grid.ColumnSpan="2" IsHitTestVisible="False" ZIndex="100">
         <Border x:Name="MarqueeBox" Background="#2638bdf8" BorderBrush="{DynamicResource AppHighlightBrush}"
                 BorderThickness="1" CornerRadius="2" IsVisible="False"/>
       </Canvas>
 
       <!-- Middle-Mouse AutoScroll Anchor Indicator -->
-      <Canvas x:Name="AutoScrollCanvas" Grid.ColumnSpan="3" IsHitTestVisible="False" ZIndex="200" IsVisible="False">
+      <Canvas x:Name="AutoScrollCanvas" Grid.ColumnSpan="2" IsHitTestVisible="False" ZIndex="200" IsVisible="False">
         <Border x:Name="AutoScrollAnchor" Width="28" Height="28" CornerRadius="14"
                 Background="{DynamicResource AppSurfaceBrush}"
                 BorderBrush="{DynamicResource AppHighlightBrush}"
