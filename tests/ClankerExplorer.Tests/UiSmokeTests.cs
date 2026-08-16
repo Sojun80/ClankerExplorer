@@ -669,4 +669,102 @@ public sealed class UiSmokeTests
             Assert.NotNull(unknownIcon);
         }
     }
+
+    [Fact]
+    public async Task Refresh_PreservesSelectedAndFocusedItems_AcrossDirectoryUpdates()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "ClankerTest_RefreshSelection_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var file1 = Path.Combine(tempDir, "fileA.txt");
+            var file2 = Path.Combine(tempDir, "fileB.txt");
+            var file3 = Path.Combine(tempDir, "fileC.txt");
+
+            File.WriteAllText(file1, "A");
+            File.WriteAllText(file2, "B");
+            File.WriteAllText(file3, "C");
+
+            var tab = new ExplorerTabViewModel(tempDir);
+            await tab.RefreshAsync();
+
+            Assert.Equal(3, tab.FilteredItems.Count);
+
+            // Select fileA and fileC, with focus on fileC
+            var itemA = tab.FilteredItems.First(i => i.Name == "fileA.txt");
+            var itemC = tab.FilteredItems.First(i => i.Name == "fileC.txt");
+
+            tab.SelectedItems.Add(itemA);
+            tab.SelectedItems.Add(itemC);
+            itemA.IsThumbnailSelected = true;
+            itemC.IsThumbnailSelected = true;
+            tab.SelectedItem = itemC;
+
+            // Modify metadata of fileB (e.g. file watcher / background update)
+            File.WriteAllText(file2, "B modified content");
+
+            // Perform refresh
+            await tab.RefreshAsync();
+
+            Assert.Equal(3, tab.FilteredItems.Count);
+
+            // Verify fileA and fileC remain selected
+            var newSelected = tab.SelectedItems.Select(s => s.FullPath).ToList();
+            Assert.Equal(2, newSelected.Count);
+            Assert.Contains(file1, newSelected);
+            Assert.Contains(file3, newSelected);
+
+            // Verify focus remains on fileC
+            Assert.NotNull(tab.SelectedItem);
+            Assert.Equal(file3, tab.SelectedItem.FullPath);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task Refresh_DoesNotPreserveDeletedItems()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "ClankerTest_RefreshDelete_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var file1 = Path.Combine(tempDir, "keep.txt");
+            var file2 = Path.Combine(tempDir, "deleted.txt");
+
+            File.WriteAllText(file1, "Keep");
+            File.WriteAllText(file2, "Delete me");
+
+            var tab = new ExplorerTabViewModel(tempDir);
+            await tab.RefreshAsync();
+
+            var keepItem = tab.FilteredItems.First(i => i.Name == "keep.txt");
+            var deleteItem = tab.FilteredItems.First(i => i.Name == "deleted.txt");
+
+            tab.SelectedItems.Add(keepItem);
+            tab.SelectedItems.Add(deleteItem);
+            keepItem.IsThumbnailSelected = true;
+            deleteItem.IsThumbnailSelected = true;
+            tab.SelectedItem = deleteItem;
+
+            // Delete file2 on disk
+            File.Delete(file2);
+
+            // Refresh
+            await tab.RefreshAsync();
+
+            Assert.Single(tab.FilteredItems);
+            Assert.Single(tab.SelectedItems);
+            Assert.Equal(file1, tab.SelectedItems[0].FullPath);
+            Assert.Equal(file1, tab.SelectedItem?.FullPath);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
 }

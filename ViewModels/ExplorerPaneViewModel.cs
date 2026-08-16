@@ -15,6 +15,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 {
     private readonly Dictionary<ExplorerTabViewModel, PropertyChangedEventHandler> _tabPropertyHandlers = new();
     private readonly Dictionary<ExplorerTabViewModel, Action<FileItem>> _tabScrollHandlers = new();
+    private readonly Dictionary<ExplorerTabViewModel, Action> _tabSyncHandlers = new();
     private readonly Action _clipboardChangedHandler;
     private readonly Action _quickAccessChangedHandler;
     private readonly Action<AppSettings> _settingsChangedHandler;
@@ -282,6 +283,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Action<FileItem?>? RequestProperties;
     public event Action<string>? RequestSetClipboardText;
     public event Action<FileItem>? RequestScrollItemIntoView;
+    public event Action? RequestSyncSelection;
 
     public Avalonia.Controls.DataGridLength NameColumnWidthDisplay =>
         new Avalonia.Controls.DataGridLength(ColumnWidthName > 0 ? ColumnWidthName : 280, Avalonia.Controls.DataGridLengthUnitType.Pixel);
@@ -855,6 +857,14 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         };
         _tabScrollHandlers[tab] = scrollHandler;
         tab.ScrollIntoViewRequested += scrollHandler;
+
+        Action syncHandler = () =>
+        {
+            if (tab == SelectedTab)
+                RequestSyncSelection?.Invoke();
+        };
+        _tabSyncHandlers[tab] = syncHandler;
+        tab.SelectionRestored += syncHandler;
     }
 
     public void UnwireTabEvents(ExplorerTabViewModel tab)
@@ -866,6 +876,10 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         if (_tabScrollHandlers.Remove(tab, out var scrollHandler))
         {
             tab.ScrollIntoViewRequested -= scrollHandler;
+        }
+        if (_tabSyncHandlers.Remove(tab, out var syncHandler))
+        {
+            tab.SelectionRestored -= syncHandler;
         }
     }
 

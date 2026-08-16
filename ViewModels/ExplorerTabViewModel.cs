@@ -39,6 +39,11 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     /// </summary>
     public event Action<FileItem>? ScrollIntoViewRequested;
 
+    /// <summary>
+    /// Raised when selection has been restored/synchronized across items after refresh/filter.
+    /// </summary>
+    public event Action? SelectionRestored;
+
     [ObservableProperty]
     private string _id = Guid.NewGuid().ToString("N");
 
@@ -212,6 +217,25 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         IsLoading = true;
         StatusMessage = "Loading...";
 
+        // Capture previous selection & focus paths before reloading to preserve continuity
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+        var previousSelectedPaths = SelectedItems
+            .Select(i => i.FullPath)
+            .Where(p => !string.IsNullOrEmpty(p))
+            .Distinct(comparer)
+            .ToList();
+
+        if (previousSelectedPaths.Count == 0 && SelectedItem != null && !string.IsNullOrEmpty(SelectedItem.FullPath))
+        {
+            previousSelectedPaths.Add(SelectedItem.FullPath);
+        }
+
+        string? previousFocusedPath = SelectedItem?.FullPath;
+
         try
         {
             var (list, error) = await FileSystemService.Instance.ReadDirectoryAsync(CurrentPath, token, _directoryReadOptions);
@@ -232,21 +256,19 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 item.IsCut = ClipboardFileService.IsPathCut(item.FullPath);
             }
 
-            ClearThumbnailSelection();
             Items = new ObservableCollection<FileItem>(list);
             await ApplyFilterAsync(token);
 
-            // After the filtered list is ready, auto-select pending items (e.g. from back-navigation or paste)
+            // Determine selection targets: explicit navigation/paste vs ordinary refresh continuity
             var pendingPaths = PendingSelectPaths;
             PendingSelectPaths = null;
-            if (pendingPaths != null && pendingPaths.Count > 0)
-            {
-                var comparison = OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal;
+            bool isExplicitNavigationSelect = (pendingPaths != null && pendingPaths.Count > 0);
+            var targetSelectPaths = isExplicitNavigationSelect ? pendingPaths! : previousSelectedPaths;
 
+            if (targetSelectPaths != null && targetSelectPaths.Count > 0)
+            {
                 var matches = new List<FileItem>();
-                foreach (var p in pendingPaths)
+                foreach (var p in targetSelectPaths)
                 {
                     var match = FilteredItems.FirstOrDefault(f => string.Equals(f.FullPath, p, comparison));
                     if (match != null && !matches.Contains(match))
@@ -258,17 +280,44 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 if (matches.Count > 0)
                 {
                     ClearThumbnailSelection();
+                    SelectedItems.Clear();
                     foreach (var m in matches)
                     {
                         m.IsThumbnailSelected = true;
                         SelectedItems.Add(m);
                     }
 
-                    SelectedItem = matches.Last();
+                    var focusedMatch = !string.IsNullOrEmpty(previousFocusedPath)
+                        ? matches.FirstOrDefault(m => string.Equals(m.FullPath, previousFocusedPath, comparison))
+                        : null;
+
+                    SelectedItem = focusedMatch ?? matches.Last();
                     var firstMatchIndex = FilteredItems.IndexOf(matches[0]);
                     _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
-                    ScrollIntoViewRequested?.Invoke(matches[0]);
+
+                    if (isExplicitNavigationSelect)
+                    {
+                        ScrollIntoViewRequested?.Invoke(matches[0]);
+                    }
+                    else
+                    {
+                        SelectionRestored?.Invoke();
+                    }
                 }
+                else
+                {
+                    ClearThumbnailSelection();
+                    SelectedItems.Clear();
+                    SelectedItem = null;
+                    SelectionRestored?.Invoke();
+                }
+            }
+            else
+            {
+                ClearThumbnailSelection();
+                SelectedItems.Clear();
+                SelectedItem = null;
+                SelectionRestored?.Invoke();
             }
         }
         catch (OperationCanceledException) { }
@@ -314,8 +363,61 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     public void ApplyFilter()
     {
         if (_isDisposed || Items == null) return;
+
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+        var selectedPaths = SelectedItems
+            .Select(i => i.FullPath)
+            .Where(p => !string.IsNullOrEmpty(p))
+            .Distinct(comparer)
+            .ToList();
+
+        if (selectedPaths.Count == 0 && SelectedItem != null && !string.IsNullOrEmpty(SelectedItem.FullPath))
+        {
+            selectedPaths.Add(SelectedItem.FullPath);
+        }
+
+        string? focusedPath = SelectedItem?.FullPath;
+
         var result = BuildFilteredItems(Items, FilterText, IsFilterRegex, SortColumn, SortAscending);
-        FilteredItems = new ObservableCollection<FileItem>(result);
+        var newFiltered = new ObservableCollection<FileItem>(result);
+        FilteredItems = newFiltered;
+
+        if (selectedPaths.Count > 0)
+        {
+            var matches = new List<FileItem>();
+            foreach (var p in selectedPaths)
+            {
+                var match = newFiltered.FirstOrDefault(f => string.Equals(f.FullPath, p, comparison));
+                if (match != null && !matches.Contains(match))
+                {
+                    matches.Add(match);
+                }
+            }
+
+            if (matches.Count > 0)
+            {
+                ClearThumbnailSelection();
+                SelectedItems.Clear();
+                foreach (var m in matches)
+                {
+                    m.IsThumbnailSelected = true;
+                    SelectedItems.Add(m);
+                }
+
+                var focusedMatch = !string.IsNullOrEmpty(focusedPath)
+                    ? matches.FirstOrDefault(m => string.Equals(m.FullPath, focusedPath, comparison))
+                    : null;
+
+                SelectedItem = focusedMatch ?? matches.Last();
+                var firstMatchIndex = newFiltered.IndexOf(matches[0]);
+                _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
+                SelectionRestored?.Invoke();
+            }
+        }
     }
 
     public async Task ApplyFilterAsync(CancellationToken cancellationToken = default)
@@ -328,12 +430,65 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         string sortColumn = SortColumn;
         bool sortAscending = SortAscending;
 
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+        var selectedPaths = SelectedItems
+            .Select(i => i.FullPath)
+            .Where(p => !string.IsNullOrEmpty(p))
+            .Distinct(comparer)
+            .ToList();
+
+        if (selectedPaths.Count == 0 && SelectedItem != null && !string.IsNullOrEmpty(SelectedItem.FullPath))
+        {
+            selectedPaths.Add(SelectedItem.FullPath);
+        }
+
+        string? focusedPath = SelectedItem?.FullPath;
+
         var result = await Task.Run(
             () => BuildFilteredItems(snapshot, filterText, isRegex, sortColumn, sortAscending),
             cancellationToken);
+
         if (!_isDisposed && !cancellationToken.IsCancellationRequested && generation == _filterGeneration)
         {
-            FilteredItems = new ObservableCollection<FileItem>(result);
+            var newFiltered = new ObservableCollection<FileItem>(result);
+            FilteredItems = newFiltered;
+
+            if (selectedPaths.Count > 0)
+            {
+                var matches = new List<FileItem>();
+                foreach (var p in selectedPaths)
+                {
+                    var match = newFiltered.FirstOrDefault(f => string.Equals(f.FullPath, p, comparison));
+                    if (match != null && !matches.Contains(match))
+                    {
+                        matches.Add(match);
+                    }
+                }
+
+                if (matches.Count > 0)
+                {
+                    ClearThumbnailSelection();
+                    SelectedItems.Clear();
+                    foreach (var m in matches)
+                    {
+                        m.IsThumbnailSelected = true;
+                        SelectedItems.Add(m);
+                    }
+
+                    var focusedMatch = !string.IsNullOrEmpty(focusedPath)
+                        ? matches.FirstOrDefault(m => string.Equals(m.FullPath, focusedPath, comparison))
+                        : null;
+
+                    SelectedItem = focusedMatch ?? matches.Last();
+                    var firstMatchIndex = newFiltered.IndexOf(matches[0]);
+                    _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
+                    SelectionRestored?.Invoke();
+                }
+            }
         }
     }
 

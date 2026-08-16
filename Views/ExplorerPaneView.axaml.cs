@@ -188,6 +188,7 @@ public partial class ExplorerPaneView : UserControl
         EnsureFolderScrollViewers();
         vm.FolderViewStateRestored += RestoreFolderViewState;
         vm.RequestScrollItemIntoView += OnRequestScrollItemIntoView;
+        vm.RequestSyncSelection += OnRequestSyncSelection;
         RestoreFolderViewState();
     }
 
@@ -346,6 +347,30 @@ public partial class ExplorerPaneView : UserControl
                 {
                     ThumbnailListBox.ScrollIntoView(vm.ThumbnailRows[rowIndex]);
                 }
+            }
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void OnRequestSyncSelection()
+    {
+        // Sync DataGrid selection without changing scroll position or jumping viewport
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+            var tab = vm.SelectedTab;
+
+            if (FileDataGrid != null && !vm.IsThumbnailView)
+            {
+                FileDataGrid.SelectedItems.Clear();
+                foreach (var selected in tab.SelectedItems)
+                {
+                    FileDataGrid.SelectedItems.Add(selected);
+                }
+                if (tab.SelectedItem != null && !FileDataGrid.SelectedItems.Contains(tab.SelectedItem))
+                {
+                    FileDataGrid.SelectedItems.Add(tab.SelectedItem);
+                }
+                FileDataGrid.SelectedItem = tab.SelectedItem;
             }
         }, DispatcherPriority.Loaded);
     }
