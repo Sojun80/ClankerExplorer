@@ -150,6 +150,13 @@ public partial class FileItem : ObservableObject
     [ObservableProperty]
     private bool _isThumbnailSelected;
 
+    // Inline Rename State
+    [ObservableProperty]
+    private bool _isRenaming;
+
+    [ObservableProperty]
+    private string _editingName = string.Empty;
+
     // File / Folder Icon (Windows-associated / extension cached)
     private IImage? _fileIcon;
     public IImage? FileIcon

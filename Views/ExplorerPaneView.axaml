@@ -552,17 +552,50 @@
                   </TextBlock>
                 </Panel>
 
-                <!-- Folder Name: Segoe UI Variable, Semibold, 13px -->
-                <TextBlock Grid.Column="1" Text="{Binding Name}" IsVisible="{Binding IsDirectory}"
-                           TextTrimming="CharacterEllipsis"
-                           behaviors:AutoToolTip.ShowWhenTrimmed="True"
-                           FontFamily="{DynamicResource AppUiFont}" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+                <!-- Name Column Display & Inline Rename Panel -->
+                <Panel Grid.Column="1" VerticalAlignment="Center">
+                  <!-- Folder Name: Segoe UI Variable, Semibold, 13px -->
+                  <TextBlock Text="{Binding Name}"
+                             TextTrimming="CharacterEllipsis"
+                             behaviors:AutoToolTip.ShowWhenTrimmed="True"
+                             FontFamily="{DynamicResource AppUiFont}" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center">
+                    <TextBlock.IsVisible>
+                      <MultiBinding Converter="{x:Static BoolConverters.And}">
+                        <Binding Path="IsDirectory"/>
+                        <Binding Path="!IsRenaming"/>
+                      </MultiBinding>
+                    </TextBlock.IsVisible>
+                  </TextBlock>
 
-                <!-- File Name: Segoe UI Variable, Regular Weight, 12.5px -->
-                <TextBlock Grid.Column="1" Text="{Binding Name}" IsVisible="{Binding !IsDirectory}"
-                           TextTrimming="CharacterEllipsis"
-                           behaviors:AutoToolTip.ShowWhenTrimmed="True"
-                           FontFamily="{DynamicResource AppUiFont}" FontWeight="Normal" FontSize="12.5" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+                  <!-- File Name: Segoe UI Variable, Regular Weight, 12.5px -->
+                  <TextBlock Text="{Binding Name}"
+                             TextTrimming="CharacterEllipsis"
+                             behaviors:AutoToolTip.ShowWhenTrimmed="True"
+                             FontFamily="{DynamicResource AppUiFont}" FontWeight="Normal" FontSize="12.5" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center">
+                    <TextBlock.IsVisible>
+                      <MultiBinding Converter="{x:Static BoolConverters.And}">
+                        <Binding Path="!IsDirectory"/>
+                        <Binding Path="!IsRenaming"/>
+                      </MultiBinding>
+                    </TextBlock.IsVisible>
+                  </TextBlock>
+
+                  <!-- Inline Rename TextBox -->
+                  <TextBox Text="{Binding EditingName, Mode=TwoWay}"
+                           IsVisible="{Binding IsRenaming}"
+                           FontSize="12.5"
+                           FontFamily="{DynamicResource AppUiFont}"
+                           Foreground="{DynamicResource AppTextBrush}"
+                           Background="{DynamicResource AppSurfaceBrush}"
+                           BorderBrush="{DynamicResource AppHighlightBrush}"
+                           BorderThickness="1"
+                           Padding="4,1"
+                           MinHeight="22"
+                           VerticalAlignment="Center"
+                           AttachedToVisualTree="OnRenameTextBoxAttachedToVisualTree"
+                           KeyDown="OnRenameTextBoxKeyDown"
+                           LostFocus="OnRenameTextBoxLostFocus"/>
+                </Panel>
               </Grid>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
@@ -813,17 +846,37 @@
                   </Panel>
                 </Panel>
 
-                <!-- Filename Underneath (2 Lines Max, Ellipsis Truncation) -->
-                <TextBlock Grid.Row="1" Text="{Binding Name}"
+                <!-- Filename Underneath & Inline Rename Box -->
+                <Panel Grid.Row="1" Margin="0,4,0,0" HorizontalAlignment="Center">
+                  <!-- Static Name Display (2 Lines Max, Ellipsis Truncation) -->
+                  <TextBlock Text="{Binding Name}"
+                             IsVisible="{Binding !IsRenaming}"
+                             FontSize="11.5"
+                             FontFamily="{DynamicResource AppUiFont}"
+                             Foreground="{DynamicResource AppTextBrush}"
+                             TextAlignment="Center"
+                             HorizontalAlignment="Center"
+                             TextTrimming="CharacterEllipsis"
+                             MaxLines="2"
+                             TextWrapping="Wrap"/>
+
+                  <!-- Inline Rename TextBox (Centered, white border on dark background with automatic name selection) -->
+                  <TextBox Text="{Binding EditingName, Mode=TwoWay}"
+                           IsVisible="{Binding IsRenaming}"
                            FontSize="11.5"
                            FontFamily="{DynamicResource AppUiFont}"
-                           Foreground="{DynamicResource AppTextBrush}"
-                           TextAlignment="Center"
+                           Foreground="#FFFFFF"
+                           Background="#1F1F1F"
+                           BorderBrush="#FFFFFF"
+                           BorderThickness="1"
+                           Padding="4,2"
+                           MinHeight="20"
                            HorizontalAlignment="Center"
-                           TextTrimming="CharacterEllipsis"
-                           MaxLines="2"
-                           TextWrapping="Wrap"
-                           Margin="0,4,0,0"/>
+                           TextAlignment="Center"
+                           AttachedToVisualTree="OnRenameTextBoxAttachedToVisualTree"
+                           KeyDown="OnRenameTextBoxKeyDown"
+                           LostFocus="OnRenameTextBoxLostFocus"/>
+                </Panel>
               </Grid>
             </Border>
                 </DataTemplate>

@@ -884,4 +884,42 @@ public sealed class UiSmokeTests
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }
+
+    [Fact]
+    public async Task StartInlineRename_SetsIsRenamingAndEditingNameToItemName()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "clanker_inline_rename_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        var file1 = Path.Combine(tempDir, "plenum.step");
+        var file2 = Path.Combine(tempDir, "document.pdf");
+        File.WriteAllText(file1, "1");
+        File.WriteAllText(file2, "2");
+
+        try
+        {
+            var pane = new ExplorerPaneViewModel("pane1", tempDir);
+            var tab = pane.SelectedTab!;
+            await tab.RefreshAsync();
+
+            var item1 = tab.FilteredItems.First(i => i.Name == "plenum.step");
+            var item2 = tab.FilteredItems.First(i => i.Name == "document.pdf");
+
+            tab.SelectedItem = item1;
+            pane.TriggerRename();
+
+            Assert.True(item1.IsRenaming);
+            Assert.Equal("plenum.step", item1.EditingName);
+            Assert.False(item2.IsRenaming);
+
+            // Starting rename on item2 cancels rename on item1
+            pane.StartInlineRename(item2);
+            Assert.False(item1.IsRenaming);
+            Assert.True(item2.IsRenaming);
+            Assert.Equal("document.pdf", item2.EditingName);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
 }

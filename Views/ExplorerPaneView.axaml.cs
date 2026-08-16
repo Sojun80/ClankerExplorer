@@ -1347,8 +1347,116 @@ public partial class ExplorerPaneView : UserControl
         }
     }
 
+    private void OnRenameTextBoxAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (sender is TextBox tb && tb.DataContext is FileItem item)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                tb.Focus();
+                string name = tb.Text ?? item.Name;
+                if (!string.IsNullOrEmpty(name))
+                {
+                    int dotIndex = item.IsDirectory ? -1 : name.LastIndexOf('.');
+                    if (dotIndex > 0)
+                    {
+                        tb.SelectionStart = 0;
+                        tb.SelectionEnd = dotIndex;
+                    }
+                    else
+                    {
+                        tb.SelectAll();
+                    }
+                }
+            }, DispatcherPriority.Input);
+        }
+    }
+
+    private void OnRenameTextBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (sender is TextBox tb && tb.DataContext is FileItem item && DataContext is ExplorerPaneViewModel vm)
+        {
+            if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                CommitInlineRename(item, tb.Text, vm);
+            }
+            else if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                item.IsRenaming = false;
+                item.EditingName = item.Name;
+            }
+        }
+    }
+
+    private void OnRenameTextBoxLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox tb && tb.DataContext is FileItem item && DataContext is ExplorerPaneViewModel vm)
+        {
+            if (item.IsRenaming)
+            {
+                CommitInlineRename(item, tb.Text, vm);
+            }
+        }
+    }
+
+    private void CommitInlineRename(FileItem item, string? newName, ExplorerPaneViewModel vm)
+    {
+        if (!item.IsRenaming) return;
+        item.IsRenaming = false;
+
+        newName = newName?.Trim();
+        if (string.IsNullOrWhiteSpace(newName) || newName == item.Name)
+        {
+            item.EditingName = item.Name;
+            return;
+        }
+
+        // Check for invalid filename characters
+        char[] invalidChars = Path.GetInvalidFileNameChars();
+        if (newName.IndexOfAny(invalidChars) >= 0)
+        {
+            item.EditingName = item.Name;
+            return;
+        }
+
+        try
+        {
+            string oldPath = item.FullPath;
+            string parentDir = Path.GetDirectoryName(oldPath) ?? vm.SelectedTab?.CurrentPath ?? string.Empty;
+            string newPath = Path.Combine(parentDir, newName);
+
+            if (string.Equals(oldPath, newPath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            {
+                // Case-only rename or identical
+                FileSystemService.Instance.Rename(oldPath, newName);
+            }
+            else if (File.Exists(newPath) || Directory.Exists(newPath))
+            {
+                // Destination already exists - revert
+                item.EditingName = item.Name;
+                return;
+            }
+            else
+            {
+                FileSystemService.Instance.Rename(oldPath, newName);
+            }
+
+            if (vm.SelectedTab != null)
+            {
+                vm.SelectedTab.ReconcileItemRenamed(oldPath, newPath);
+            }
+        }
+        catch
+        {
+            item.EditingName = item.Name;
+        }
+    }
+
     private void OnDataGridKeyDownTunnel(object? sender, KeyEventArgs e)
     {
+        if (e.Source is TextBox) return;
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
 
         // Enter: Open selected item(s) without triggering inline cell edit or row jumping
@@ -1383,6 +1491,7 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnThumbnailKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Source is TextBox) return;
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
 
         // Enter: Open

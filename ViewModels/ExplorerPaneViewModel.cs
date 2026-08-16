@@ -279,7 +279,6 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Action<FileItem?>? FileSelectedForPreview;
     public event Action<string, string>? RequestCreateItem; // "folder" / "file", parentPath
     public event Action<string>? RequestOpenInOtherPane;
-    public event Action<FileItem>? RequestRename;
     public event Action<FileItem?>? RequestProperties;
     public event Action<string>? RequestSetClipboardText;
     public event Action<FileItem>? RequestScrollItemIntoView;
@@ -1293,8 +1292,32 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         var target = SelectedTab?.SelectedItem;
         if (target != null)
         {
-            RequestRename?.Invoke(target);
+            StartInlineRename(target);
         }
+    }
+
+    public void StartInlineRename(FileItem item)
+    {
+        if (SelectedTab != null)
+        {
+            if (SelectedTab.Items != null)
+            {
+                foreach (var existing in SelectedTab.Items)
+                {
+                    if (existing != item) existing.IsRenaming = false;
+                }
+            }
+            if (SelectedTab.FilteredItems != null)
+            {
+                foreach (var existing in SelectedTab.FilteredItems)
+                {
+                    if (existing != item) existing.IsRenaming = false;
+                }
+            }
+        }
+
+        item.EditingName = item.Name;
+        item.IsRenaming = true;
     }
 
     [RelayCommand]

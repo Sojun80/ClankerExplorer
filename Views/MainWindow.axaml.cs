@@ -78,25 +78,6 @@ public partial class MainWindow : Window
                     vm.RefreshAll();
                 };
 
-                vm.RequestRename += async item =>
-                {
-                    if (item == null) return;
-                    try
-                    {
-                        var dlg = new RenameWindow(item.Name);
-                        var res = await dlg.ShowDialog<bool>(this);
-                        if (res && !string.IsNullOrWhiteSpace(dlg.NewName) && dlg.NewName != item.Name)
-                        {
-                            FileSystemService.Instance.Rename(item.FullPath, dlg.NewName);
-                            await vm.ActivePane.RefreshAsync();
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        await ShowErrorDialogAsync("Rename Failed", ex.Message);
-                    }
-                };
-
                 vm.RequestProperties += async item =>
                 {
                     var target = item ?? new FileItem
