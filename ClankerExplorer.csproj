@@ -72,6 +72,6 @@
     <ItemGroup>
       <OutputFiles Include="$(TargetDir)**\*.*" />
     </ItemGroup>
-    <Copy SourceFiles="@(OutputFiles)" DestinationFiles="@(OutputFiles->'$(SolutionDir)bin\$(Configuration)\net8.0\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" ContinueOnError="true" />
+    <Copy SourceFiles="@(OutputFiles)" DestinationFiles="@(OutputFiles->'$(SolutionDir)bin\$(Configuration)\net8.0\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" ContinueOnError="true" Retries="0" />
   </Target>
 </Project>

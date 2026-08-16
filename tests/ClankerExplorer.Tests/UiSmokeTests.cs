@@ -1023,6 +1023,97 @@ public sealed class UiSmokeTests
         Assert.True(memDepth.Length > 1000, $"memDepth length was {memDepth.Length}");
     }
 
+    [Fact]
+    public async Task ZipPreviewService_LoadsFullPreviewHierarchyAsync()
+    {
+        string tempZip = Path.Combine(Path.GetTempPath(), $"test_zip_hier_{Guid.NewGuid():N}.zip");
+        try
+        {
+            using (var zipStream = new FileStream(tempZip, FileMode.Create))
+            using (var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                var entry1 = archive.CreateEntry("documents/subfolder/notes.txt");
+                using (var writer = new StreamWriter(entry1.Open()))
+                {
+                    writer.Write("Detailed report contents");
+                }
+                var entry2 = archive.CreateEntry("images/photo.jpg");
+                using (var writer = new StreamWriter(entry2.Open()))
+                {
+                    writer.Write("Mock JPG Image Data");
+                }
+            }
+
+            var result = await ClankerExplorer.Services.Preview.ZipPreviewService.Instance.LoadZipPreviewAsync(tempZip);
+            Assert.True(result.Success);
+            Assert.Equal(2, result.TotalFileCount);
+            Assert.True(result.TotalFolderCount >= 2);
+            Assert.True(result.TotalUncompressedBytes > 0);
+            Assert.NotNull(result.Entries);
+            Assert.Contains(result.Entries, e => e.Name == "notes.txt" && !e.IsDirectory);
+            Assert.Contains(result.Entries, e => e.IsDirectory);
+        }
+        finally
+        {
+            if (File.Exists(tempZip)) File.Delete(tempZip);
+        }
+    }
+
+    [Fact]
+    public void PdfPreviewService_RecognizesPdfFiles()
+    {
+        Assert.True(ClankerExplorer.Services.Preview.PdfPreviewService.Instance.IsPdfFile("document.pdf"));
+        Assert.True(ClankerExplorer.Services.Preview.PdfPreviewService.Instance.IsPdfFile(@"C:\Folder\REPORT.PDF"));
+        Assert.False(ClankerExplorer.Services.Preview.PdfPreviewService.Instance.IsPdfFile("image.png"));
+        Assert.False(ClankerExplorer.Services.Preview.PdfPreviewService.Instance.IsPdfFile(""));
+    }
+
+    [Fact]
+    public async Task InspectorViewModel_SwitchesProvidersAndCleansUpStateAsync()
+    {
+        var vm = new InspectorViewModel();
+
+        string tempZip = Path.Combine(Path.GetTempPath(), $"test_zip_vm_{Guid.NewGuid():N}.zip");
+        string tempTxt = Path.Combine(Path.GetTempPath(), $"test_txt_vm_{Guid.NewGuid():N}.txt");
+        try
+        {
+            using (var zipStream = new FileStream(tempZip, FileMode.Create))
+            using (var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("test.txt");
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write("Hello inside zip");
+            }
+            File.WriteAllText(tempTxt, "Plain text document");
+
+            // 1. Select ZIP
+            await vm.LoadPreviewAsync(tempZip);
+            Assert.True(vm.IsZipPreview);
+            Assert.False(vm.IsTextPreview);
+            Assert.False(vm.IsImagePreview);
+            Assert.False(vm.IsVideoPreview);
+            Assert.True(vm.ZipEntries.Count > 0);
+
+            // 2. Select Text
+            await vm.LoadPreviewAsync(tempTxt);
+            Assert.True(vm.IsTextPreview);
+            Assert.False(vm.IsZipPreview);
+            Assert.Empty(vm.ZipEntries);
+
+            // 3. Clear Selection
+            await vm.LoadPreviewAsync(null);
+            Assert.False(vm.IsTextPreview);
+            Assert.False(vm.IsZipPreview);
+            Assert.Null(vm.PreviewData);
+        }
+        finally
+        {
+            if (File.Exists(tempZip)) File.Delete(tempZip);
+            if (File.Exists(tempTxt)) File.Delete(tempTxt);
+            vm.Dispose();
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct PROPERTYKEY
     {

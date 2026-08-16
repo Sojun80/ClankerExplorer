@@ -3,7 +3,9 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:ClankerExplorer.ViewModels"
+             xmlns:views="clr-namespace:ClankerExplorer.Views"
              xmlns:models="clr-namespace:ClankerExplorer.Models"
+             xmlns:preview="clr-namespace:ClankerExplorer.Services.Preview"
              x:Class="ClankerExplorer.Views.InspectorPanelView"
              x:DataType="vm:InspectorViewModel"
              mc:Ignorable="d" d:DesignWidth="360" d:DesignHeight="600"
@@ -42,6 +44,31 @@
               <TextBlock Text="1:1" FontWeight="SemiBold" HorizontalAlignment="Center"/>
             </Button>
           </StackPanel>
+
+          <!-- PDF Navigation Toolbar on Right (Visible when viewing a PDF) -->
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                      IsVisible="{Binding IsPdfPreview}">
+            <Button Command="{Binding PrevPdfPageCommand}" IsEnabled="{Binding CanPdfGoPrev}"
+                    ToolTip.Tip="Previous Page" Classes="power-btn" Padding="5,2" FontSize="10">
+              <TextBlock Text="◀" FontSize="9" HorizontalAlignment="Center"/>
+            </Button>
+            <TextBlock Text="{Binding PdfPageDisplay}" FontSize="10" FontWeight="SemiBold"
+                       FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppHighlightBrush}"
+                       VerticalAlignment="Center" Margin="2,0"/>
+            <Button Command="{Binding NextPdfPageCommand}" IsEnabled="{Binding CanPdfGoNext}"
+                    ToolTip.Tip="Next Page" Classes="power-btn" Padding="5,2" FontSize="10">
+              <TextBlock Text="▶" FontSize="9" HorizontalAlignment="Center"/>
+            </Button>
+            <Button Command="{Binding TogglePdfFitWidthCommand}"
+                    ToolTip.Tip="Toggle Fit Page / Fit Width" Classes="power-btn" Padding="5,2" FontSize="9.5">
+              <TextBlock Text="↔" FontWeight="Bold" HorizontalAlignment="Center"/>
+            </Button>
+          </StackPanel>
+
+          <!-- ZIP Summary on Right (Visible when viewing a ZIP) -->
+          <TextBlock DockPanel.Dock="Right" Text="{Binding ZipSummaryDisplay}" FontSize="10"
+                     FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppHighlightBrush}"
+                     VerticalAlignment="Center" IsVisible="{Binding IsZipPreview}" TextTrimming="CharacterEllipsis"/>
         </DockPanel>
       </Border>
 
@@ -56,7 +83,7 @@
         <!-- Populated Inspector Content -->
         <Grid RowDefinitions="*,Auto" IsVisible="{Binding PreviewData, Converter={x:Static ObjectConverters.IsNotNull}}">
 
-          <!-- Image Preview -->
+          <!-- 1. IMAGE PREVIEW -->
           <Border Grid.Row="0" Background="#0C1017" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
                   CornerRadius="4" Margin="0,0,0,8" ClipToBounds="True"
                   IsVisible="{Binding IsImagePreview}"
@@ -66,7 +93,7 @@
               <!-- Subtle backdrop -->
               <Border Background="{DynamicResource AppBgBrush}" Opacity="0.3"/>
 
-              <!-- Fit Mode: Centered, Uniform Stretch, preserves aspect ratio perfectly -->
+              <!-- Fit Mode -->
               <Image Source="{Binding ImagePreview}"
                      IsVisible="{Binding IsFitMode}"
                      Stretch="Uniform"
@@ -74,7 +101,7 @@
                      VerticalAlignment="Center"
                      RenderOptions.BitmapInterpolationMode="HighQuality"/>
 
-              <!-- Zoomed/Pan Mode: ScrollViewer with Scaled Image -->
+              <!-- Zoomed/Pan Mode -->
               <ScrollViewer IsVisible="{Binding !IsFitMode}"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto">
@@ -90,7 +117,7 @@
                 </Panel>
               </ScrollViewer>
 
-              <!-- Dimension & Zoom Badge (Bottom Right Overlay) -->
+              <!-- Dimension & Zoom Badge -->
               <Border Background="#DD0D1520" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
                       CornerRadius="4" Padding="6,2" Margin="8"
                       HorizontalAlignment="Right" VerticalAlignment="Bottom"
@@ -106,28 +133,129 @@
             </Panel>
           </Border>
 
-          <!-- Image Loading State -->
-          <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
-                  CornerRadius="4" Padding="12" Margin="0,0,0,8"
-                  IsVisible="{Binding IsLoadingPreview}">
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
-              <ProgressBar IsIndeterminate="True" Width="120" Height="4" Foreground="{DynamicResource AppHighlightBrush}"/>
-              <TextBlock Text="Loading image preview..." FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center"/>
-            </StackPanel>
+          <!-- 2. VIDEO PREVIEW -->
+          <Border Grid.Row="0" Background="#080C12" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Margin="0,0,0,8" ClipToBounds="True"
+                  IsVisible="{Binding IsVideoPreview}">
+            <Grid RowDefinitions="*,Auto">
+              <!-- Video Viewport -->
+              <Panel Grid.Row="0">
+                <!-- Native Video Control Host (renders when playing) -->
+                <views:NativeVideoHost x:Name="VideoHost"
+                                       IsVisible="{Binding IsVideoPlaying}"
+                                       HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+
+                <!-- Poster Frame / Static Thumbnail (renders when stopped or paused) -->
+                <Panel IsVisible="{Binding !IsVideoPlaying}">
+                  <Image Source="{Binding VideoPosterImage}"
+                         Stretch="Uniform"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         RenderOptions.BitmapInterpolationMode="HighQuality"/>
+
+                  <!-- Big Central Play Button -->
+                  <Button Command="{Binding TogglePlayPauseCommand}"
+                          Classes="power-btn"
+                          Width="56" Height="56" CornerRadius="28"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Padding="0" Background="#99000000" BorderBrush="{DynamicResource AppHighlightBrush}" BorderThickness="2"
+                          ToolTip.Tip="Play Video">
+                    <TextBlock Text="▶" FontSize="22" Foreground="{DynamicResource AppHighlightBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                  </Button>
+                </Panel>
+              </Panel>
+
+              <!-- Video Media Controls Toolbar -->
+              <Border Grid.Row="1" Background="#E60D1520" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,1,0,0" Padding="8,4">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" VerticalAlignment="Center">
+                  <!-- Play / Pause Button -->
+                  <Button Grid.Column="0" Command="{Binding TogglePlayPauseCommand}"
+                          Classes="power-btn" Padding="6,3" FontSize="11" Margin="0,0,6,0">
+                    <TextBlock Text="{Binding PlayPauseButtonIcon}" FontWeight="Bold"/>
+                  </Button>
+
+                  <!-- Current Time -->
+                  <TextBlock Grid.Column="1" Text="{Binding FormattedVideoPosition}" FontSize="10"
+                             FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppTextBrush}"
+                             VerticalAlignment="Center" Margin="0,0,6,0"/>
+
+                  <!-- Seek Slider -->
+                  <Slider Grid.Column="2" Minimum="0" Maximum="{Binding VideoDurationSeconds}" Value="{Binding VideoPositionSeconds, Mode=OneWay}"
+                          PointerCaptureLost="OnVideoSliderPointerCaptureLost"
+                          VerticalAlignment="Center" Margin="0,0,6,0"/>
+
+                  <!-- Total Duration -->
+                  <TextBlock Grid.Column="3" Text="{Binding FormattedVideoDuration}" FontSize="10"
+                             FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppSubTextBrush}"
+                             VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                  <!-- Mute Button -->
+                  <Button Grid.Column="4" Command="{Binding ToggleMuteCommand}"
+                          Classes="power-btn" Padding="5,3" FontSize="11" Margin="0,0,4,0" ToolTip.Tip="Toggle Mute">
+                    <TextBlock Text="{Binding MuteButtonIcon}"/>
+                  </Button>
+
+                  <!-- Volume Slider -->
+                  <Slider Grid.Column="5" Minimum="0" Maximum="1" Width="55" Value="{Binding VideoVolume}"
+                          VerticalAlignment="Center" ToolTip.Tip="Volume"/>
+                </Grid>
+              </Border>
+            </Grid>
           </Border>
 
-          <!-- Image Error State -->
-          <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
-                  CornerRadius="4" Padding="12" Margin="0,0,0,8"
-                  IsVisible="{Binding IsImageError}">
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
-              <TextBlock Text="⚠️" FontSize="24" HorizontalAlignment="Center"/>
-              <TextBlock Text="Unable to display image preview" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource AppTextBrush}" HorizontalAlignment="Center"/>
-              <TextBlock Text="{Binding PreviewErrorMessage}" FontSize="10" Foreground="{DynamicResource AppSubTextBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"/>
-            </StackPanel>
+          <!-- 3. PDF PREVIEW -->
+          <Border Grid.Row="0" Background="#0C1017" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Margin="0,0,0,8" ClipToBounds="True"
+                  IsVisible="{Binding IsPdfPreview}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+              <Panel HorizontalAlignment="Center" VerticalAlignment="Top" Margin="8">
+                <Image Source="{Binding PdfCurrentPageBitmap}"
+                       Stretch="Uniform"
+                       RenderOptions.BitmapInterpolationMode="HighQuality"/>
+              </Panel>
+            </ScrollViewer>
           </Border>
 
-          <!-- Text Preview -->
+          <!-- 4. ZIP ARCHIVE PREVIEW -->
+          <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Margin="0,0,0,8" ClipToBounds="True"
+                  IsVisible="{Binding IsZipPreview}">
+            <DataGrid ItemsSource="{Binding ZipEntries}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      GridLinesVisibility="Horizontal"
+                      CanUserResizeColumns="True"
+                      BorderThickness="0"
+                      Background="Transparent"
+                      HeadersVisibility="Column">
+              <DataGrid.Columns>
+                <DataGridTemplateColumn Header="Name" Width="2*">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate DataType="preview:ZipEntryItem">
+                      <StackPanel Orientation="Horizontal" Spacing="6" Margin="4,2">
+                        <TextBlock Text="{Binding IndentPadding}"/>
+                        <Image Source="{Binding Icon}" Width="16" Height="16" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Name}" FontWeight="{Binding IsDirectory, Converter={x:Static ObjectConverters.IsNull}, FallbackValue='Normal'}"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource AppTextBrush}"/>
+                      </StackPanel>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+                <DataGridTextColumn Header="Size" Binding="{Binding FormattedSize}" Width="70"
+                                    FontFamily="{DynamicResource AppMonoFont}"/>
+                <DataGridTextColumn Header="Packed" Binding="{Binding FormattedCompressedSize}" Width="70"
+                                    FontFamily="{DynamicResource AppMonoFont}"/>
+                <DataGridTextColumn Header="Ratio" Binding="{Binding CompressionRatio}" Width="50"
+                                    FontFamily="{DynamicResource AppMonoFont}"/>
+                <DataGridTextColumn Header="Modified" Binding="{Binding ModifiedTime}" Width="105"
+                                    FontFamily="{DynamicResource AppMonoFont}"/>
+              </DataGrid.Columns>
+            </DataGrid>
+          </Border>
+
+          <!-- 5. TEXT PREVIEW -->
           <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
                   CornerRadius="4" Padding="6" Margin="0,0,0,8"
                   IsVisible="{Binding IsTextPreview}">
@@ -138,7 +266,7 @@
             </ScrollViewer>
           </Border>
 
-          <!-- Hex Dump Preview -->
+          <!-- 6. HEX DUMP PREVIEW -->
           <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
                   CornerRadius="4" Padding="6" Margin="0,0,0,8"
                   IsVisible="{Binding IsBinaryPreview}">
@@ -158,6 +286,27 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </ScrollViewer>
+          </Border>
+
+          <!-- Loading State -->
+          <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Padding="12" Margin="0,0,0,8"
+                  IsVisible="{Binding IsLoadingPreview}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+              <ProgressBar IsIndeterminate="True" Width="120" Height="4" Foreground="{DynamicResource AppHighlightBrush}"/>
+              <TextBlock Text="Loading preview..." FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center"/>
+            </StackPanel>
+          </Border>
+
+          <!-- Error State -->
+          <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Padding="12" Margin="0,0,0,8"
+                  IsVisible="{Binding PreviewErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+              <TextBlock Text="⚠️" FontSize="24" HorizontalAlignment="Center"/>
+              <TextBlock Text="Preview unavailable" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource AppTextBrush}" HorizontalAlignment="Center"/>
+              <TextBlock Text="{Binding PreviewErrorMessage}" FontSize="10" Foreground="{DynamicResource AppSubTextBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"/>
+            </StackPanel>
           </Border>
 
           <!-- Metadata Summary Card -->
@@ -199,14 +348,24 @@
                     Classes="power-btn" FontSize="10" Padding="6,2" HorizontalAlignment="Right"/>
           </DockPanel>
 
-          <StackPanel Spacing="2" IsVisible="{Binding HasHashes}">
-            <TextBlock Text="{Binding Sha256Hash, StringFormat='{}SHA256: {0}'}"
-                       FontSize="9.5" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"
-                       TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Sha256Hash}"/>
-            <TextBlock Text="{Binding Md5Hash, StringFormat='{}MD5:    {0}'}"
-                       FontSize="9.5" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"
-                       TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Md5Hash}"/>
+          <!-- Checksum Values (Visible when computed) -->
+          <StackPanel Spacing="3" IsVisible="{Binding HasHashes}">
+            <Grid ColumnDefinitions="Auto,*">
+              <TextBlock Grid.Column="0" Text="SHA-256:" Foreground="{DynamicResource AppSubTextBrush}" FontSize="10" Width="55"/>
+              <TextBox Grid.Column="1" Text="{Binding Sha256Hash}" IsReadOnly="True"
+                       Background="Transparent" BorderThickness="0" Padding="0"
+                       FontFamily="{DynamicResource AppMonoFont}" FontSize="9.5" Foreground="{DynamicResource AppHighlightBrush}"/>
+            </Grid>
+            <Grid ColumnDefinitions="Auto,*">
+              <TextBlock Grid.Column="0" Text="MD5:" Foreground="{DynamicResource AppSubTextBrush}" FontSize="10" Width="55"/>
+              <TextBox Grid.Column="1" Text="{Binding Md5Hash}" IsReadOnly="True"
+                       Background="Transparent" BorderThickness="0" Padding="0"
+                       FontFamily="{DynamicResource AppMonoFont}" FontSize="9.5" Foreground="{DynamicResource AppTextBrush}"/>
+            </Grid>
           </StackPanel>
+
+          <!-- Computing State -->
+          <ProgressBar IsIndeterminate="True" Height="2" IsVisible="{Binding IsHashing}" Foreground="{DynamicResource AppHighlightBrush}"/>
         </StackPanel>
       </Border>
     </Grid>

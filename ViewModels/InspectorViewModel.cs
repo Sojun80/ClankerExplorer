@@ -1,21 +1,42 @@
 using System;
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
+using ClankerExplorer.Services.Preview;
 
 namespace ClankerExplorer.ViewModels;
 
-public partial class InspectorViewModel : ObservableObject
+public partial class InspectorViewModel : ObservableObject, IDisposable
 {
     private CancellationTokenSource? _previewCts;
     private CancellationTokenSource? _hashingCts;
     private long _previewGeneration = 0;
     private string? _currentFilePath;
+    private bool _isDisposed;
+
+    // Video Player
+    private readonly NativeVideoPlayer _videoPlayer = new();
+    private readonly DispatcherTimer _videoPositionTimer;
+    private IntPtr _videoHwnd = IntPtr.Zero;
+    private int _videoHostWidth;
+    private int _videoHostHeight;
+
+    public InspectorViewModel()
+    {
+        _videoPositionTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        _videoPositionTimer.Tick += OnVideoTimerTick;
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsTextPreview))]
@@ -23,7 +44,29 @@ public partial class InspectorViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsHexPreview))]
     [NotifyPropertyChangedFor(nameof(IsImagePreview))]
     [NotifyPropertyChangedFor(nameof(IsImageError))]
+    [NotifyPropertyChangedFor(nameof(IsVideoPreview))]
+    [NotifyPropertyChangedFor(nameof(IsPdfPreview))]
+    [NotifyPropertyChangedFor(nameof(IsZipPreview))]
     private FilePreviewData? _previewData;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsImagePreview))]
+    [NotifyPropertyChangedFor(nameof(IsVideoPreview))]
+    [NotifyPropertyChangedFor(nameof(IsPdfPreview))]
+    [NotifyPropertyChangedFor(nameof(IsZipPreview))]
+    [NotifyPropertyChangedFor(nameof(IsTextPreview))]
+    [NotifyPropertyChangedFor(nameof(IsBinaryPreview))]
+    private string _activePreviewType = "none";
+
+    [ObservableProperty]
+    private bool _isLoadingPreview;
+
+    [ObservableProperty]
+    private string? _previewErrorMessage;
+
+    // ==========================================
+    // IMAGE PREVIEW STATE
+    // ==========================================
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsImagePreview))]
@@ -34,13 +77,6 @@ public partial class InspectorViewModel : ObservableObject
     private string _imageDimensions = string.Empty;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsImageError))]
-    private bool _isLoadingPreview;
-
-    [ObservableProperty]
-    private string? _previewErrorMessage;
-
-    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ZoomPercentDisplay))]
     private double _zoomLevel = 1.0;
 
@@ -49,12 +85,92 @@ public partial class InspectorViewModel : ObservableObject
     private bool _isFitMode = true;
 
     public string ZoomPercentDisplay => IsFitMode ? "Fit" : $"{(int)(ZoomLevel * 100)}%";
+    public bool IsImagePreview => ActivePreviewType == "image" && ImagePreview != null;
+    public bool IsImageError => ActivePreviewType == "image" && ImagePreview == null && !IsLoadingPreview;
 
-    public bool IsImagePreview => PreviewData?.PreviewType == "image" && ImagePreview != null;
-    public bool IsImageError => PreviewData?.PreviewType == "image" && ImagePreview == null && !IsLoadingPreview;
-    public bool IsTextPreview => PreviewData?.PreviewType == "text";
-    public bool IsBinaryPreview => PreviewData?.PreviewType == "binary";
-    public bool IsHexPreview => PreviewData?.PreviewType == "hex";
+    // ==========================================
+    // VIDEO PREVIEW STATE
+    // ==========================================
+
+    [ObservableProperty]
+    private Bitmap? _videoPosterImage;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PlayPauseButtonIcon))]
+    private bool _isVideoPlaying;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FormattedVideoPosition))]
+    private TimeSpan _videoPosition = TimeSpan.Zero;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FormattedVideoDuration))]
+    private TimeSpan _videoDuration = TimeSpan.Zero;
+
+    [ObservableProperty]
+    private double _videoVolume = 0.8;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MuteButtonIcon))]
+    private bool _isVideoMuted;
+
+    [ObservableProperty]
+    private bool _isVideoPlaybackAvailable = true;
+
+    public string PlayPauseButtonIcon => IsVideoPlaying ? "⏸" : "▶";
+    public string MuteButtonIcon => IsVideoMuted ? "🔇" : "🔊";
+    public bool IsVideoPreview => ActivePreviewType == "video";
+    public double VideoPositionSeconds => VideoPosition.TotalSeconds;
+    public double VideoDurationSeconds => Math.Max(1.0, VideoDuration.TotalSeconds);
+    public string FormattedVideoPosition => FormatTime(VideoPosition);
+    public string FormattedVideoDuration => FormatTime(VideoDuration);
+
+    // ==========================================
+    // PDF PREVIEW STATE
+    // ==========================================
+
+    [ObservableProperty]
+    private Bitmap? _pdfCurrentPageBitmap;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PdfPageDisplay))]
+    [NotifyPropertyChangedFor(nameof(CanPdfGoPrev))]
+    [NotifyPropertyChangedFor(nameof(CanPdfGoNext))]
+    private uint _pdfCurrentPage = 1;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PdfPageDisplay))]
+    [NotifyPropertyChangedFor(nameof(CanPdfGoPrev))]
+    [NotifyPropertyChangedFor(nameof(CanPdfGoNext))]
+    private uint _pdfTotalPages = 1;
+
+    [ObservableProperty]
+    private bool _isPdfFitWidth = true;
+
+    public bool IsPdfPreview => ActivePreviewType == "pdf";
+    public string PdfPageDisplay => $"Page {PdfCurrentPage} of {PdfTotalPages}";
+    public bool CanPdfGoPrev => PdfCurrentPage > 1;
+    public bool CanPdfGoNext => PdfCurrentPage < PdfTotalPages;
+
+    // ==========================================
+    // ZIP PREVIEW STATE
+    // ==========================================
+
+    [ObservableProperty]
+    private ObservableCollection<ZipEntryItem> _zipEntries = new();
+
+    [ObservableProperty]
+    private string _zipSummaryDisplay = string.Empty;
+
+    public bool IsZipPreview => ActivePreviewType == "zip";
+
+    // ==========================================
+    // FALLBACK / TEXT / BINARY / HASHES STATE
+    // ==========================================
+
+    public bool IsTextPreview => ActivePreviewType == "text";
+    public bool IsBinaryPreview => ActivePreviewType == "binary";
+    public bool IsHexPreview => ActivePreviewType == "hex";
 
     [ObservableProperty]
     private ObservableCollection<HexRow> _hexRows = new();
@@ -74,6 +190,10 @@ public partial class InspectorViewModel : ObservableObject
     [ObservableProperty]
     private string _statusMessage = "Select a file to inspect";
 
+    // ==========================================
+    // PREVIEW LIFECYCLE & LOADING
+    // ==========================================
+
     public async Task LoadPreviewAsync(string? filePath)
     {
         _previewCts?.Cancel();
@@ -83,10 +203,16 @@ public partial class InspectorViewModel : ObservableObject
         long generation = Interlocked.Increment(ref _previewGeneration);
         _currentFilePath = filePath;
 
-        // Reset previous preview state immediately to avoid stale flashes
+        // Immediately stop video playback & reset previous preview state
+        StopVideo();
         ImagePreview = null;
         ImageDimensions = string.Empty;
+        VideoPosterImage = null;
+        PdfCurrentPageBitmap = null;
+        ZipEntries.Clear();
+        ZipSummaryDisplay = string.Empty;
         PreviewErrorMessage = null;
+        ActivePreviewType = "none";
         IsFitMode = true;
         ZoomLevel = 1.0;
 
@@ -114,6 +240,7 @@ public partial class InspectorViewModel : ObservableObject
             if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
 
             PreviewData = data;
+            string ext = Path.GetExtension(filePath);
 
             if (data.HexRows != null)
             {
@@ -124,8 +251,10 @@ public partial class InspectorViewModel : ObservableObject
                 HexRows.Clear();
             }
 
-            if (data.PreviewType == "image")
+            // 1. Image Preview
+            if (ImagePreviewService.Instance.IsSupportedImageExtension(ext))
             {
+                ActivePreviewType = "image";
                 var imgResult = await ImagePreviewService.Instance.LoadImagePreviewAsync(filePath, token);
                 if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
 
@@ -141,6 +270,67 @@ public partial class InspectorViewModel : ObservableObject
                     PreviewErrorMessage = imgResult.ErrorMessage ?? "Failed to load image preview";
                 }
             }
+            // 2. Video Preview
+            else if (VideoThumbnailService.IsVideoFile(filePath))
+            {
+                ActivePreviewType = "video";
+                IsVideoPlaybackAvailable = true;
+                IsVideoPlaying = false;
+
+                // Load poster thumbnail first
+                var poster = await ThumbnailService.Instance.GetThumbnailAsync(filePath, File.GetLastWriteTime(filePath), 512, token);
+                if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
+                VideoPosterImage = poster;
+
+                // Query video duration
+                var duration = await VideoThumbnailService.Instance.GetVideoDurationAsync(filePath, token);
+                if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
+                VideoDuration = duration;
+                VideoPosition = TimeSpan.Zero;
+            }
+            // 3. PDF Preview
+            else if (PdfPreviewService.Instance.IsPdfFile(filePath))
+            {
+                ActivePreviewType = "pdf";
+                var pdfInfo = await PdfPreviewService.Instance.GetPdfInfoAsync(filePath, token);
+                if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
+
+                if (pdfInfo.IsValid && pdfInfo.PageCount > 0)
+                {
+                    PdfTotalPages = pdfInfo.PageCount;
+                    PdfCurrentPage = 1;
+
+                    var pageBmp = await PdfPreviewService.Instance.RenderPageAsync(filePath, 0, 1200, token);
+                    if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
+                    PdfCurrentPageBitmap = pageBmp;
+                }
+                else
+                {
+                    PreviewErrorMessage = pdfInfo.ErrorMessage ?? "Failed to load PDF document.";
+                }
+            }
+            // 4. ZIP Preview
+            else if (ZipPreviewService.Instance.IsZipFile(filePath))
+            {
+                ActivePreviewType = "zip";
+                var zipResult = await ZipPreviewService.Instance.LoadZipPreviewAsync(filePath, token);
+                if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
+
+                if (zipResult.Success)
+                {
+                    ZipEntries = new ObservableCollection<ZipEntryItem>(zipResult.Entries);
+                    ZipSummaryDisplay = $"{zipResult.TotalFileCount} files, {zipResult.TotalFolderCount} folders ({zipResult.FormattedTotalSize})";
+                }
+                else
+                {
+                    PreviewErrorMessage = zipResult.ErrorMessage ?? "Unable to inspect ZIP archive.";
+                }
+            }
+            // 5. Text / Binary / Directory Fallback
+            else
+            {
+                ActivePreviewType = data.PreviewType;
+            }
 
             StatusMessage = data.PreviewType == "directory" ? "Directory selected" : "";
         }
@@ -154,18 +344,194 @@ public partial class InspectorViewModel : ObservableObject
         }
     }
 
+    // ==========================================
+    // VIDEO CONTROLS & HWND ATTACH
+    // ==========================================
+
+    public void RegisterVideoHostHwnd(IntPtr hwnd)
+    {
+        _videoHwnd = hwnd;
+        if (IsVideoPlaying && !string.IsNullOrEmpty(_currentFilePath))
+        {
+            _videoPlayer.Open(_currentFilePath, _videoHwnd);
+            _videoPlayer.SetBounds(0, 0, _videoHostWidth, _videoHostHeight);
+            _videoPlayer.Play();
+        }
+    }
+
+    public void UpdateVideoHostBounds(int width, int height)
+    {
+        _videoHostWidth = width;
+        _videoHostHeight = height;
+        if (IsVideoPlaying)
+        {
+            _videoPlayer.SetBounds(0, 0, width, height);
+        }
+    }
+
+    [RelayCommand]
+    public void TogglePlayPause()
+    {
+        if (IsVideoPlaying)
+        {
+            PauseVideo();
+        }
+        else
+        {
+            PlayVideo();
+        }
+    }
+
+    public void PlayVideo()
+    {
+        if (string.IsNullOrEmpty(_currentFilePath) || !File.Exists(_currentFilePath)) return;
+
+        if (!_videoPlayer.IsInitialized)
+        {
+            bool ok = _videoPlayer.Open(_currentFilePath, _videoHwnd);
+            if (!ok)
+            {
+                IsVideoPlaybackAvailable = false;
+                return;
+            }
+
+            if (_videoHostWidth > 0 && _videoHostHeight > 0)
+            {
+                _videoPlayer.SetBounds(0, 0, _videoHostWidth, _videoHostHeight);
+            }
+
+            if (VideoPosition > TimeSpan.Zero)
+            {
+                _videoPlayer.SetPosition(VideoPosition);
+            }
+        }
+
+        _videoPlayer.SetVolume(IsVideoMuted ? 0.0 : VideoVolume);
+        _videoPlayer.Play();
+        IsVideoPlaying = true;
+        _videoPositionTimer.Start();
+    }
+
+    public void PauseVideo()
+    {
+        if (_videoPlayer.IsInitialized)
+        {
+            _videoPlayer.Pause();
+        }
+        IsVideoPlaying = false;
+        _videoPositionTimer.Stop();
+    }
+
+    public void StopVideo()
+    {
+        _videoPositionTimer.Stop();
+        if (_videoPlayer.IsInitialized)
+        {
+            _videoPlayer.Stop();
+            _videoPlayer.Close();
+        }
+        IsVideoPlaying = false;
+        VideoPosition = TimeSpan.Zero;
+    }
+
+    [RelayCommand]
+    public void SeekVideo(double seconds)
+    {
+        var target = TimeSpan.FromSeconds(Math.Clamp(seconds, 0, VideoDuration.TotalSeconds));
+        VideoPosition = target;
+        if (_videoPlayer.IsInitialized)
+        {
+            _videoPlayer.SetPosition(target);
+        }
+    }
+
+    [RelayCommand]
+    public void ToggleMute()
+    {
+        IsVideoMuted = !IsVideoMuted;
+        _videoPlayer.SetMute(IsVideoMuted);
+    }
+
+    partial void OnVideoVolumeChanged(double value)
+    {
+        _videoPlayer.SetVolume(IsVideoMuted ? 0.0 : value);
+    }
+
+    private void OnVideoTimerTick(object? sender, EventArgs e)
+    {
+        if (!IsVideoPlaying) return;
+        var current = _videoPlayer.GetPosition();
+        if (current > TimeSpan.Zero)
+        {
+            VideoPosition = current;
+            if (VideoDuration > TimeSpan.Zero && current >= VideoDuration)
+            {
+                PauseVideo();
+                VideoPosition = VideoDuration;
+            }
+        }
+    }
+
+    // ==========================================
+    // PDF CONTROLS
+    // ==========================================
+
+    [RelayCommand]
+    public async Task NextPdfPageAsync()
+    {
+        if (PdfCurrentPage < PdfTotalPages && !string.IsNullOrEmpty(_currentFilePath))
+        {
+            PdfCurrentPage++;
+            await RenderCurrentPdfPageAsync();
+        }
+    }
+
+    [RelayCommand]
+    public async Task PrevPdfPageAsync()
+    {
+        if (PdfCurrentPage > 1 && !string.IsNullOrEmpty(_currentFilePath))
+        {
+            PdfCurrentPage--;
+            await RenderCurrentPdfPageAsync();
+        }
+    }
+
+    [RelayCommand]
+    public void TogglePdfFitWidth()
+    {
+        IsPdfFitWidth = !IsPdfFitWidth;
+    }
+
+    private async Task RenderCurrentPdfPageAsync()
+    {
+        if (string.IsNullOrEmpty(_currentFilePath) || !File.Exists(_currentFilePath)) return;
+        try
+        {
+            var pageBmp = await PdfPreviewService.Instance.RenderPageAsync(_currentFilePath, PdfCurrentPage - 1, 1400);
+            if (pageBmp != null)
+            {
+                PdfCurrentPageBitmap = pageBmp;
+            }
+        }
+        catch { }
+    }
+
+    // ==========================================
+    // IMAGE ZOOM CONTROLS
+    // ==========================================
+
     [RelayCommand]
     public void ZoomIn()
     {
         IsFitMode = false;
-        ZoomLevel = Math.Clamp(ZoomLevel * 1.25, 0.1, 8.0);
+        ZoomLevel = Math.Clamp(ZoomLevel * 1.25, 0.1, 10.0);
     }
 
     [RelayCommand]
     public void ZoomOut()
     {
         IsFitMode = false;
-        ZoomLevel = Math.Clamp(ZoomLevel / 1.25, 0.1, 8.0);
+        ZoomLevel = Math.Clamp(ZoomLevel / 1.25, 0.1, 10.0);
     }
 
     [RelayCommand]
@@ -187,51 +553,95 @@ public partial class InspectorViewModel : ObservableObject
     {
         if (IsFitMode)
         {
-            IsFitMode = false;
-            ZoomLevel = 1.0;
+            ActualSize();
         }
         else
         {
-            IsFitMode = true;
-            ZoomLevel = 1.0;
+            ResetZoom();
         }
     }
+
+    // ==========================================
+    // HASHING CONTROLS
+    // ==========================================
 
     [RelayCommand]
     public async Task ComputeHashesAsync()
     {
-        if (PreviewData == null || PreviewData.PreviewType == "directory" || string.IsNullOrEmpty(_currentFilePath)) return;
+        if (string.IsNullOrEmpty(_currentFilePath) || !File.Exists(_currentFilePath) || IsHashing) return;
 
         _hashingCts?.Cancel();
         _hashingCts = new CancellationTokenSource();
         var token = _hashingCts.Token;
 
-        var targetPath = _currentFilePath;
         IsHashing = true;
+        HasHashes = false;
+        Sha256Hash = "Computing...";
+        Md5Hash = "Computing...";
 
         try
         {
-            var res = await FileSystemService.Instance.ComputeHashesAsync(targetPath, token);
-            if (token.IsCancellationRequested || _currentFilePath != targetPath) return;
+            var (sha256, md5) = await Task.Run(() =>
+            {
+                using var stream = new FileStream(_currentFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var sha256Alg = System.Security.Cryptography.SHA256.Create();
+                using var md5Alg = System.Security.Cryptography.MD5.Create();
 
-            Sha256Hash = res.Sha256;
-            Md5Hash = res.Md5;
-            HasHashes = true;
+                byte[] buffer = new byte[64 * 1024];
+                int bytesRead;
+                while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    token.ThrowIfCancellationRequested();
+                    sha256Alg.TransformBlock(buffer, 0, bytesRead, null, 0);
+                    md5Alg.TransformBlock(buffer, 0, bytesRead, null, 0);
+                }
+
+                sha256Alg.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+                md5Alg.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+
+                return (
+                    Convert.ToHexString(sha256Alg.Hash ?? Array.Empty<byte>()).ToLowerInvariant(),
+                    Convert.ToHexString(md5Alg.Hash ?? Array.Empty<byte>()).ToLowerInvariant()
+                );
+            }, token);
+
+            if (!token.IsCancellationRequested)
+            {
+                Sha256Hash = sha256;
+                Md5Hash = md5;
+                HasHashes = true;
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            if (_currentFilePath == targetPath)
-            {
-                StatusMessage = $"Hashing error: {ex.Message}";
-            }
+            Sha256Hash = $"Error: {ex.Message}";
+            Md5Hash = $"Error: {ex.Message}";
+            HasHashes = true;
         }
         finally
         {
-            if (_currentFilePath == targetPath)
-            {
-                IsHashing = false;
-            }
+            IsHashing = false;
         }
+    }
+
+    private static string FormatTime(TimeSpan ts)
+    {
+        if (ts < TimeSpan.Zero) ts = TimeSpan.Zero;
+        if (ts.TotalHours >= 1)
+        {
+            return $"{(int)ts.TotalHours:D2}:{ts.Minutes:D2}:{ts.Seconds:D2}";
+        }
+        return $"{ts.Minutes:D2}:{ts.Seconds:D2}";
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+        _previewCts?.Cancel();
+        _hashingCts?.Cancel();
+        _videoPositionTimer.Stop();
+        _videoPlayer.Dispose();
     }
 }
