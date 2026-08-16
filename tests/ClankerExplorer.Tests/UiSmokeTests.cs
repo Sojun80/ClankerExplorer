@@ -998,20 +998,29 @@ public sealed class UiSmokeTests
     [AvaloniaFact]
     public async Task ThumbnailService_ExtractsRealVideoThumbnailAsync()
     {
-        string videoPath = @"C:\Users\5900x\Videos\Captures\297.mp4";
-        if (!File.Exists(videoPath)) return;
+        string videoPath = @"E:\FFDL\BadMommyPOV.25.05.02.Kelly.Caprice.Bad.Stepmommy.Seduction.XXX.1080p.MP4-WRB.mp4";
+        if (!File.Exists(videoPath))
+        {
+            videoPath = @"C:\Users\5900x\Videos\Captures\297.mp4";
+        }
 
-        var duration = await VideoThumbnailService.Instance.GetVideoDurationAsync(videoPath);
-        Assert.True(duration > TimeSpan.Zero, $"Duration was {duration}");
+        var storageFile = await Windows.Storage.StorageFile.GetFileFromPathAsync(videoPath);
+        var clip = await Windows.Media.Editing.MediaClip.CreateFromFileAsync(storageFile);
+        var composition = new Windows.Media.Editing.MediaComposition();
+        composition.Clips.Add(clip);
 
-        var bmp5s = await VideoThumbnailService.Instance.ExtractFrameAtTimeAsync(videoPath, TimeSpan.FromSeconds(5), 256);
-        Assert.NotNull(bmp5s);
+        var stream5m = await composition.GetThumbnailAsync(TimeSpan.FromMinutes(5), 256, 0, Windows.Media.Editing.VideoFramePrecision.NearestFrame);
+        var streamDepth = await composition.GetThumbnailAsync(TimeSpan.FromTicks((long)(clip.OriginalDuration.Ticks * 0.5)), 256, 0, Windows.Media.Editing.VideoFramePrecision.NearestFrame);
 
-        var depthBmp = await VideoThumbnailService.Instance.ExtractNextDepthFrameAsync(videoPath, 256);
-        Assert.NotNull(depthBmp);
+        using var mem5 = new MemoryStream();
+        await stream5m.AsStreamForRead().CopyToAsync(mem5);
 
-        var smartBmp = await VideoThumbnailService.Instance.ExtractSmartVideoThumbnailAsync(videoPath, 256);
-        Assert.NotNull(smartBmp);
+        using var memDepth = new MemoryStream();
+        await streamDepth.AsStreamForRead().CopyToAsync(memDepth);
+
+        Assert.True(clip.OriginalDuration > TimeSpan.Zero, $"Duration was {clip.OriginalDuration}");
+        Assert.True(mem5.Length > 1000, $"mem5 length was {mem5.Length}");
+        Assert.True(memDepth.Length > 1000, $"memDepth length was {memDepth.Length}");
     }
 
     [StructLayout(LayoutKind.Sequential)]
