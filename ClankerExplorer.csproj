@@ -67,4 +67,11 @@
     <!-- Explicit patched version to resolve security advisory GHSA-xrw6-gwf8-vvr9 -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
   </ItemGroup>
+
+  <Target Name="SyncNet8LegacyOutput" AfterTargets="Build">
+    <ItemGroup>
+      <OutputFiles Include="$(TargetDir)**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(OutputFiles)" DestinationFiles="@(OutputFiles->'$(SolutionDir)bin\$(Configuration)\net8.0\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" ContinueOnError="true" />
+  </Target>
 </Project>
