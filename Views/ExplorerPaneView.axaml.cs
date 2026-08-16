@@ -171,6 +171,7 @@ public partial class ExplorerPaneView : UserControl
         if (DataContext is not ExplorerPaneViewModel vm) return;
         EnsureFolderScrollViewers();
         vm.FolderViewStateRestored += RestoreFolderViewState;
+        vm.RequestScrollItemIntoView += OnRequestScrollItemIntoView;
         RestoreFolderViewState();
     }
 
@@ -289,6 +290,33 @@ public partial class ExplorerPaneView : UserControl
             if (rowIndex >= 0 && rowIndex < vm.ThumbnailRows.Count)
                 ThumbnailListBox.ScrollIntoView(vm.ThumbnailRows[rowIndex]);
         }
+    }
+
+    private void OnRequestScrollItemIntoView(FileItem item)
+    {
+        // Dispatch on Loaded priority so the DataGrid/ListBox has finished laying out the new items
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (DataContext is not ExplorerPaneViewModel vm) return;
+
+            // Details view: scroll the DataGrid
+            if (FileDataGrid != null && !vm.IsThumbnailView)
+            {
+                FileDataGrid.ScrollIntoView(item, null);
+            }
+
+            // Thumbnail view: scroll the ListBox row containing this item
+            if (ThumbnailListBox != null && vm.IsThumbnailView && vm.SelectedTab != null)
+            {
+                int index = vm.SelectedTab.FilteredItems.IndexOf(item);
+                int colCount = Math.Max(1, vm.ThumbnailColumnCount);
+                int rowIndex = index < 0 ? -1 : index / colCount;
+                if (rowIndex >= 0 && rowIndex < vm.ThumbnailRows.Count)
+                {
+                    ThumbnailListBox.ScrollIntoView(vm.ThumbnailRows[rowIndex]);
+                }
+            }
+        }, DispatcherPriority.Loaded);
     }
 
     private void ScheduleThumbnailViewportUpdate()

@@ -22,6 +22,17 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     private bool _isDisposed;
     private DirectoryReadOptions _directoryReadOptions = DirectoryReadOptions.FromSettings(SettingsService.Instance.CurrentSettings);
 
+    /// <summary>
+    /// After a back/up navigation, holds the path of the folder we came from
+    /// so it can be auto-selected once the directory listing loads.
+    /// </summary>
+    public string? PendingSelectPath { get; set; }
+
+    /// <summary>
+    /// Raised when a navigation-context item should be scrolled into view.
+    /// </summary>
+    public event Action<FileItem>? ScrollIntoViewRequested;
+
     [ObservableProperty]
     private string _id = Guid.NewGuid().ToString("N");
 
@@ -139,6 +150,8 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     public void GoBack()
     {
         if (!CanGoBack || _isDisposed) return;
+        // Remember the folder we're leaving so we can re-select it after loading
+        PendingSelectPath = History[HistoryIndex];
         HistoryIndex--;
         CurrentPath = History[HistoryIndex];
         UpdateTitle(CurrentPath);
@@ -164,6 +177,8 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         var parent = Directory.GetParent(CurrentPath);
         if (parent != null)
         {
+            // Remember the folder we're leaving so we can re-select it after loading
+            PendingSelectPath = CurrentPath;
             NavigateTo(parent.FullName);
         }
     }
@@ -214,6 +229,23 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             ClearThumbnailSelection();
             Items = new ObservableCollection<FileItem>(list);
             await ApplyFilterAsync(token);
+
+            // After the filtered list is ready, auto-select the folder we navigated from (if any)
+            var pendingPath = PendingSelectPath;
+            PendingSelectPath = null;
+            if (!string.IsNullOrEmpty(pendingPath))
+            {
+                var comparison = OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase
+                    : StringComparison.Ordinal;
+                var match = FilteredItems.FirstOrDefault(f =>
+                    string.Equals(f.FullPath, pendingPath, comparison));
+                if (match != null)
+                {
+                    SelectedItem = match;
+                    ScrollIntoViewRequested?.Invoke(match);
+                }
+            }
         }
         catch (OperationCanceledException) { }
         finally

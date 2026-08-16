@@ -14,6 +14,7 @@ namespace ClankerExplorer.ViewModels;
 public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 {
     private readonly Dictionary<ExplorerTabViewModel, PropertyChangedEventHandler> _tabPropertyHandlers = new();
+    private readonly Dictionary<ExplorerTabViewModel, Action<FileItem>> _tabScrollHandlers = new();
     private readonly Action _clipboardChangedHandler;
     private readonly Action _quickAccessChangedHandler;
     private readonly Action<AppSettings> _settingsChangedHandler;
@@ -280,6 +281,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Action<FileItem>? RequestRename;
     public event Action<FileItem?>? RequestProperties;
     public event Action<string>? RequestSetClipboardText;
+    public event Action<FileItem>? RequestScrollItemIntoView;
 
     public Avalonia.Controls.DataGridLength NameColumnWidthDisplay =>
         new Avalonia.Controls.DataGridLength(ColumnWidthName > 0 ? ColumnWidthName : 280, Avalonia.Controls.DataGridLengthUnitType.Pixel);
@@ -779,6 +781,14 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
         _tabPropertyHandlers[tab] = handler;
         tab.PropertyChanged += handler;
+
+        Action<FileItem> scrollHandler = item =>
+        {
+            if (tab == SelectedTab)
+                RequestScrollItemIntoView?.Invoke(item);
+        };
+        _tabScrollHandlers[tab] = scrollHandler;
+        tab.ScrollIntoViewRequested += scrollHandler;
     }
 
     public void UnwireTabEvents(ExplorerTabViewModel tab)
@@ -786,6 +796,10 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         if (_tabPropertyHandlers.Remove(tab, out var handler))
         {
             tab.PropertyChanged -= handler;
+        }
+        if (_tabScrollHandlers.Remove(tab, out var scrollHandler))
+        {
+            tab.ScrollIntoViewRequested -= scrollHandler;
         }
     }
 
