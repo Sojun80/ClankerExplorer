@@ -799,4 +799,31 @@ public sealed class UiSmokeTests
         Assert.False(pane.IsFolderSelected);
         Assert.False(file1.IsThumbnailSelected);
     }
+
+    [Fact]
+    public void OpenSelected_Folder_NavigatesIntoDirectory()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "clanker_enter_test_" + Guid.NewGuid().ToString("N"));
+        var subDir = Path.Combine(tempRoot, "SubFolder");
+        Directory.CreateDirectory(subDir);
+
+        try
+        {
+            var pane = new ExplorerPaneViewModel("pane1", tempRoot);
+            var tab = pane.SelectedTab!;
+
+            var folderItem = new FileItem { Name = "SubFolder", FullPath = subDir, IsDirectory = true };
+            tab.FilteredItems.Add(folderItem);
+            tab.SelectedItems.Add(folderItem);
+            tab.SelectedItem = folderItem;
+
+            pane.OpenSelected();
+
+            Assert.Equal(subDir, tab.CurrentPath);
+        }
+        finally
+        {
+            try { Directory.Delete(tempRoot, true); } catch { }
+        }
+    }
 }

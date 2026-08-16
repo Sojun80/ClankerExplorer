@@ -108,6 +108,7 @@ public partial class ExplorerPaneView : UserControl
                     Dispatcher.UIThread.Post(CaptureFolderViewportAnchors, DispatcherPriority.Background);
                 FileDataGrid.ColumnReordered += (sender, args) => SaveCurrentColumnLayout();
                 FileDataGrid.Sorting += OnDataGridSorting;
+                FileDataGrid.AddHandler(KeyDownEvent, OnDataGridKeyDownTunnel, RoutingStrategies.Tunnel);
             }
 
             if (ThumbnailListBox != null)
@@ -1346,6 +1347,40 @@ public partial class ExplorerPaneView : UserControl
         }
     }
 
+    private void OnDataGridKeyDownTunnel(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+
+        // Enter: Open selected item(s) without triggering inline cell edit or row jumping
+        if (e.Key == Key.Enter)
+        {
+            vm.OpenSelected();
+            e.Handled = true;
+        }
+        // F2: Rename
+        else if (e.Key == Key.F2)
+        {
+            if (vm.SelectedTab.SelectedItem != null)
+            {
+                vm.TriggerRename();
+                e.Handled = true;
+            }
+        }
+        // Delete / Shift+Delete
+        else if (e.Key == Key.Delete)
+        {
+            bool isPermanent = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            vm.DeleteSelected(isPermanent);
+            e.Handled = true;
+        }
+        // F5: Refresh
+        else if (e.Key == Key.F5)
+        {
+            vm.Refresh();
+            e.Handled = true;
+        }
+    }
+
     private void OnThumbnailKeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
@@ -1353,11 +1388,8 @@ public partial class ExplorerPaneView : UserControl
         // Enter: Open
         if (e.Key == Key.Enter)
         {
-            if (vm.SelectedTab.SelectedItem != null)
-            {
-                vm.OpenItem(vm.SelectedTab.SelectedItem);
-                e.Handled = true;
-            }
+            vm.OpenSelected();
+            e.Handled = true;
         }
         // F2: Rename
         else if (e.Key == Key.F2)

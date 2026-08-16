@@ -1063,6 +1063,36 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    public void OpenSelected()
+    {
+        var items = GetSelectedFileItems();
+        if (items.Count == 0 && SelectedTab?.SelectedItem != null)
+        {
+            items = new List<FileItem> { SelectedTab.SelectedItem };
+        }
+
+        if (items.Count == 1)
+        {
+            OpenItem(items[0]);
+        }
+        else if (items.Count > 1)
+        {
+            var nonDirs = items.Where(i => !i.IsDirectory).ToList();
+            if (nonDirs.Count > 0)
+            {
+                foreach (var file in nonDirs)
+                {
+                    OpenItem(file);
+                }
+            }
+            else if (SelectedTab?.SelectedItem != null)
+            {
+                OpenItem(SelectedTab.SelectedItem);
+            }
+        }
+    }
+
+    [RelayCommand]
     public void EditItem()
     {
         var target = SelectedTab?.SelectedItem;
