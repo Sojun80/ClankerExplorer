@@ -18,6 +18,7 @@ namespace ClankerExplorer.Views;
 public partial class ExplorerPaneView : UserControl
 {
     private readonly DispatcherTimer _autoScrollTimer;
+    private readonly DispatcherTimer _middleScrollTimer;
     private readonly DispatcherTimer _thumbnailDebounceTimer;
     private readonly DispatcherTimer _folderScrollSaveTimer;
     private CancellationTokenSource? _thumbnailViewportCts;
@@ -35,12 +36,21 @@ public partial class ExplorerPaneView : UserControl
     private HashSet<FileItem> _marqueeBaseSelection = new();
     private double _autoScrollVelocity;
 
+    // Middle-Mouse Free-Scroll / Autoscroll State
+    private bool _isMiddleAutoScrolling;
+    private Point _autoScrollAnchorPos;
+    private Point _currentPointerPos;
+    private bool _hasMovedDuringMiddleScroll;
+    private ScrollViewer? _activeMiddleScrollViewer;
+
     public ExplorerPaneView()
     {
         InitializeComponent();
 
         _autoScrollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _autoScrollTimer.Tick += OnAutoScrollTick;
+        _middleScrollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _middleScrollTimer.Tick += OnMiddleScrollTick;
         _thumbnailDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(90) };
         _thumbnailDebounceTimer.Tick += OnThumbnailDebounceTick;
         _folderScrollSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
@@ -98,6 +108,12 @@ public partial class ExplorerPaneView : UserControl
                 FileDataGrid.ColumnReordered += (sender, args) => SaveCurrentColumnLayout();
                 FileDataGrid.Sorting += OnDataGridSorting;
             }
+
+            if (FileGridContainer != null)
+            {
+                FileGridContainer.AddHandler(PointerPressedEvent, OnFileGridPointerPressedTunnel, RoutingStrategies.Tunnel);
+            }
+            AddHandler(KeyDownEvent, OnPaneKeyDownTunnel, RoutingStrategies.Tunnel);
 
             InitializeThumbnailViewport();
             InitializeFolderViewRestoration();
@@ -725,6 +741,134 @@ public partial class ExplorerPaneView : UserControl
         }
     }
 
+    private void OnFileGridPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
+    {
+        if (_isMiddleAutoScrolling)
+        {
+            StopMiddleAutoScroll();
+            e.Pointer.Capture(null);
+            e.Handled = true;
+            return;
+        }
+
+        if (FileGridContainer != null)
+        {
+            var props = e.GetCurrentPoint(FileGridContainer).Properties;
+            if (props.IsMiddleButtonPressed)
+            {
+                StartMiddleAutoScroll(e);
+                e.Handled = true;
+            }
+        }
+    }
+
+    private void StartMiddleAutoScroll(PointerPressedEventArgs e)
+    {
+        if (FileGridContainer == null) return;
+
+        _isMiddleAutoScrolling = true;
+        _hasMovedDuringMiddleScroll = false;
+        _autoScrollAnchorPos = e.GetPosition(FileGridContainer);
+        _currentPointerPos = _autoScrollAnchorPos;
+        _activeMiddleScrollViewer = GetActiveMiddleScrollViewer();
+
+        if (AutoScrollAnchor != null && AutoScrollCanvas != null)
+        {
+            double halfW = AutoScrollAnchor.Width > 0 ? AutoScrollAnchor.Width / 2 : 14;
+            double halfH = AutoScrollAnchor.Height > 0 ? AutoScrollAnchor.Height / 2 : 14;
+            Canvas.SetLeft(AutoScrollAnchor, _autoScrollAnchorPos.X - halfW);
+            Canvas.SetTop(AutoScrollAnchor, _autoScrollAnchorPos.Y - halfH);
+            AutoScrollCanvas.IsVisible = true;
+        }
+
+        e.Pointer.Capture(FileGridContainer);
+        _middleScrollTimer.Start();
+    }
+
+    private void StopMiddleAutoScroll()
+    {
+        if (!_isMiddleAutoScrolling) return;
+
+        _isMiddleAutoScrolling = false;
+        _middleScrollTimer.Stop();
+        _activeMiddleScrollViewer = null;
+
+        if (AutoScrollCanvas != null)
+        {
+            AutoScrollCanvas.IsVisible = false;
+        }
+    }
+
+    private ScrollViewer? GetActiveMiddleScrollViewer()
+    {
+        if (DataContext is ExplorerPaneViewModel vm)
+        {
+            if (vm.IsThumbnailView && ThumbnailListBox != null)
+            {
+                return ThumbnailListBox.FindDescendantOfType<ScrollViewer>();
+            }
+            else if (FileDataGrid != null)
+            {
+                return FileDataGrid.FindDescendantOfType<ScrollViewer>();
+            }
+        }
+        return null;
+    }
+
+    private void OnPaneKeyDownTunnel(object? sender, KeyEventArgs e)
+    {
+        if (_isMiddleAutoScrolling && e.Key == Key.Escape)
+        {
+            StopMiddleAutoScroll();
+            if (FileGridContainer != null)
+            {
+                // TopLevel capture release
+            }
+            e.Handled = true;
+        }
+    }
+
+    private void OnMiddleScrollTick(object? sender, EventArgs e)
+    {
+        if (!_isMiddleAutoScrolling || _activeMiddleScrollViewer == null)
+        {
+            StopMiddleAutoScroll();
+            return;
+        }
+
+        double dx = _currentPointerPos.X - _autoScrollAnchorPos.X;
+        double dy = _currentPointerPos.Y - _autoScrollAnchorPos.Y;
+
+        const double deadZone = 8.0;
+        double vx = 0;
+        double vy = 0;
+
+        if (Math.Abs(dy) > deadZone)
+        {
+            double distY = Math.Abs(dy) - deadZone;
+            double signY = Math.Sign(dy);
+            vy = signY * Math.Pow(distY * 0.16, 1.4);
+        }
+
+        if (Math.Abs(dx) > deadZone && _activeMiddleScrollViewer.Extent.Width > _activeMiddleScrollViewer.Viewport.Width)
+        {
+            double distX = Math.Abs(dx) - deadZone;
+            double signX = Math.Sign(dx);
+            vx = signX * Math.Pow(distX * 0.16, 1.4);
+        }
+
+        if (vx != 0 || vy != 0)
+        {
+            double maxOffsetX = Math.Max(0, _activeMiddleScrollViewer.Extent.Width - _activeMiddleScrollViewer.Viewport.Width);
+            double maxOffsetY = Math.Max(0, _activeMiddleScrollViewer.Extent.Height - _activeMiddleScrollViewer.Viewport.Height);
+
+            double newX = Math.Clamp(_activeMiddleScrollViewer.Offset.X + vx, 0, maxOffsetX);
+            double newY = Math.Clamp(_activeMiddleScrollViewer.Offset.Y + vy, 0, maxOffsetY);
+
+            _activeMiddleScrollViewer.Offset = new Vector(newX, newY);
+        }
+    }
+
     private void OnFileGridPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (FileGridContainer == null || FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm) return;
@@ -782,12 +926,23 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnFileGridPointerMoved(object? sender, PointerEventArgs e)
     {
+        if (_isMiddleAutoScrolling)
+        {
+            _currentPointerPos = e.GetPosition(FileGridContainer);
+            var delta = _currentPointerPos - _autoScrollAnchorPos;
+            if (Math.Abs(delta.X) > 8 || Math.Abs(delta.Y) > 8)
+            {
+                _hasMovedDuringMiddleScroll = true;
+            }
+            return;
+        }
+
         if (!_isMouseDownForMarquee || FileGridContainer == null || FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm) return;
 
         var cur = e.GetPosition(FileGridContainer);
-        var delta = cur - _marqueeStartPos;
+        var deltaMarquee = cur - _marqueeStartPos;
 
-        if (!_isMarqueeActive && PointerGestureClassifier.ExceedsDragThreshold(delta.X, delta.Y, 4))
+        if (!_isMarqueeActive && PointerGestureClassifier.ExceedsDragThreshold(deltaMarquee.X, deltaMarquee.Y, 4))
         {
             _isMarqueeActive = true;
             vm.IsSuppressingPreview = true;
@@ -834,6 +989,20 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnFileGridPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_isMiddleAutoScrolling)
+        {
+            var props = e.GetCurrentPoint(FileGridContainer).Properties;
+            // If the middle button was released after moving, stop autoscroll (hold-to-scroll gesture)
+            if (!props.IsMiddleButtonPressed && _hasMovedDuringMiddleScroll)
+            {
+                StopMiddleAutoScroll();
+                e.Pointer.Capture(null);
+                e.Handled = true;
+                return;
+            }
+            return;
+        }
+
         _autoScrollTimer.Stop();
         _autoScrollVelocity = 0;
         if (MarqueeBox != null) MarqueeBox.IsVisible = false;
@@ -872,6 +1041,11 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnFileGridPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
+        if (_isMiddleAutoScrolling)
+        {
+            StopMiddleAutoScroll();
+        }
+
         _autoScrollTimer.Stop();
         _autoScrollVelocity = 0;
         if (MarqueeBox != null) MarqueeBox.IsVisible = false;

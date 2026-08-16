@@ -458,4 +458,31 @@ public sealed class UiSmokeTests
         Assert.True(betaItem.IsThumbnailSelected);
         Assert.False(existingItem.IsThumbnailSelected);
     }
+
+    [AvaloniaFact]
+    public async Task ExplorerPane_MiddleMouseAutoScroll_InitializesAndRendersAnchor()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderA, "PANE 1");
+        await pane.SelectedTab!.RefreshAsync();
+
+        var view = new ExplorerPaneView { DataContext = pane };
+        var window = new Window { Content = view, Width = 800, Height = 600 };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var autoScrollCanvas = view.FindControl<Canvas>("AutoScrollCanvas");
+            var autoScrollAnchor = view.FindControl<Border>("AutoScrollAnchor");
+
+            Assert.NotNull(autoScrollCanvas);
+            Assert.NotNull(autoScrollAnchor);
+            Assert.False(autoScrollCanvas.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
 }
