@@ -45,23 +45,41 @@
             </Button>
           </StackPanel>
 
-          <!-- PDF Navigation Toolbar on Right (Visible when viewing a PDF) -->
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+          <!-- PDF Navigation & Zoom Toolbar on Right (Visible when viewing a PDF) -->
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
                       IsVisible="{Binding IsPdfPreview}">
+            <!-- Page Navigation -->
             <Button Command="{Binding PrevPdfPageCommand}" IsEnabled="{Binding CanPdfGoPrev}"
                     ToolTip.Tip="Previous Page" Classes="power-btn" Padding="5,2" FontSize="10">
               <TextBlock Text="◀" FontSize="9" HorizontalAlignment="Center"/>
             </Button>
-            <TextBlock Text="{Binding PdfPageDisplay}" FontSize="10" FontWeight="SemiBold"
+            <TextBlock Text="{Binding PdfPageDisplay}" FontSize="9.5" FontWeight="SemiBold"
                        FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppHighlightBrush}"
                        VerticalAlignment="Center" Margin="2,0"/>
             <Button Command="{Binding NextPdfPageCommand}" IsEnabled="{Binding CanPdfGoNext}"
                     ToolTip.Tip="Next Page" Classes="power-btn" Padding="5,2" FontSize="10">
               <TextBlock Text="▶" FontSize="9" HorizontalAlignment="Center"/>
             </Button>
-            <Button Command="{Binding TogglePdfFitWidthCommand}"
-                    ToolTip.Tip="Toggle Fit Page / Fit Width" Classes="power-btn" Padding="5,2" FontSize="9.5">
-              <TextBlock Text="↔" FontWeight="Bold" HorizontalAlignment="Center"/>
+
+            <Border Width="1" Height="14" Background="{DynamicResource AppBorderBrush}" Margin="3,0"/>
+
+            <!-- PDF Zoom Options -->
+            <Button Command="{Binding ZoomOutCommand}" ToolTip.Tip="Zoom Out (Ctrl+Wheel Down)"
+                    Classes="power-btn" Padding="5,2" FontSize="10" MinWidth="20">
+              <TextBlock Text="−" FontWeight="Bold" HorizontalAlignment="Center"/>
+            </Button>
+            <Button Command="{Binding ResetZoomCommand}" ToolTip.Tip="Fit to Window"
+                    Classes="power-btn" Padding="5,2" FontSize="9.5">
+              <TextBlock Text="{Binding ZoomPercentDisplay}" FontSize="9" FontWeight="SemiBold"
+                         FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppHighlightBrush}"/>
+            </Button>
+            <Button Command="{Binding ZoomInCommand}" ToolTip.Tip="Zoom In (Ctrl+Wheel Up)"
+                    Classes="power-btn" Padding="5,2" FontSize="10" MinWidth="20">
+              <TextBlock Text="+" FontWeight="Bold" HorizontalAlignment="Center"/>
+            </Button>
+            <Button Command="{Binding ActualSizeCommand}" ToolTip.Tip="Actual Size (100% / 1:1)"
+                    Classes="power-btn" Padding="5,2" FontSize="9" MinWidth="22">
+              <TextBlock Text="1:1" FontWeight="SemiBold" HorizontalAlignment="Center"/>
             </Button>
           </StackPanel>
 
@@ -207,14 +225,51 @@
           <!-- 3. PDF PREVIEW -->
           <Border Grid.Row="0" Background="#0C1017" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
                   CornerRadius="4" Margin="0,0,0,8" ClipToBounds="True"
-                  IsVisible="{Binding IsPdfPreview}">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-              <Panel HorizontalAlignment="Center" VerticalAlignment="Top" Margin="8">
-                <Image Source="{Binding PdfCurrentPageBitmap}"
-                       Stretch="Uniform"
-                       RenderOptions.BitmapInterpolationMode="HighQuality"/>
-              </Panel>
-            </ScrollViewer>
+                  IsVisible="{Binding IsPdfPreview}"
+                  PointerWheelChanged="OnImagePointerWheelChanged"
+                  DoubleTapped="OnImageDoubleTapped">
+            <Panel>
+              <!-- Subtle backdrop -->
+              <Border Background="{DynamicResource AppBgBrush}" Opacity="0.3"/>
+
+              <!-- Fit Mode: Centered, Uniform Stretch -->
+              <Image Source="{Binding PdfCurrentPageBitmap}"
+                     IsVisible="{Binding IsFitMode}"
+                     Stretch="Uniform"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     RenderOptions.BitmapInterpolationMode="HighQuality"/>
+
+              <!-- Zoomed/Pan Mode: ScrollViewer with Scaled Page -->
+              <ScrollViewer IsVisible="{Binding !IsFitMode}"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Auto">
+                <Panel HorizontalAlignment="Center" VerticalAlignment="Center">
+                  <LayoutTransformControl>
+                    <LayoutTransformControl.LayoutTransform>
+                      <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                    </LayoutTransformControl.LayoutTransform>
+                    <Image Source="{Binding PdfCurrentPageBitmap}"
+                           Stretch="None"
+                           RenderOptions.BitmapInterpolationMode="HighQuality"/>
+                  </LayoutTransformControl>
+                </Panel>
+              </ScrollViewer>
+
+              <!-- Page & Zoom Badge (Bottom Right Overlay) -->
+              <Border Background="#DD0D1520" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                      CornerRadius="4" Padding="6,2" Margin="8"
+                      HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                      IsHitTestVisible="False">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{Binding PdfPageDisplay}" FontSize="10"
+                             Foreground="{DynamicResource AppTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                  <TextBlock Text="•" FontSize="10" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <TextBlock Text="{Binding ZoomPercentDisplay}" FontSize="10"
+                             Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}" FontWeight="Bold"/>
+                </StackPanel>
+              </Border>
+            </Panel>
           </Border>
 
           <!-- 4. ZIP ARCHIVE PREVIEW -->

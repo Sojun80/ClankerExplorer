@@ -54,7 +54,7 @@ public partial class InspectorPanelView : UserControl
 
     private void OnImagePointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        if (DataContext is InspectorViewModel vm && vm.IsImagePreview)
+        if (DataContext is InspectorViewModel vm && (vm.IsImagePreview || vm.IsPdfPreview))
         {
             if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || !vm.IsFitMode)
             {
@@ -74,7 +74,7 @@ public partial class InspectorPanelView : UserControl
 
     private void OnImageDoubleTapped(object? sender, TappedEventArgs e)
     {
-        if (DataContext is InspectorViewModel vm && vm.IsImagePreview)
+        if (DataContext is InspectorViewModel vm && (vm.IsImagePreview || vm.IsPdfPreview))
         {
             vm.ToggleFitOrActualCommand.Execute(null);
             e.Handled = true;
