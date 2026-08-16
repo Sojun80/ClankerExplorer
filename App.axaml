@@ -10,6 +10,8 @@
     <SolidColorBrush x:Key="AppBorderBrush" Color="#1E293B"/>
     <SolidColorBrush x:Key="AppAccentBrush" Color="#0284C7"/>
     <SolidColorBrush x:Key="AppHighlightBrush" Color="#38BDF8"/>
+    <SolidColorBrush x:Key="AppSelectedBgBrush" Color="#283548"/>
+    <SolidColorBrush x:Key="AppThumbnailSelectedBgBrush" Color="#283548"/>
     <SolidColorBrush x:Key="AppTextBrush" Color="#F8FAFC"/>
     <SolidColorBrush x:Key="AppSubTextBrush" Color="#94A3B8"/>
     

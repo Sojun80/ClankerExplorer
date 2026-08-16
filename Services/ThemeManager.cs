@@ -33,6 +33,22 @@ public static class ThemeManager
         if (Color.TryParse(s.HighlightColor, out var highlight))
             res["AppHighlightBrush"] = new SolidColorBrush(highlight);
 
+        if (Color.TryParse(s.SelectedBackgroundColor, out var selectedBg))
+        {
+            var selBrush = new SolidColorBrush(selectedBg);
+            res["AppSelectedBgBrush"] = selBrush;
+            res["AppThumbnailSelectedBgBrush"] = selBrush;
+        }
+        else if (Color.TryParse(s.SurfaceColor, out var surf))
+        {
+            byte sr = (byte)Math.Min(255, surf.R + 40);
+            byte sg = (byte)Math.Min(255, surf.G + 45);
+            byte sb = (byte)Math.Min(255, surf.B + 55);
+            var derivedSel = new SolidColorBrush(Color.FromArgb(255, sr, sg, sb));
+            res["AppSelectedBgBrush"] = derivedSel;
+            res["AppThumbnailSelectedBgBrush"] = derivedSel;
+        }
+
         if (Color.TryParse(s.TextColor, out var text))
             res["AppTextBrush"] = new SolidColorBrush(text);
 

@@ -375,4 +375,49 @@ public sealed class UiSmokeTests
             window.Close();
         }
     }
+
+    [AvaloniaFact]
+    public void ThumbnailSelection_SmoothReSelection_AndThemeBrushConfigured()
+    {
+        using var fs = new TemporaryFileSystem();
+        var itemA = new FileItem { Name = "a.jpg", FullPath = Path.Combine(fs.FolderA, "a.jpg") };
+        var itemB = new FileItem { Name = "b.jpg", FullPath = Path.Combine(fs.FolderA, "b.jpg") };
+
+        using var tab = new ExplorerTabViewModel(fs.FolderA);
+        tab.Items = new System.Collections.ObjectModel.ObservableCollection<FileItem>(new[] { itemA, itemB });
+        tab.ApplyFilter();
+
+        // 1. Initial selection
+        tab.SelectThumbnailItem(itemA, control: false, shift: false);
+        Assert.True(itemA.IsThumbnailSelected);
+        Assert.Single(tab.SelectedItems);
+        Assert.Equal(itemA, tab.SelectedItem);
+
+        // Track if IsThumbnailSelected property changed on re-clicking already selected item
+        int changedCount = 0;
+        itemA.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(FileItem.IsThumbnailSelected)) changedCount++;
+        };
+
+        // 2. Click already selected item (simulating 2nd click of double-click)
+        tab.SelectThumbnailItem(itemA, control: false, shift: false);
+        Assert.True(itemA.IsThumbnailSelected);
+        Assert.Single(tab.SelectedItems);
+        Assert.Equal(itemA, tab.SelectedItem);
+        // Should not have toggled false then true
+        Assert.Equal(0, changedCount);
+
+        // 3. Select different item
+        tab.SelectThumbnailItem(itemB, control: false, shift: false);
+        Assert.False(itemA.IsThumbnailSelected);
+        Assert.True(itemB.IsThumbnailSelected);
+        Assert.Single(tab.SelectedItems);
+        Assert.Equal(itemB, tab.SelectedItem);
+
+        // 4. Verify ThemeManager configures AppThumbnailSelectedBgBrush
+        var settings = new AppSettings { SelectedBackgroundColor = "#283548" };
+        ThemeManager.ApplyTheme(settings);
+        Assert.True(Avalonia.Application.Current?.Resources.ContainsKey("AppThumbnailSelectedBgBrush"));
+    }
 }

@@ -436,6 +436,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         }
         else
         {
+            if (SelectedItems.Count == 1 && SelectedItems[0] == item && item.IsThumbnailSelected)
+            {
+                _selectionAnchorIndex = itemIndex;
+                if (SelectedItem != item) SelectedItem = item;
+                return;
+            }
+
             ClearThumbnailSelection();
             AddThumbnailSelection(item);
             _selectionAnchorIndex = itemIndex;

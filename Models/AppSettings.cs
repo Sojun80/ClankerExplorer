@@ -14,6 +14,7 @@ public class AppSettings
     public string BorderColor { get; set; } = "#1E293B";
     public string AccentColor { get; set; } = "#0284C7";
     public string HighlightColor { get; set; } = "#38BDF8";
+    public string SelectedBackgroundColor { get; set; } = "#283548";
     public string TextColor { get; set; } = "#F8FAFC";
     public string SecondaryTextColor { get; set; } = "#94A3B8";
 
@@ -75,6 +76,7 @@ public class AppSettings
             BorderColor = this.BorderColor,
             AccentColor = this.AccentColor,
             HighlightColor = this.HighlightColor,
+            SelectedBackgroundColor = this.SelectedBackgroundColor,
             TextColor = this.TextColor,
             SecondaryTextColor = this.SecondaryTextColor,
             UiFontFamily = this.UiFontFamily,
