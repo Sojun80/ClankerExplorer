@@ -764,14 +764,17 @@
                           Fill="{DynamicResource AppAccentBrush}"
                           Stroke="{DynamicResource AppHighlightBrush}"
                           StrokeThickness="1"
-                          Width="52" Height="44"
+                          Width="64" Height="52"
                           Stretch="Uniform"
                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
-                    <!-- File Icon in Thumbnail Mode: Large associated icon with badge fallback -->
+                    <!-- File Icon in Thumbnail Mode: High-Resolution 64px+ associated icon with badge fallback -->
                     <Panel IsVisible="{Binding !IsDirectory}" HorizontalAlignment="Center" VerticalAlignment="Center">
                       <Image Source="{Binding FileIcon}" IsVisible="{Binding HasFileIcon}"
-                             Width="48" Height="48" Stretch="Uniform"
+                             Width="64" Height="64"
+                             MaxWidth="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageWidth}"
+                             MaxHeight="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageHeight}"
+                             Stretch="Uniform"
                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
                       <!-- Generic File Type Badge when no icon available -->
