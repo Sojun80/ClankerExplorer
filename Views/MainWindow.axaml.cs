@@ -282,6 +282,7 @@ public partial class MainWindow : Window
 
     private void OnWindowPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (e.Handled) return;
         if (DataContext is MainViewModel vm)
         {
             var props = e.GetCurrentPoint(this).Properties;

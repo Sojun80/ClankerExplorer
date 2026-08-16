@@ -202,20 +202,6 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnPanePointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (DataContext is ExplorerPaneViewModel vm)
-        {
-            var kind = e.GetCurrentPoint(this).Properties.PointerUpdateKind;
-            if (kind == PointerUpdateKind.XButton1Released)
-            {
-                vm.GoBack();
-                e.Handled = true;
-            }
-            else if (kind == PointerUpdateKind.XButton2Released)
-            {
-                vm.GoForward();
-                e.Handled = true;
-            }
-        }
     }
 
     private ExplorerTabViewModel? _pressedTab;
@@ -489,7 +475,7 @@ public partial class ExplorerPaneView : UserControl
             .Select(r =>
             {
                 var pt = r.TranslatePoint(new Point(0, 0), FileGridContainer);
-                return new { Row = r, Top = pt?.Y ?? -1, Height = r.Bounds.Height, Item = (FileItem)r.DataContext };
+                return new { Row = r, Top = pt?.Y ?? -1, Height = r.Bounds.Height, Item = (FileItem)r.DataContext! };
             })
             .Where(x => x.Top >= 0 && x.Height > 0)
             .OrderBy(x => x.Top)
