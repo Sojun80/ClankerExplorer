@@ -233,6 +233,27 @@ public partial class ExplorerPaneView : UserControl
     private void OnFolderScrollChanged()
     {
         if (_restoringFolderViewState) return;
+        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+
+        // If the ScrollViewer is collapsing during a collection reload or transient layout update,
+        // do not overwrite the valid non-zero scroll position or anchor with 0.
+        if (!vm.IsThumbnailView && _detailsScrollViewer != null)
+        {
+            bool isCollapsing = _detailsScrollViewer.Extent.Height <= _detailsScrollViewer.Viewport.Height;
+            if (isCollapsing && _detailsScrollViewer.Offset.Y == 0 && vm.DetailsVerticalOffset > 0 && vm.SelectedTab.FilteredItems.Count > 0)
+            {
+                return;
+            }
+        }
+        else if (vm.IsThumbnailView && _thumbnailScrollViewer != null)
+        {
+            bool isCollapsing = _thumbnailScrollViewer.Extent.Height <= _thumbnailScrollViewer.Viewport.Height;
+            if (isCollapsing && _thumbnailScrollViewer.Offset.Y == 0 && vm.ThumbnailVerticalOffset > 0 && vm.SelectedTab.FilteredItems.Count > 0)
+            {
+                return;
+            }
+        }
+
         SaveFolderScrollState(persist: false);
         _folderScrollSaveTimer.Stop();
         _folderScrollSaveTimer.Start();
@@ -284,11 +305,19 @@ public partial class ExplorerPaneView : UserControl
             {
                 EnsureFolderScrollViewers();
                 RestoreColumnOrder(vm.CurrentColumnOrder);
-                RestoreViewportAnchors(vm);
-                if (_detailsScrollViewer != null)
-                    _detailsScrollViewer.Offset = new Vector(vm.DetailsHorizontalOffset, vm.DetailsVerticalOffset);
-                if (_thumbnailScrollViewer != null)
-                    _thumbnailScrollViewer.Offset = new Vector(0, vm.ThumbnailVerticalOffset);
+                bool anchored = RestoreViewportAnchors(vm);
+                if (!anchored)
+                {
+                    if (_detailsScrollViewer != null && vm.DetailsVerticalOffset > 0)
+                        _detailsScrollViewer.Offset = new Vector(vm.DetailsHorizontalOffset, vm.DetailsVerticalOffset);
+                    if (_thumbnailScrollViewer != null && vm.ThumbnailVerticalOffset > 0)
+                        _thumbnailScrollViewer.Offset = new Vector(0, vm.ThumbnailVerticalOffset);
+                }
+                else
+                {
+                    if (_detailsScrollViewer != null && vm.DetailsHorizontalOffset > 0)
+                        _detailsScrollViewer.Offset = new Vector(vm.DetailsHorizontalOffset, _detailsScrollViewer.Offset.Y);
+                }
             }
             finally
             {
@@ -297,19 +326,24 @@ public partial class ExplorerPaneView : UserControl
         }, DispatcherPriority.Loaded);
     }
 
-    private void RestoreViewportAnchors(ExplorerPaneViewModel vm)
+    private bool RestoreViewportAnchors(ExplorerPaneViewModel vm)
     {
         var tab = vm.SelectedTab;
-        if (tab == null) return;
+        if (tab == null) return false;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!string.IsNullOrWhiteSpace(vm.DetailsTopItemPath))
+
+        if (!vm.IsThumbnailView && !string.IsNullOrWhiteSpace(vm.DetailsTopItemPath))
         {
             var item = tab.FilteredItems.FirstOrDefault(candidate =>
                 string.Equals(candidate.FullPath, vm.DetailsTopItemPath, comparison));
-            if (item != null) FileDataGrid?.ScrollIntoView(item, null);
+            if (item != null && FileDataGrid != null)
+            {
+                FileDataGrid.ScrollIntoView(item, null);
+                return true;
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(vm.ThumbnailTopItemPath) && ThumbnailListBox != null)
+        if (vm.IsThumbnailView && !string.IsNullOrWhiteSpace(vm.ThumbnailTopItemPath) && ThumbnailListBox != null)
         {
             int index = -1;
             for (int candidateIndex = 0; candidateIndex < tab.FilteredItems.Count; candidateIndex++)
@@ -320,10 +354,18 @@ public partial class ExplorerPaneView : UserControl
                     break;
                 }
             }
-            int rowIndex = index < 0 ? -1 : index / Math.Max(1, vm.ThumbnailColumnCount);
-            if (rowIndex >= 0 && rowIndex < vm.ThumbnailRows.Count)
-                ThumbnailListBox.ScrollIntoView(vm.ThumbnailRows[rowIndex]);
+            if (index >= 0)
+            {
+                int rowIndex = index / Math.Max(1, vm.ThumbnailColumnCount);
+                if (rowIndex >= 0 && rowIndex < vm.ThumbnailRows.Count)
+                {
+                    ThumbnailListBox.ScrollIntoView(vm.ThumbnailRows[rowIndex]);
+                    return true;
+                }
+            }
         }
+
+        return false;
     }
 
     private void OnRequestScrollItemIntoView(FileItem item)
