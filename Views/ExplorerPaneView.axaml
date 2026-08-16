@@ -62,11 +62,11 @@
         </Transitions>
       </Setter>
     </Style>
-    <Style Selector="ListBoxItem:pointerover Border.thumbnail-card">
+    <Style Selector="Border.thumbnail-card:pointerover">
       <Setter Property="Background" Value="{DynamicResource AppSurfaceHoverBrush}"/>
       <Setter Property="BorderBrush" Value="{DynamicResource AppHighlightBrush}"/>
     </Style>
-    <Style Selector="ListBoxItem:selected Border.thumbnail-card">
+    <Style Selector="Border.thumbnail-card.selected">
       <Setter Property="Background" Value="#1f0284c7"/>
       <Setter Property="BorderBrush" Value="{DynamicResource AppHighlightBrush}"/>
       <Setter Property="BorderThickness" Value="1.5"/>
@@ -474,7 +474,7 @@
 
       <DataGrid.Columns>
         <!-- Name Column (Segoe UI Variable, Semibold folders, Regular files) -->
-        <DataGridTemplateColumn Header="Name" Width="{Binding NameColumnWidthDisplay}" MinWidth="160" SortMemberPath="Name">
+        <DataGridTemplateColumn Header="Name" Width="{Binding NameColumnWidthDisplay}" MinWidth="140" SortMemberPath="Name">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
@@ -503,7 +503,7 @@
         </DataGridTemplateColumn>
 
         <!-- Extension Tag Column (Clear tag pill, centered, comfortably sized) -->
-        <DataGridTemplateColumn Header="Ext" Width="{Binding ExtColumnWidthDisplay}" MinWidth="55" SortMemberPath="Extension"
+        <DataGridTemplateColumn Header="Ext" Width="{Binding ExtColumnWidthDisplay}" MinWidth="70" SortMemberPath="Extension"
                                 IsVisible="{Binding ShowColumnExt}">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
@@ -520,7 +520,7 @@
         </DataGridTemplateColumn>
 
         <!-- Size Column with Logarithmic Size Bar Visualizer -->
-        <DataGridTemplateColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="70"
+        <DataGridTemplateColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="95"
                                 SortMemberPath="SizeBytes" IsVisible="{Binding ShowColumnSize}">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
@@ -545,30 +545,30 @@
         </DataGridTemplateColumn>
 
         <!-- Date Modified Column (Cascadia Mono, Chronological Sort) -->
-        <DataGridTextColumn Header="Date Modified" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="130"
+        <DataGridTextColumn Header="Date Modified" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="140"
                             Binding="{Binding FormattedModifiedTime}" SortMemberPath="ModifiedTime"
                             IsVisible="{Binding ShowColumnDateModified}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
         <!-- Date Created Column (Cascadia Mono, Chronological Sort) -->
-        <DataGridTextColumn Header="Date Created" Width="{Binding CreatedColumnWidthDisplay}" MinWidth="130"
+        <DataGridTextColumn Header="Date Created" Width="{Binding CreatedColumnWidthDisplay}" MinWidth="140"
                             Binding="{Binding FormattedCreatedTime}" SortMemberPath="CreatedTime"
                             IsVisible="{Binding ShowColumnDateCreated}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
         <!-- Date Accessed Column (Cascadia Mono, Chronological Sort) -->
-        <DataGridTextColumn Header="Date Accessed" Width="{Binding AccessedColumnWidthDisplay}" MinWidth="130"
+        <DataGridTextColumn Header="Date Accessed" Width="{Binding AccessedColumnWidthDisplay}" MinWidth="140"
                             Binding="{Binding FormattedAccessedTime}" SortMemberPath="AccessedTime"
                             IsVisible="{Binding ShowColumnDateAccessed}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
         <!-- Item Type Column (Segoe UI Variable) -->
-        <DataGridTextColumn Header="Type" Width="{Binding TypeColumnWidthDisplay}" MinWidth="80" Binding="{Binding ItemTypeDisplay}"
+        <DataGridTextColumn Header="Type" Width="{Binding TypeColumnWidthDisplay}" MinWidth="90" Binding="{Binding ItemTypeDisplay}"
                             IsVisible="{Binding ShowColumnItemType}"
                             FontFamily="{DynamicResource AppUiFont}" FontSize="11.5"/>
 
         <!-- Attributes Column (Cascadia Mono) -->
-        <DataGridTextColumn Header="Attributes" Width="{Binding AttributesColumnWidthDisplay}" MinWidth="65" Binding="{Binding AttributesString}"
+        <DataGridTextColumn Header="Attributes" Width="{Binding AttributesColumnWidthDisplay}" MinWidth="75" Binding="{Binding AttributesString}"
                             IsVisible="{Binding ShowColumnAttributes}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
@@ -584,17 +584,14 @@
       </DataGrid.Columns>
     </DataGrid>
 
-      <!-- Thumbnail Visual Grid Mode (ListBox with WrapPanel) -->
+      <!-- Thumbnail mode: vertically virtualized logical rows. A plain WrapPanel
+           realizes every item and is intentionally avoided for large folders. -->
       <ListBox x:Name="ThumbnailListBox" Grid.Column="1"
                Classes="thumbnail-grid"
-               ItemsSource="{Binding SelectedTab.FilteredItems}"
-               SelectedItem="{Binding SelectedTab.SelectedItem, Mode=TwoWay}"
-               SelectionMode="Multiple"
+               ItemsSource="{Binding ThumbnailRows}"
                IsVisible="{Binding IsThumbnailView}"
                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                ScrollViewer.VerticalScrollBarVisibility="Auto"
-               DoubleTapped="OnRowDoubleTapped"
-               SelectionChanged="OnSelectionChanged"
                KeyDown="OnThumbnailKeyDown"
                FontFamily="{DynamicResource AppUiFont}">
         <ListBox.ContextMenu>
@@ -673,16 +670,27 @@
         </ListBox.ContextMenu>
         <ListBox.ItemsPanel>
           <ItemsPanelTemplate>
-            <WrapPanel Orientation="Horizontal"/>
+            <VirtualizingStackPanel Orientation="Vertical"/>
           </ItemsPanelTemplate>
         </ListBox.ItemsPanel>
         <ListBox.ItemTemplate>
-          <DataTemplate DataType="models:FileItem">
+          <DataTemplate DataType="models:ThumbnailRow">
+            <ItemsControl ItemsSource="{Binding Items}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal"/>
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="models:FileItem">
             <Border Classes="thumbnail-card"
+                    Classes.selected="{Binding IsThumbnailSelected}"
                     Width="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailCellWidth}"
                     Height="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailCellHeight}"
                     Padding="6"
                     Opacity="{Binding RowOpacity}"
+                    PointerPressed="OnThumbnailItemPointerPressed"
+                    DoubleTapped="OnThumbnailItemDoubleTapped"
                     ToolTip.Tip="{Binding Name}">
               <Grid RowDefinitions="*,Auto">
                 <!-- Thumbnail / Icon Preview Area -->
@@ -733,6 +741,9 @@
                            Margin="0,4,0,0"/>
               </Grid>
             </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
           </DataTemplate>
         </ListBox.ItemTemplate>
       </ListBox>

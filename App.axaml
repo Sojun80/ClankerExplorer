@@ -96,7 +96,7 @@
       <Setter Property="Foreground" Value="{DynamicResource AppSubTextBrush}"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="FontSize" Value="11.5"/>
-      <Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Padding" Value="8,6,6,6"/>
       <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
       <Setter Property="BorderThickness" Value="0,0,0,1"/>
       <Setter Property="FontFamily" Value="{DynamicResource AppUiFont}"/>

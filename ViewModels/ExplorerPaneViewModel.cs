@@ -54,15 +54,19 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public double ThumbnailImageWidth => ThumbnailSize;
     public double ThumbnailImageHeight => ThumbnailSize;
 
+    [ObservableProperty]
+    private IReadOnlyList<ThumbnailRow> _thumbnailRows = Array.Empty<ThumbnailRow>();
+
+    [ObservableProperty]
+    private int _thumbnailColumnCount = 1;
+
+    private double _thumbnailViewportWidth;
+
     partial void OnViewModeChanged(string value)
     {
         if (value == "Thumbnails")
         {
-            SelectedTab?.LoadThumbnails((int)ThumbnailSize);
-        }
-        else
-        {
-            SelectedTab?.CancelThumbnailLoading();
+            RebuildThumbnailRows();
         }
     }
 
@@ -70,7 +74,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     {
         if (IsThumbnailView)
         {
-            SelectedTab?.LoadThumbnails((int)value);
+            RebuildThumbnailRows();
         }
 
         if (double.IsFinite(value) && value >= 64 && value <= 320)
@@ -82,6 +86,40 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
                 SettingsService.Instance.SaveSettings(settings);
             }
         }
+    }
+
+    public void UpdateThumbnailViewportWidth(double width)
+    {
+        if (!double.IsFinite(width) || width <= 0) return;
+        int columns = Math.Max(1, (int)Math.Floor(Math.Max(1, width - 8) / (ThumbnailCellWidth + 8)));
+        if (Math.Abs(_thumbnailViewportWidth - width) < 1 && columns == ThumbnailColumnCount) return;
+        _thumbnailViewportWidth = width;
+        ThumbnailColumnCount = columns;
+        RebuildThumbnailRows();
+    }
+
+    public void RebuildThumbnailRows()
+    {
+        var items = SelectedTab?.FilteredItems;
+        if (items == null || items.Count == 0)
+        {
+            ThumbnailRows = Array.Empty<ThumbnailRow>();
+            return;
+        }
+
+        int columns = Math.Max(1, ThumbnailColumnCount);
+        var rows = new List<ThumbnailRow>((items.Count + columns - 1) / columns);
+        for (int start = 0; start < items.Count; start += columns)
+        {
+            int count = Math.Min(columns, items.Count - start);
+            var rowItems = new FileItem[count];
+            for (int offset = 0; offset < count; offset++)
+            {
+                rowItems[offset] = items[start + offset];
+            }
+            rows.Add(new ThumbnailRow(rowItems));
+        }
+        ThumbnailRows = rows;
     }
 
     [RelayCommand]
@@ -220,50 +258,39 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Action<FileItem?>? FileSelectedForPreview;
     public event Action<string, string>? RequestCreateItem; // "folder" / "file", parentPath
     public event Action<string>? RequestOpenInOtherPane;
-    public event Action<string>? RequestPinFolder;
     public event Action<FileItem>? RequestRename;
     public event Action<FileItem?>? RequestProperties;
     public event Action<string>? RequestSetClipboardText;
 
-    public Avalonia.Controls.DataGridLength NameColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(3, Avalonia.Controls.DataGridLengthUnitType.Star)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthName, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength NameColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthName > 0 ? ColumnWidthName : 280, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
-    public Avalonia.Controls.DataGridLength ExtColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(65, Avalonia.Controls.DataGridLengthUnitType.Pixel)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthExt, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength ExtColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthExt > 0 ? ColumnWidthExt : 75, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
-    public Avalonia.Controls.DataGridLength SizeColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(95, Avalonia.Controls.DataGridLengthUnitType.Pixel)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthSize, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength SizeColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthSize > 0 ? ColumnWidthSize : 110, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
-    public Avalonia.Controls.DataGridLength ModifiedColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(150, Avalonia.Controls.DataGridLengthUnitType.Pixel)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthDateModified, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength ModifiedColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthDateModified > 0 ? ColumnWidthDateModified : 160, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
-    public Avalonia.Controls.DataGridLength CreatedColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(150, Avalonia.Controls.DataGridLengthUnitType.Pixel)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthDateCreated, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength CreatedColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthDateCreated > 0 ? ColumnWidthDateCreated : 160, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
-    public Avalonia.Controls.DataGridLength AccessedColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(150, Avalonia.Controls.DataGridLengthUnitType.Pixel)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthDateAccessed, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength AccessedColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthDateAccessed > 0 ? ColumnWidthDateAccessed : 160, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
-    public Avalonia.Controls.DataGridLength TypeColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(110, Avalonia.Controls.DataGridLengthUnitType.Pixel)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthItemType, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength TypeColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthItemType > 0 ? ColumnWidthItemType : 120, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
-    public Avalonia.Controls.DataGridLength AttributesColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(90, Avalonia.Controls.DataGridLengthUnitType.Pixel)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthAttributes, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength AttributesColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthAttributes > 0 ? ColumnWidthAttributes : 95, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
-    public Avalonia.Controls.DataGridLength PermissionsColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(110, Avalonia.Controls.DataGridLengthUnitType.Pixel)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthPermissions, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength PermissionsColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthPermissions > 0 ? ColumnWidthPermissions : 115, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
-    public Avalonia.Controls.DataGridLength OwnerGroupColumnWidthDisplay => SmartColumnSizing
-        ? new Avalonia.Controls.DataGridLength(110, Avalonia.Controls.DataGridLengthUnitType.Pixel)
-        : new Avalonia.Controls.DataGridLength(ColumnWidthOwnerGroup, Avalonia.Controls.DataGridLengthUnitType.Pixel);
+    public Avalonia.Controls.DataGridLength OwnerGroupColumnWidthDisplay =>
+        new Avalonia.Controls.DataGridLength(ColumnWidthOwnerGroup > 0 ? ColumnWidthOwnerGroup : 115, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
     public void NotifyColumnWidthsChanged()
     {
@@ -324,15 +351,15 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
         SmartColumnSizing = s.SmartColumnSizing;
         ColumnWidthName = s.ColumnWidthName > 0 ? s.ColumnWidthName : 280;
-        ColumnWidthExt = s.ColumnWidthExt > 0 ? s.ColumnWidthExt : 65;
-        ColumnWidthSize = s.ColumnWidthSize > 0 ? s.ColumnWidthSize : 95;
-        ColumnWidthDateModified = s.ColumnWidthDateModified > 0 ? s.ColumnWidthDateModified : 150;
-        ColumnWidthDateCreated = s.ColumnWidthDateCreated > 0 ? s.ColumnWidthDateCreated : 150;
-        ColumnWidthDateAccessed = s.ColumnWidthDateAccessed > 0 ? s.ColumnWidthDateAccessed : 150;
-        ColumnWidthItemType = s.ColumnWidthItemType > 0 ? s.ColumnWidthItemType : 110;
-        ColumnWidthAttributes = s.ColumnWidthAttributes > 0 ? s.ColumnWidthAttributes : 90;
-        ColumnWidthPermissions = s.ColumnWidthPermissions > 0 ? s.ColumnWidthPermissions : 110;
-        ColumnWidthOwnerGroup = s.ColumnWidthOwnerGroup > 0 ? s.ColumnWidthOwnerGroup : 110;
+        ColumnWidthExt = s.ColumnWidthExt > 0 ? s.ColumnWidthExt : 75;
+        ColumnWidthSize = s.ColumnWidthSize > 0 ? s.ColumnWidthSize : 110;
+        ColumnWidthDateModified = s.ColumnWidthDateModified > 0 ? s.ColumnWidthDateModified : 160;
+        ColumnWidthDateCreated = s.ColumnWidthDateCreated > 0 ? s.ColumnWidthDateCreated : 160;
+        ColumnWidthDateAccessed = s.ColumnWidthDateAccessed > 0 ? s.ColumnWidthDateAccessed : 160;
+        ColumnWidthItemType = s.ColumnWidthItemType > 0 ? s.ColumnWidthItemType : 120;
+        ColumnWidthAttributes = s.ColumnWidthAttributes > 0 ? s.ColumnWidthAttributes : 95;
+        ColumnWidthPermissions = s.ColumnWidthPermissions > 0 ? s.ColumnWidthPermissions : 115;
+        ColumnWidthOwnerGroup = s.ColumnWidthOwnerGroup > 0 ? s.ColumnWidthOwnerGroup : 115;
         TabWidth = double.IsFinite(s.TabWidth) && s.TabWidth >= 80 && s.TabWidth <= 280
             ? s.TabWidth
             : 150.0;
@@ -355,28 +382,28 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     {
         SmartColumnSizing = true;
         ColumnWidthName = 280;
-        ColumnWidthExt = 65;
-        ColumnWidthSize = 95;
-        ColumnWidthDateModified = 150;
-        ColumnWidthDateCreated = 150;
-        ColumnWidthDateAccessed = 150;
-        ColumnWidthItemType = 110;
-        ColumnWidthAttributes = 90;
-        ColumnWidthPermissions = 110;
-        ColumnWidthOwnerGroup = 110;
+        ColumnWidthExt = 75;
+        ColumnWidthSize = 110;
+        ColumnWidthDateModified = 160;
+        ColumnWidthDateCreated = 160;
+        ColumnWidthDateAccessed = 160;
+        ColumnWidthItemType = 120;
+        ColumnWidthAttributes = 95;
+        ColumnWidthPermissions = 115;
+        ColumnWidthOwnerGroup = 115;
 
         var s = SettingsService.Instance.CurrentSettings;
         s.SmartColumnSizing = true;
         s.ColumnWidthName = 280;
-        s.ColumnWidthExt = 65;
-        s.ColumnWidthSize = 95;
-        s.ColumnWidthDateModified = 150;
-        s.ColumnWidthDateCreated = 150;
-        s.ColumnWidthDateAccessed = 150;
-        s.ColumnWidthItemType = 110;
-        s.ColumnWidthAttributes = 90;
-        s.ColumnWidthPermissions = 110;
-        s.ColumnWidthOwnerGroup = 110;
+        s.ColumnWidthExt = 75;
+        s.ColumnWidthSize = 110;
+        s.ColumnWidthDateModified = 160;
+        s.ColumnWidthDateCreated = 160;
+        s.ColumnWidthDateAccessed = 160;
+        s.ColumnWidthItemType = 120;
+        s.ColumnWidthAttributes = 95;
+        s.ColumnWidthPermissions = 115;
+        s.ColumnWidthOwnerGroup = 115;
         SettingsService.Instance.SaveSettings(s);
         NotifyColumnWidthsChanged();
     }
@@ -464,10 +491,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             }
             else if (e.PropertyName == nameof(ExplorerTabViewModel.FilteredItems) && tab == SelectedTab)
             {
-                if (IsThumbnailView)
-                {
-                    tab.LoadThumbnails((int)ThumbnailSize);
-                }
+                RebuildThumbnailRows();
             }
         };
 
@@ -513,7 +537,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             FileSelectedForPreview?.Invoke(value.SelectedItem);
             if (IsThumbnailView)
             {
-                value.LoadThumbnails((int)ThumbnailSize);
+                RebuildThumbnailRows();
             }
         }
     }
