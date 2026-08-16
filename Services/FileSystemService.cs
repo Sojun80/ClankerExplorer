@@ -1130,7 +1130,7 @@ public class FileSystemService
     }
 
     private static bool IsImageExtension(string ext) =>
-        new[] { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".svg" }.Contains(ext);
+        new[] { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".svg", ".tiff", ".tif" }.Contains(ext);
 
     private static bool IsMediaExtension(string ext) =>
         new[] { ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".mp4", ".mkv", ".avi", ".webm", ".mov" }.Contains(ext);

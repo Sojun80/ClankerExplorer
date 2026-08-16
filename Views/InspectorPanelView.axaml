@@ -15,9 +15,32 @@
       <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1"
               Height="36" Padding="10,0">
         <DockPanel LastChildFill="True">
+          <!-- Title on Left -->
           <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
             <TextBlock Text="🔍" FontSize="12"/>
             <TextBlock Text="Preview Window" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}"/>
+          </StackPanel>
+
+          <!-- Image Zoom Toolbar on Right (Visible when viewing an image) -->
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
+                      IsVisible="{Binding IsImagePreview}">
+            <Button Command="{Binding ZoomOutCommand}" ToolTip.Tip="Zoom Out (Ctrl+Wheel Down)"
+                    Classes="power-btn" Padding="5,2" FontSize="10" MinWidth="22">
+              <TextBlock Text="−" FontWeight="Bold" HorizontalAlignment="Center"/>
+            </Button>
+            <Button Command="{Binding ResetZoomCommand}" ToolTip.Tip="Fit to Pane (Reset Zoom)"
+                    Classes="power-btn" Padding="6,2" FontSize="10">
+              <TextBlock Text="{Binding ZoomPercentDisplay}" FontSize="9.5" FontWeight="SemiBold"
+                         FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppHighlightBrush}"/>
+            </Button>
+            <Button Command="{Binding ZoomInCommand}" ToolTip.Tip="Zoom In (Ctrl+Wheel Up)"
+                    Classes="power-btn" Padding="5,2" FontSize="10" MinWidth="22">
+              <TextBlock Text="+" FontWeight="Bold" HorizontalAlignment="Center"/>
+            </Button>
+            <Button Command="{Binding ActualSizeCommand}" ToolTip.Tip="Actual Size (100% / 1:1)"
+                    Classes="power-btn" Padding="5,2" FontSize="9.5" MinWidth="24">
+              <TextBlock Text="1:1" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+            </Button>
           </StackPanel>
         </DockPanel>
       </Border>
@@ -25,13 +48,84 @@
       <!-- Content Area -->
       <Grid Grid.Row="1" Margin="8">
         <!-- Empty State -->
-        <TextBlock Text="Select a file to inspect code, hex, or hashes"
+        <TextBlock Text="Select a file to inspect preview, code, hex, or hashes"
                    IsVisible="{Binding PreviewData, Converter={x:Static ObjectConverters.IsNull}}"
                    Foreground="{DynamicResource AppSubTextBrush}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"
                    TextWrapping="Wrap" TextAlignment="Center" Margin="20"/>
 
         <!-- Populated Inspector Content -->
         <Grid RowDefinitions="*,Auto" IsVisible="{Binding PreviewData, Converter={x:Static ObjectConverters.IsNotNull}}">
+
+          <!-- Image Preview -->
+          <Border Grid.Row="0" Background="#0C1017" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Margin="0,0,0,8" ClipToBounds="True"
+                  IsVisible="{Binding IsImagePreview}"
+                  PointerWheelChanged="OnImagePointerWheelChanged"
+                  DoubleTapped="OnImageDoubleTapped">
+            <Panel>
+              <!-- Subtle backdrop -->
+              <Border Background="{DynamicResource AppBgBrush}" Opacity="0.3"/>
+
+              <!-- Fit Mode: Centered, Uniform Stretch, preserves aspect ratio perfectly -->
+              <Image Source="{Binding ImagePreview}"
+                     IsVisible="{Binding IsFitMode}"
+                     Stretch="Uniform"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     RenderOptions.BitmapInterpolationMode="HighQuality"/>
+
+              <!-- Zoomed/Pan Mode: ScrollViewer with Scaled Image -->
+              <ScrollViewer IsVisible="{Binding !IsFitMode}"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Auto">
+                <Panel HorizontalAlignment="Center" VerticalAlignment="Center">
+                  <LayoutTransformControl>
+                    <LayoutTransformControl.LayoutTransform>
+                      <ScaleTransform ScaleX="{Binding ZoomLevel}" ScaleY="{Binding ZoomLevel}"/>
+                    </LayoutTransformControl.LayoutTransform>
+                    <Image Source="{Binding ImagePreview}"
+                           Stretch="None"
+                           RenderOptions.BitmapInterpolationMode="HighQuality"/>
+                  </LayoutTransformControl>
+                </Panel>
+              </ScrollViewer>
+
+              <!-- Dimension & Zoom Badge (Bottom Right Overlay) -->
+              <Border Background="#DD0D1520" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                      CornerRadius="4" Padding="6,2" Margin="8"
+                      HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                      IsHitTestVisible="False">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{Binding ImageDimensions}" FontSize="10"
+                             Foreground="{DynamicResource AppTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                  <TextBlock Text="•" FontSize="10" Foreground="{DynamicResource AppSubTextBrush}"/>
+                  <TextBlock Text="{Binding ZoomPercentDisplay}" FontSize="10"
+                             Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}" FontWeight="Bold"/>
+                </StackPanel>
+              </Border>
+            </Panel>
+          </Border>
+
+          <!-- Image Loading State -->
+          <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Padding="12" Margin="0,0,0,8"
+                  IsVisible="{Binding IsLoadingPreview}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+              <ProgressBar IsIndeterminate="True" Width="120" Height="4" Foreground="{DynamicResource AppHighlightBrush}"/>
+              <TextBlock Text="Loading image preview..." FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center"/>
+            </StackPanel>
+          </Border>
+
+          <!-- Image Error State -->
+          <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                  CornerRadius="4" Padding="12" Margin="0,0,0,8"
+                  IsVisible="{Binding IsImageError}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+              <TextBlock Text="⚠️" FontSize="24" HorizontalAlignment="Center"/>
+              <TextBlock Text="Unable to display image preview" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource AppTextBrush}" HorizontalAlignment="Center"/>
+              <TextBlock Text="{Binding PreviewErrorMessage}" FontSize="10" Foreground="{DynamicResource AppSubTextBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"/>
+            </StackPanel>
+          </Border>
 
           <!-- Text Preview -->
           <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
@@ -78,6 +172,12 @@
               <Grid ColumnDefinitions="Auto,*">
                 <TextBlock Grid.Column="0" Text="Size:" Foreground="{DynamicResource AppSubTextBrush}" FontSize="10.5" Width="55"/>
                 <TextBlock Grid.Column="1" Text="{Binding PreviewData.FormattedSize}" Foreground="{DynamicResource AppHighlightBrush}"
+                           FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}"/>
+              </Grid>
+              <!-- Dimensions (Visible for image files) -->
+              <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding ImageDimensions, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <TextBlock Grid.Column="0" Text="Dims:" Foreground="{DynamicResource AppSubTextBrush}" FontSize="10.5" Width="55"/>
+                <TextBlock Grid.Column="1" Text="{Binding ImageDimensions}" Foreground="{DynamicResource AppHighlightBrush}"
                            FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}"/>
               </Grid>
               <Grid ColumnDefinitions="Auto,*">
