@@ -20,7 +20,8 @@ namespace ClankerExplorer.Services;
 /// </summary>
 public class ThumbnailService : IDisposable
 {
-    private const int CacheFormatVersion = 1;
+    private const int CacheFormatVersion = 2;
+    private const int CanonicalThumbnailSizeSmall = 128;
     private const int MaxQueuedRequests = 512;
     private static readonly Lazy<ThumbnailService> _instance = new(() => new ThumbnailService());
     public static ThumbnailService Instance => _instance.Value;
@@ -626,36 +627,67 @@ public class ThumbnailService : IDisposable
             int height = Math.Abs(bm.bmHeight);
             if (width <= 0 || height <= 0) return null;
 
-            byte[] pixelData;
+            int stride = width * 4;
+            int byteCount = stride * height;
+            byte[] pixelData = new byte[byteCount];
 
             // If Shell returned a 32-bit DIB section with direct memory pointer:
             if (bm.bmBits != IntPtr.Zero && bm.bmBitsPixel == 32)
             {
-                int byteCount = width * height * 4;
-                pixelData = new byte[byteCount];
-                Marshal.Copy(bm.bmBits, pixelData, 0, byteCount);
+                // Standard Windows DIB sections (bmHeight > 0) are stored bottom-up.
+                // Invert the scanlines to top-down order for Avalonia.
+                if (bm.bmHeight > 0)
+                {
+                    for (int y = 0; y < height; y++)
+                    {
+                        int srcRow = height - 1 - y;
+                        IntPtr srcPtr = bm.bmBits + (srcRow * stride);
+                        Marshal.Copy(srcPtr, pixelData, y * stride, stride);
+                    }
+                }
+                else
+                {
+                    Marshal.Copy(bm.bmBits, pixelData, 0, byteCount);
+                }
             }
             else
             {
-                // Fallback to GetDIBits for DDBs
+                // Fallback to GetDIBits with explicit top-down biHeight for DDBs
                 IntPtr hdc = CreateCompatibleDC(IntPtr.Zero);
                 try
                 {
                     var bmi = new BITMAPINFO();
                     bmi.bmiHeader.biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>();
                     bmi.bmiHeader.biWidth = width;
-                    bmi.bmiHeader.biHeight = -height; // Top-down DIB
+                    bmi.bmiHeader.biHeight = -height; // Request top-down DIB from GDI
                     bmi.bmiHeader.biPlanes = 1;
                     bmi.bmiHeader.biBitCount = 32;
                     bmi.bmiHeader.biCompression = 0; // BI_RGB
 
-                    pixelData = new byte[width * height * 4];
                     int lines = GetDIBits(hdc, hBitmap, 0, (uint)height, pixelData, ref bmi, 0);
                     if (lines == 0) return null;
                 }
                 finally
                 {
                     if (hdc != IntPtr.Zero) DeleteDC(hdc);
+                }
+            }
+
+            // Ensure RGBX/BGRX bitmaps with 0 alpha are opaque
+            bool hasNonZeroAlpha = false;
+            for (int i = 3; i < pixelData.Length; i += 4)
+            {
+                if (pixelData[i] != 0)
+                {
+                    hasNonZeroAlpha = true;
+                    break;
+                }
+            }
+            if (!hasNonZeroAlpha)
+            {
+                for (int i = 3; i < pixelData.Length; i += 4)
+                {
+                    pixelData[i] = 255;
                 }
             }
 
