@@ -97,7 +97,15 @@ public partial class SettingsWindow : Window
     {
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
-            BeginMoveDrag(e);
+            if (e.ClickCount == 2)
+            {
+                WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+                e.Handled = true;
+            }
+            else
+            {
+                BeginMoveDrag(e);
+            }
         }
     }
 }

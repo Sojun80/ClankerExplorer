@@ -54,7 +54,7 @@
       <!-- Row 0: Seamless Dark TitleBar -->
       <Border Grid.Row="0" Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1"
               Height="40" Padding="12,0" PointerPressed="OnTitleBarPointerPressed">
-        <Grid ColumnDefinitions="Auto,Auto,*,Auto,140" VerticalAlignment="Center">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto,140" VerticalAlignment="Center" Background="Transparent">
           <!-- Column 0: Compact App Icon on Left -->
           <Image Grid.Column="0" Source="/Assets/app-icon.png" Width="20" Height="20"
                  VerticalAlignment="Center" ToolTip.Tip="Clanker Explorer" Margin="0,0,10,0"/>
