@@ -5,6 +5,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using ClankerExplorer.Tests.TestInfrastructure;
 using ClankerExplorer.Models;
+using ClankerExplorer.Services;
 using ClankerExplorer.ViewModels;
 using ClankerExplorer.Views;
 
@@ -178,9 +179,101 @@ public sealed class UiSmokeTests
                 text => text.IsVisible && text.Text == "visible-in-thumbnails.txt");
 
             var item = Assert.Single(pane.SelectedTab.FilteredItems);
-            thumbnails.SelectedItem = item;
+            pane.SelectedTab.SelectThumbnailItem(item, control: false, shift: false);
             Dispatcher.UIThread.RunJobs();
             Assert.Same(item, pane.SelectedTab.SelectedItem);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ThumbnailGrid_VirtualizesFiftyThousandItems()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderB);
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderB);
+        await pane.SelectedTab!.RefreshAsync();
+        pane.SelectedTab.Items = new System.Collections.ObjectModel.ObservableCollection<FileItem>(
+            Enumerable.Range(0, 50_000).Select(index => new FileItem
+            {
+                Name = $"image{index}.png",
+                Extension = ".png",
+                FullPath = Path.Combine(fs.FolderB, $"image{index}.png"),
+                SizeBytes = 100
+            }));
+        pane.SelectedTab.ApplyFilter();
+        pane.UpdateThumbnailViewportWidth(900);
+
+        var view = new ExplorerPaneView { DataContext = pane };
+        var window = new Window { Content = view, Width = 900, Height = 600 };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            int realizedDetailRows = view.GetVisualDescendants().OfType<DataGridRow>().Count();
+            Assert.InRange(realizedDetailRows, 1, 200);
+
+            pane.ViewMode = "Thumbnails";
+            Dispatcher.UIThread.RunJobs();
+
+            int realizedCards = view.GetVisualDescendants()
+                .OfType<Border>()
+                .Count(border => border.Classes.Contains("thumbnail-card"));
+            Assert.InRange(realizedCards, 1, 200);
+            Assert.True(pane.ThumbnailRows.Count < pane.SelectedTab.FilteredItems.Count);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ExplorerPane_RestoresFolderColumnOrderAndScrollPosition()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var store = new FolderViewStateService(fs.CreateDirectory("ui-folder-state"));
+        store.Set(fs.FolderB, new FolderViewState
+        {
+            ViewMode = "Details",
+            SmartColumnSizing = false,
+            ColumnOrder = new List<string> { "Size", "Name", "Ext" },
+            DetailsVerticalOffset = 240,
+            DetailsTopItemPath = Path.Combine(fs.FolderB, "file250.txt")
+        });
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderB, folderViewStateService: store);
+        await pane.SelectedTab!.RefreshAsync();
+        pane.SelectedTab.Items = new System.Collections.ObjectModel.ObservableCollection<FileItem>(
+            Enumerable.Range(0, 300).Select(index => new FileItem
+            {
+                Name = $"file{index}.txt",
+                Extension = ".txt",
+                FullPath = Path.Combine(fs.FolderB, $"file{index}.txt")
+            }));
+        pane.SelectedTab.ApplyFilter();
+
+        var view = new ExplorerPaneView { DataContext = pane };
+        var window = new Window { Content = view, Width = 900, Height = 500 };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var grid = Assert.IsType<DataGrid>(view.FindControl<DataGrid>("FileDataGrid"));
+            Assert.Equal("Size", grid.Columns.OrderBy(column => column.DisplayIndex).First().Header?.ToString());
+            var createdColumn = Assert.Single(grid.Columns, column =>
+                column.Header?.ToString()?.StartsWith("Date Created", StringComparison.Ordinal) == true);
+            createdColumn.Sort();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal("Created", pane.SelectedTab.SortColumn);
+            Assert.Equal("Date Created ↑", createdColumn.Header?.ToString());
+            Assert.Contains(
+                grid.GetVisualDescendants().OfType<DataGridRow>(),
+                row => (row.DataContext as FileItem)?.Name == "file250.txt");
         }
         finally
         {

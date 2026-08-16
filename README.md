@@ -32,6 +32,7 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
 - 🌐 **Network & WSL Browser**: Collapsible bottom section for network shares, local subnets, and WSL Linux distributions.
 - 🔍 **Quick Inspector (`F3`)**: Code/Text syntax viewer, Binary Hex dump (Offset / Hex / ASCII), and instant SHA-256 & MD5 hash calculator.
 - ⚡ **Live Quick Filter (`Ctrl+F`)**: Real-time wildcard (`*.cs`, `*test*`) and regular expression file search with 250ms catastrophic backtracking protection.
+- 🧠 **Per-Folder View Memory**: Each folder remembers Details/Thumbnails mode, thumbnail size, sort and direction, visible columns, widths/order, and the previous scroll location across navigation and restarts.
 - 💾 **Portability & Full Backup**:
   - Portable single-file profile export/import (`settings.json` + `history.json` + column layout).
   - Cross-platform path normalization between Windows (`C:\...`) and Linux (`/home/...`).
@@ -74,6 +75,16 @@ dotnet test
 ```
 
 The suite uses disposable filesystem and configuration directories. See [tests/README.md](tests/README.md) for its structure and current UI/integration boundaries.
+
+### Large-folder performance probe
+
+Measure enumeration, allocation, and natural-sort cost against an existing directory:
+
+```bash
+dotnet run --project tools/ClankerExplorer.PerformanceProbe -- <directory>
+```
+
+See [docs/large-folder-performance.md](docs/large-folder-performance.md) for the 1k/10k/50k baseline, thumbnail scheduling/cache architecture, virtualization proof, and remaining limits.
 
 ### Build Single-File Windows Executable (`.exe`)
 ```bash

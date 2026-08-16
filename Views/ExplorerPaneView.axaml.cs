@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -17,6 +18,16 @@ namespace ClankerExplorer.Views;
 public partial class ExplorerPaneView : UserControl
 {
     private readonly DispatcherTimer _autoScrollTimer;
+    private readonly DispatcherTimer _thumbnailDebounceTimer;
+    private readonly DispatcherTimer _folderScrollSaveTimer;
+    private CancellationTokenSource? _thumbnailViewportCts;
+    private HashSet<FileItem> _retainedThumbnailItems = new();
+    private bool _thumbnailViewportInitialized;
+    private ScrollViewer? _detailsScrollViewer;
+    private ScrollViewer? _thumbnailScrollViewer;
+    private bool _restoringFolderViewState;
+    private bool _detailsScrollSubscribed;
+    private bool _thumbnailScrollSubscribed;
     private bool _isMouseDownForMarquee;
     private bool _isMarqueeActive;
     private Point _marqueeStartPos;
@@ -30,6 +41,14 @@ public partial class ExplorerPaneView : UserControl
 
         _autoScrollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _autoScrollTimer.Tick += OnAutoScrollTick;
+        _thumbnailDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(90) };
+        _thumbnailDebounceTimer.Tick += OnThumbnailDebounceTick;
+        _folderScrollSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _folderScrollSaveTimer.Tick += (_, _) =>
+        {
+            _folderScrollSaveTimer.Stop();
+            SaveFolderScrollState(persist: true);
+        };
 
         Loaded += (s, e) =>
         {
@@ -67,9 +86,21 @@ public partial class ExplorerPaneView : UserControl
             if (FileDataGrid != null)
             {
                 FileDataGrid.AddHandler(PointerPressedEvent, OnDataGridPointerPressedTunnel, RoutingStrategies.Tunnel);
-                FileDataGrid.AddHandler(PointerReleasedEvent, (sender, args) => SaveCurrentColumnLayout(), RoutingStrategies.Bubble);
+                FileDataGrid.AddHandler(PointerReleasedEvent, (sender, args) =>
+                {
+                    SaveCurrentColumnLayout();
+                    CaptureFolderViewportAnchors();
+                }, RoutingStrategies.Bubble);
+                FileDataGrid.PointerWheelChanged += (_, _) =>
+                    Dispatcher.UIThread.Post(CaptureFolderViewportAnchors, DispatcherPriority.Background);
+                FileDataGrid.KeyUp += (_, _) =>
+                    Dispatcher.UIThread.Post(CaptureFolderViewportAnchors, DispatcherPriority.Background);
                 FileDataGrid.ColumnReordered += (sender, args) => SaveCurrentColumnLayout();
+                FileDataGrid.Sorting += OnDataGridSorting;
             }
+
+            InitializeThumbnailViewport();
+            InitializeFolderViewRestoration();
 
             if (GridContextMenu != null)
             {
@@ -84,7 +115,284 @@ public partial class ExplorerPaneView : UserControl
 
             Dispatcher.UIThread.Post(UpdateTabScrollButtonsVisibility, DispatcherPriority.Loaded);
         };
+
+        Unloaded += (_, _) =>
+        {
+            _thumbnailDebounceTimer.Stop();
+            _folderScrollSaveTimer.Stop();
+            _thumbnailViewportCts?.Cancel();
+        };
     }
+
+    private void InitializeThumbnailViewport()
+    {
+        if (_thumbnailViewportInitialized || ThumbnailListBox == null) return;
+        _thumbnailViewportInitialized = true;
+
+        ThumbnailListBox.SizeChanged += (_, _) =>
+        {
+            if (DataContext is ExplorerPaneViewModel vm)
+            {
+                vm.UpdateThumbnailViewportWidth(ThumbnailListBox.Bounds.Width);
+                ScheduleThumbnailViewportUpdate();
+            }
+        };
+
+        _thumbnailScrollViewer = ThumbnailListBox.FindDescendantOfType<ScrollViewer>();
+        if (_thumbnailScrollViewer != null)
+        {
+            _thumbnailScrollSubscribed = true;
+            _thumbnailScrollViewer.ScrollChanged += (_, _) =>
+            {
+                ScheduleThumbnailViewportUpdate();
+                OnFolderScrollChanged();
+            };
+        }
+
+        if (DataContext is ExplorerPaneViewModel pane)
+        {
+            pane.UpdateThumbnailViewportWidth(ThumbnailListBox.Bounds.Width);
+            pane.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName is nameof(ExplorerPaneViewModel.ThumbnailRows)
+                    or nameof(ExplorerPaneViewModel.IsThumbnailView)
+                    or nameof(ExplorerPaneViewModel.ThumbnailSize))
+                {
+                    Dispatcher.UIThread.Post(ScheduleThumbnailViewportUpdate, DispatcherPriority.Loaded);
+                }
+            };
+        }
+
+        Dispatcher.UIThread.Post(ScheduleThumbnailViewportUpdate, DispatcherPriority.Loaded);
+    }
+
+    private void InitializeFolderViewRestoration()
+    {
+        if (DataContext is not ExplorerPaneViewModel vm) return;
+        EnsureFolderScrollViewers();
+        vm.FolderViewStateRestored += RestoreFolderViewState;
+        RestoreFolderViewState();
+    }
+
+    private void EnsureFolderScrollViewers()
+    {
+        _detailsScrollViewer ??= FileDataGrid?.FindDescendantOfType<ScrollViewer>();
+        if (_detailsScrollViewer != null && !_detailsScrollSubscribed)
+        {
+            _detailsScrollSubscribed = true;
+            _detailsScrollViewer.ScrollChanged += (_, _) => OnFolderScrollChanged();
+        }
+
+        _thumbnailScrollViewer ??= ThumbnailListBox?.FindDescendantOfType<ScrollViewer>();
+        if (_thumbnailScrollViewer != null && !_thumbnailScrollSubscribed)
+        {
+            _thumbnailScrollSubscribed = true;
+            _thumbnailScrollViewer.ScrollChanged += (_, _) =>
+            {
+                ScheduleThumbnailViewportUpdate();
+                OnFolderScrollChanged();
+            };
+        }
+    }
+
+    private void OnFolderScrollChanged()
+    {
+        if (_restoringFolderViewState) return;
+        SaveFolderScrollState(persist: false);
+        _folderScrollSaveTimer.Stop();
+        _folderScrollSaveTimer.Start();
+    }
+
+    private void SaveFolderScrollState(bool persist)
+    {
+        if (DataContext is not ExplorerPaneViewModel vm) return;
+        CaptureFolderViewportAnchors();
+        vm.UpdateFolderScrollState(
+            _detailsScrollViewer?.Offset.X ?? vm.DetailsHorizontalOffset,
+            _detailsScrollViewer?.Offset.Y ?? vm.DetailsVerticalOffset,
+            _thumbnailScrollViewer?.Offset.Y ?? vm.ThumbnailVerticalOffset,
+            persist);
+    }
+
+    private void CaptureFolderViewportAnchors()
+    {
+        if (_restoringFolderViewState || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+        string? detailsPath = FileDataGrid?.GetVisualDescendants()
+            .OfType<DataGridRow>()
+            .Select(row => new { Row = row, Point = row.TranslatePoint(new Point(0, 0), FileDataGrid) })
+            .Where(entry => entry.Point.HasValue && entry.Point.Value.Y + entry.Row.Bounds.Height >= 0)
+            .OrderBy(entry => entry.Point!.Value.Y)
+            .Select(entry => (entry.Row.DataContext as FileItem)?.FullPath)
+            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+
+        string? thumbnailPath = null;
+        var panel = ThumbnailListBox?.FindDescendantOfType<VirtualizingStackPanel>();
+        if (panel != null && panel.FirstRealizedIndex >= 0)
+        {
+            int itemIndex = panel.FirstRealizedIndex * Math.Max(1, vm.ThumbnailColumnCount);
+            if (itemIndex < vm.SelectedTab.FilteredItems.Count)
+                thumbnailPath = vm.SelectedTab.FilteredItems[itemIndex].FullPath;
+        }
+
+        vm.UpdateFolderViewportAnchors(
+            detailsPath ?? vm.DetailsTopItemPath,
+            thumbnailPath ?? vm.ThumbnailTopItemPath);
+    }
+
+    private void RestoreFolderViewState()
+    {
+        if (DataContext is not ExplorerPaneViewModel vm) return;
+        _restoringFolderViewState = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                EnsureFolderScrollViewers();
+                RestoreColumnOrder(vm.CurrentColumnOrder);
+                RestoreViewportAnchors(vm);
+                if (_detailsScrollViewer != null)
+                    _detailsScrollViewer.Offset = new Vector(vm.DetailsHorizontalOffset, vm.DetailsVerticalOffset);
+                if (_thumbnailScrollViewer != null)
+                    _thumbnailScrollViewer.Offset = new Vector(0, vm.ThumbnailVerticalOffset);
+            }
+            finally
+            {
+                _restoringFolderViewState = false;
+            }
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void RestoreViewportAnchors(ExplorerPaneViewModel vm)
+    {
+        var tab = vm.SelectedTab;
+        if (tab == null) return;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!string.IsNullOrWhiteSpace(vm.DetailsTopItemPath))
+        {
+            var item = tab.FilteredItems.FirstOrDefault(candidate =>
+                string.Equals(candidate.FullPath, vm.DetailsTopItemPath, comparison));
+            if (item != null) FileDataGrid?.ScrollIntoView(item, null);
+        }
+
+        if (!string.IsNullOrWhiteSpace(vm.ThumbnailTopItemPath) && ThumbnailListBox != null)
+        {
+            int index = -1;
+            for (int candidateIndex = 0; candidateIndex < tab.FilteredItems.Count; candidateIndex++)
+            {
+                if (string.Equals(tab.FilteredItems[candidateIndex].FullPath, vm.ThumbnailTopItemPath, comparison))
+                {
+                    index = candidateIndex;
+                    break;
+                }
+            }
+            int rowIndex = index < 0 ? -1 : index / Math.Max(1, vm.ThumbnailColumnCount);
+            if (rowIndex >= 0 && rowIndex < vm.ThumbnailRows.Count)
+                ThumbnailListBox.ScrollIntoView(vm.ThumbnailRows[rowIndex]);
+        }
+    }
+
+    private void ScheduleThumbnailViewportUpdate()
+    {
+        _thumbnailViewportCts?.Cancel();
+        if (DataContext is not ExplorerPaneViewModel vm || !vm.IsThumbnailView) return;
+
+        int delay = Math.Clamp(SettingsService.Instance.CurrentSettings.ThumbnailScrollDebounceMilliseconds, 50, 150);
+        _thumbnailDebounceTimer.Interval = TimeSpan.FromMilliseconds(delay);
+        _thumbnailDebounceTimer.Stop();
+        _thumbnailDebounceTimer.Start();
+    }
+
+    private void OnThumbnailDebounceTick(object? sender, EventArgs e)
+    {
+        _thumbnailDebounceTimer.Stop();
+        LoadRealizedThumbnailWindow();
+    }
+
+    private void LoadRealizedThumbnailWindow()
+    {
+        if (ThumbnailListBox == null || DataContext is not ExplorerPaneViewModel vm ||
+            !vm.IsThumbnailView || vm.SelectedTab == null)
+        {
+            return;
+        }
+
+        var panel = ThumbnailListBox.FindDescendantOfType<VirtualizingStackPanel>();
+        int firstRow = panel?.FirstRealizedIndex ?? 0;
+        int lastRow = panel?.LastRealizedIndex ?? Math.Min(vm.ThumbnailRows.Count - 1, 3);
+        if (firstRow < 0 || lastRow < firstRow) return;
+
+        var items = vm.SelectedTab.FilteredItems;
+        var window = ThumbnailViewportPlanner.Plan(
+            items.Count,
+            vm.ThumbnailColumnCount,
+            firstRow,
+            lastRow,
+            SettingsService.Instance.CurrentSettings.ThumbnailPrefetchViewports);
+
+        var visible = new List<FileItem>(window.VisibleEnd - window.VisibleStart);
+        var prefetch = new List<FileItem>(Math.Max(0, window.RetainedEnd - window.RetainedStart - visible.Count));
+        var retained = new HashSet<FileItem>();
+        for (int index = window.RetainedStart; index < window.RetainedEnd; index++)
+        {
+            var item = items[index];
+            retained.Add(item);
+            if (index >= window.VisibleStart && index < window.VisibleEnd) visible.Add(item);
+            else prefetch.Add(item);
+        }
+
+        foreach (var oldItem in _retainedThumbnailItems)
+        {
+            if (!retained.Contains(oldItem)) oldItem.ThumbnailImage = null;
+        }
+        _retainedThumbnailItems = retained;
+
+        _thumbnailViewportCts?.Dispose();
+        _thumbnailViewportCts = new CancellationTokenSource();
+        _ = ThumbnailService.Instance.LoadViewportAsync(
+            visible,
+            prefetch,
+            (int)vm.ThumbnailSize,
+            _thumbnailViewportCts.Token);
+    }
+
+    private void OnThumbnailItemPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Control { DataContext: FileItem item } ||
+            DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(this);
+        bool rightClick = point.Properties.IsRightButtonPressed;
+        bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        var tab = vm.SelectedTab;
+
+        if (rightClick)
+        {
+            if (!item.IsThumbnailSelected)
+            {
+                tab.SelectThumbnailItem(item, control: false, shift: false);
+            }
+        }
+        else
+        {
+            tab.SelectThumbnailItem(item, ctrl, shift);
+        }
+
+        vm.NotifyContextMenuProperties();
+    }
+
+    private void OnThumbnailItemDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is Control { DataContext: FileItem item } && DataContext is ExplorerPaneViewModel vm)
+        {
+            vm.OpenItem(item);
+            e.Handled = true;
+        }
+    }
+
 
     private void SaveCurrentColumnLayout()
     {
@@ -95,7 +403,7 @@ public partial class ExplorerPaneView : UserControl
 
         foreach (var col in FileDataGrid.Columns)
         {
-            var header = col.Header?.ToString();
+            var header = BaseColumnHeader(col.Header?.ToString());
             double actualWidth = col.ActualWidth;
             if (actualWidth > 20)
             {
@@ -159,7 +467,52 @@ public partial class ExplorerPaneView : UserControl
         {
             SettingsService.Instance.SaveSettings(s);
         }
+        vm.SetCurrentColumnOrder(FileDataGrid.Columns
+            .OrderBy(column => column.DisplayIndex)
+            .Select(column => BaseColumnHeader(column.Header?.ToString())));
     }
+
+    private void RestoreColumnOrder(IReadOnlyList<string> savedOrder)
+    {
+        if (FileDataGrid == null || savedOrder.Count == 0) return;
+        var byHeader = FileDataGrid.Columns
+            .Where(column => column.Header != null)
+            .ToDictionary(column => BaseColumnHeader(column.Header!.ToString()), StringComparer.Ordinal);
+        int displayIndex = 0;
+        foreach (string header in savedOrder)
+        {
+            if (byHeader.Remove(header, out var column)) column.DisplayIndex = displayIndex++;
+        }
+        foreach (var column in byHeader.Values.OrderBy(column => column.DisplayIndex))
+            column.DisplayIndex = displayIndex++;
+    }
+
+    private void OnDataGridSorting(object? sender, DataGridColumnEventArgs e)
+    {
+        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+        string sortColumn = HeaderToSortColumn(e.Column.Header?.ToString());
+        vm.SelectedTab.SortBy(sortColumn);
+        vm.PersistCurrentFolderViewState();
+        e.Handled = true;
+        vm.NotifySortHeadersChanged();
+    }
+
+    private static string BaseColumnHeader(string? header) =>
+        (header ?? string.Empty).TrimEnd(' ', '↑', '↓');
+
+    private static string HeaderToSortColumn(string? header) => BaseColumnHeader(header) switch
+    {
+        "Ext" => "Extension",
+        "Size" => "Size",
+        "Date Modified" => "Modified",
+        "Date Created" => "Created",
+        "Date Accessed" => "Accessed",
+        "Type" => "Type",
+        "Attributes" => "Attributes",
+        "Permissions" => "Permissions",
+        "Owner:Group" => "OwnerGroup",
+        _ => "Name"
+    };
 
     private void OnDataGridPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
     {
@@ -304,10 +657,16 @@ public partial class ExplorerPaneView : UserControl
             {
                 if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && FileDataGrid != null)
                 {
-                    FileDataGrid.SelectedItems.Clear();
-                    vm.SelectedTab.SelectedItem = null;
+                    if (vm.IsThumbnailView) vm.SelectedTab.ClearThumbnailSelection();
+                    else
+                    {
+                        FileDataGrid.SelectedItems.Clear();
+                        vm.SelectedTab.SelectedItem = null;
+                    }
                     vm.NotifyContextMenuProperties();
                 }
+
+                if (vm.IsThumbnailView) return;
 
                 if (FileGridContainer != null)
                 {
@@ -331,6 +690,27 @@ public partial class ExplorerPaneView : UserControl
         if (props.IsLeftButtonPressed)
         {
             var source = e.Source as Visual;
+            if (vm.IsThumbnailView)
+            {
+                bool isThumbnailCard = false;
+                while (source != null && source != FileGridContainer)
+                {
+                    if (source is Border border && border.Classes.Contains("thumbnail-card"))
+                    {
+                        isThumbnailCard = true;
+                        break;
+                    }
+                    source = source.GetVisualParent();
+                }
+
+                if (!isThumbnailCard && !e.KeyModifiers.HasFlag(KeyModifiers.Control))
+                {
+                    vm.SelectedTab?.ClearThumbnailSelection();
+                    vm.NotifyContextMenuProperties();
+                }
+                return;
+            }
+
             bool isRowOrCell = false;
             while (source != null && source != FileGridContainer)
             {
@@ -615,6 +995,12 @@ public partial class ExplorerPaneView : UserControl
         else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.V)
         {
             _ = vm.PasteFilesAsync();
+            e.Handled = true;
+        }
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.A)
+        {
+            vm.SelectedTab.SelectAllThumbnails();
+            vm.NotifyContextMenuProperties();
             e.Handled = true;
         }
         // F5: Refresh

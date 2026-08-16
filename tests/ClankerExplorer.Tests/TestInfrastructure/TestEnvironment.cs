@@ -40,6 +40,7 @@ public static class TestEnvironment
 
     public static void ResetGlobalSettings(string defaultPath)
     {
+        FolderViewStateService.Instance.ClearAll();
         SettingsService.Instance.SaveSettings(new AppSettings
         {
             DefaultPath = defaultPath,

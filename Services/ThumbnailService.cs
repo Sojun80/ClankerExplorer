@@ -2,7 +2,10 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
@@ -15,83 +18,94 @@ namespace ClankerExplorer.Services;
 /// High-performance asynchronous thumbnail retrieval and caching service.
 /// Supports direct image decoding and Windows Shell thumbnail providers with cancellation.
 /// </summary>
-public class ThumbnailService
+public class ThumbnailService : IDisposable
 {
+    private const int CacheFormatVersion = 1;
+    private const int MaxQueuedRequests = 512;
     private static readonly Lazy<ThumbnailService> _instance = new(() => new ThumbnailService());
     public static ThumbnailService Instance => _instance.Value;
 
-    private readonly ConcurrentDictionary<string, Bitmap> _cache = new();
-    private readonly ConcurrentQueue<string> _lruQueue = new();
-    private const int MaxCacheEntries = 1200;
+    private readonly object _memoryGate = new();
+    private readonly Dictionary<string, MemoryEntry> _memoryCache = new();
+    private readonly LinkedList<string> _memoryLru = new();
+    private long _memoryBytes;
+
+    private readonly object _queueGate = new();
+    private readonly Queue<ThumbnailWorkItem> _visibleQueue = new();
+    private readonly Queue<ThumbnailWorkItem> _prefetchQueue = new();
+    private readonly SemaphoreSlim _queueSignal = new(0);
+    private readonly CancellationTokenSource _workerCts = new();
+    private readonly ConcurrentDictionary<string, Task<Bitmap?>> _inflight = new();
+    private readonly ConcurrentDictionary<string, byte> _failedSources = new();
+    private readonly ConcurrentQueue<string> _failureLru = new();
+    private readonly string _diskCacheDirectory;
+    private readonly int _workerCount;
+    private int _cleanupScheduled;
+    private int _workersStarted;
+    private long _lastCleanupUtcTicks;
 
     private static readonly HashSet<string> DirectImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".ico", ".tiff", ".tif"
     };
 
-    public ThumbnailService()
+    public ThumbnailService(string? cacheDirectory = null, int? workerCount = null)
     {
+        _diskCacheDirectory = cacheDirectory ?? Path.Combine(AppStoragePaths.GetDataDirectory(), $"thumbnail-cache-v{CacheFormatVersion}");
+        Directory.CreateDirectory(_diskCacheDirectory);
+
+        _workerCount = Math.Clamp(workerCount ?? SettingsService.Instance.CurrentSettings.ThumbnailWorkerCount, 1, 8);
     }
 
     /// <summary>
-    /// Loads thumbnails for a collection of FileItems in background tasks with cancellation.
+    /// Replaces the outstanding viewport request. Visible work is always dequeued before
+    /// prefetch work; callers cancel the previous token when the viewport changes.
     /// </summary>
-    public async Task LoadThumbnailsAsync(IEnumerable<FileItem> items, int targetSize, CancellationToken cancellationToken)
+    public Task LoadViewportAsync(
+        IEnumerable<FileItem> visibleItems,
+        IEnumerable<FileItem> prefetchItems,
+        int targetSize,
+        CancellationToken cancellationToken)
     {
-        var itemList = new List<FileItem>(items);
-        var sizeBucket = GetSizeBucket(targetSize);
-
-        using var semaphore = new SemaphoreSlim(4);
-        var tasks = new List<Task>();
-
-        foreach (var item in itemList)
+        PruneCancelledRequests();
+        var completions = new List<Task>();
+        foreach (var item in visibleItems)
         {
-            if (cancellationToken.IsCancellationRequested) break;
-            if (item.IsDirectory || item.SizeBytes <= 0) continue;
-
-            string key = GetCacheKey(item.FullPath, item.ModifiedTime.Ticks, sizeBucket);
-            if (_cache.TryGetValue(key, out var cachedBmp))
+            if (!item.IsDirectory && item.SizeBytes > 0)
             {
-                item.ThumbnailImage = cachedBmp;
-                continue;
+                completions.Add(EnqueueAsync(item, targetSize, ThumbnailPriority.Visible, cancellationToken));
             }
-
-            tasks.Add(Task.Run(async () =>
-            {
-                if (cancellationToken.IsCancellationRequested) return;
-
-                await semaphore.WaitAsync(cancellationToken);
-                try
-                {
-                    if (cancellationToken.IsCancellationRequested) return;
-
-                    var bmp = await GetThumbnailAsync(item.FullPath, item.ModifiedTime, targetSize, cancellationToken);
-                    if (bmp != null && !cancellationToken.IsCancellationRequested)
-                    {
-                        Dispatcher.UIThread.Post(() =>
-                        {
-                            if (!cancellationToken.IsCancellationRequested)
-                            {
-                                item.ThumbnailImage = bmp;
-                            }
-                        }, DispatcherPriority.Background);
-                    }
-                }
-                catch (OperationCanceledException) { }
-                catch { }
-                finally
-                {
-                    semaphore.Release();
-                }
-            }, cancellationToken));
         }
 
-        try
+        foreach (var item in prefetchItems)
         {
-            await Task.WhenAll(tasks);
+            if (!item.IsDirectory && item.SizeBytes > 0)
+            {
+                completions.Add(EnqueueAsync(item, targetSize, ThumbnailPriority.Prefetch, cancellationToken));
+            }
         }
-        catch (OperationCanceledException) { }
-        catch { }
+
+        return Task.WhenAll(completions);
+    }
+
+    private void PruneCancelledRequests()
+    {
+        lock (_queueGate)
+        {
+            PruneQueue(_visibleQueue);
+            PruneQueue(_prefetchQueue);
+        }
+    }
+
+    private static void PruneQueue(Queue<ThumbnailWorkItem> queue)
+    {
+        int count = queue.Count;
+        for (int index = 0; index < count; index++)
+        {
+            var request = queue.Dequeue();
+            if (request.CancellationToken.IsCancellationRequested) request.Completion.TrySetResult();
+            else queue.Enqueue(request);
+        }
     }
 
     /// <summary>
@@ -101,12 +115,43 @@ public class ThumbnailService
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
 
-        int sizeBucket = GetSizeBucket(targetSize);
-        string key = GetCacheKey(path, modifiedTime.Ticks, sizeBucket);
+        var fileInfo = new FileInfo(path);
+        int sizeBucket = GetCanonicalSize(targetSize);
+        string key = GetCacheKey(path, fileInfo.Length, modifiedTime.Ticks, sizeBucket);
 
-        if (_cache.TryGetValue(key, out var cached))
+        if (TryGetMemoryEntry(key, out var cached))
         {
             return cached;
+        }
+
+        if (_failedSources.ContainsKey(key)) return null;
+
+        var loadTask = _inflight.GetOrAdd(key, _ => LoadOrGenerateAsync(path, key, sizeBucket, CancellationToken.None));
+        try
+        {
+            return await loadTask.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            _inflight.TryRemove(new KeyValuePair<string, Task<Bitmap?>>(key, loadTask));
+        }
+    }
+
+    public static int GetCanonicalSize(int size)
+    {
+        if (size <= 128) return 128;
+        if (size <= 256) return 256;
+        return 512;
+    }
+
+    private async Task<Bitmap?> LoadOrGenerateAsync(string path, string key, int sizeBucket, CancellationToken cancellationToken)
+    {
+        string diskPath = GetDiskPath(key);
+        var diskBitmap = await Task.Run(() => TryLoadDiskEntry(diskPath), cancellationToken);
+        if (diskBitmap != null)
+        {
+            AddMemoryEntry(key, diskBitmap);
+            return diskBitmap;
         }
 
         Bitmap? result = null;
@@ -126,35 +171,159 @@ public class ThumbnailService
 
         if (result != null)
         {
-            AddCacheEntry(key, result);
+            AddMemoryEntry(key, result);
+            await Task.Run(() => SaveDiskEntry(diskPath, result), CancellationToken.None);
+        }
+        else
+        {
+            AddFailure(key);
         }
 
         return result;
     }
 
-    private static int GetSizeBucket(int size)
+    private Task EnqueueAsync(FileItem item, int targetSize, ThumbnailPriority priority, CancellationToken cancellationToken)
     {
-        if (size <= 96) return 96;
-        if (size <= 160) return 160;
-        if (size <= 256) return 256;
-        return 384;
-    }
+        EnsureWorkersStarted();
+        if (cancellationToken.IsCancellationRequested) return Task.FromCanceled(cancellationToken);
 
-    private static string GetCacheKey(string path, long ticks, int sizeBucket)
-    {
-        return $"{path}|{ticks}|{sizeBucket}";
-    }
-
-    private void AddCacheEntry(string key, Bitmap bmp)
-    {
-        if (_cache.TryAdd(key, bmp))
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var request = new ThumbnailWorkItem(item, targetSize, priority, cancellationToken, completion);
+        lock (_queueGate)
         {
-            _lruQueue.Enqueue(key);
-            if (_cache.Count > MaxCacheEntries)
+            int count = _visibleQueue.Count + _prefetchQueue.Count;
+            if (count >= MaxQueuedRequests)
             {
-                if (_lruQueue.TryDequeue(out var oldestKey))
+                if (priority == ThumbnailPriority.Prefetch)
                 {
-                    _cache.TryRemove(oldestKey, out _);
+                    completion.TrySetResult();
+                    return completion.Task;
+                }
+
+                if (_prefetchQueue.TryDequeue(out var dropped))
+                {
+                    dropped.Completion.TrySetResult();
+                }
+                else if (_visibleQueue.TryDequeue(out dropped))
+                {
+                    dropped.Completion.TrySetResult();
+                }
+            }
+
+            (priority == ThumbnailPriority.Visible ? _visibleQueue : _prefetchQueue).Enqueue(request);
+        }
+
+        _queueSignal.Release();
+        return completion.Task;
+    }
+
+    private void EnsureWorkersStarted()
+    {
+        if (Interlocked.Exchange(ref _workersStarted, 1) != 0) return;
+        for (int i = 0; i < _workerCount; i++) _ = Task.Run(WorkerLoopAsync);
+    }
+
+    private async Task WorkerLoopAsync()
+    {
+        while (!_workerCts.IsCancellationRequested)
+        {
+            try
+            {
+                await _queueSignal.WaitAsync(_workerCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            ThumbnailWorkItem? request = null;
+            lock (_queueGate)
+            {
+                if (!_visibleQueue.TryDequeue(out request))
+                {
+                    _prefetchQueue.TryDequeue(out request);
+                }
+            }
+
+            if (request == null) continue;
+            if (request.CancellationToken.IsCancellationRequested)
+            {
+                request.Completion.TrySetResult();
+                continue;
+            }
+
+            try
+            {
+                var bitmap = await GetThumbnailAsync(
+                    request.Item.FullPath,
+                    request.Item.ModifiedTime,
+                    request.TargetSize,
+                    request.CancellationToken);
+
+                if (bitmap != null && !request.CancellationToken.IsCancellationRequested)
+                {
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (!request.CancellationToken.IsCancellationRequested)
+                        {
+                            request.Item.ThumbnailImage = bitmap;
+                        }
+                    }, request.Priority == ThumbnailPriority.Visible
+                        ? DispatcherPriority.Normal
+                        : DispatcherPriority.Background);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch { }
+            finally
+            {
+                request.Completion.TrySetResult();
+            }
+        }
+    }
+
+    private static string GetCacheKey(string path, long fileSize, long ticks, int sizeBucket)
+    {
+        string normalized = Path.GetFullPath(path).Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        if (OperatingSystem.IsWindows()) normalized = normalized.ToUpperInvariant();
+        byte[] input = Encoding.UTF8.GetBytes($"{CacheFormatVersion}|{normalized}|{fileSize}|{ticks}|{sizeBucket}");
+        return Convert.ToHexString(SHA256.HashData(input));
+    }
+
+    private bool TryGetMemoryEntry(string key, out Bitmap? bitmap)
+    {
+        lock (_memoryGate)
+        {
+            if (_memoryCache.TryGetValue(key, out var entry))
+            {
+                _memoryLru.Remove(entry.Node);
+                _memoryLru.AddFirst(entry.Node);
+                bitmap = entry.Bitmap;
+                return true;
+            }
+        }
+
+        bitmap = null;
+        return false;
+    }
+
+    private void AddMemoryEntry(string key, Bitmap bitmap)
+    {
+        long approximateBytes = Math.Max(1, (long)bitmap.PixelSize.Width * bitmap.PixelSize.Height * 4);
+        long limit = Math.Max(16 * 1024 * 1024, SettingsService.Instance.CurrentSettings.ThumbnailMemoryCacheMaxBytes);
+        lock (_memoryGate)
+        {
+            if (_memoryCache.ContainsKey(key)) return;
+            var node = _memoryLru.AddFirst(key);
+            _memoryCache.Add(key, new MemoryEntry(bitmap, node, approximateBytes));
+            _memoryBytes += approximateBytes;
+
+            while (_memoryBytes > limit && _memoryLru.Last is { } oldest)
+            {
+                _memoryLru.RemoveLast();
+                if (_memoryCache.Remove(oldest.Value, out var removed))
+                {
+                    _memoryBytes -= removed.ApproximateBytes;
                 }
             }
         }
@@ -162,8 +331,134 @@ public class ThumbnailService
 
     public void ClearCache()
     {
-        _cache.Clear();
-        while (_lruQueue.TryDequeue(out _)) { }
+        lock (_memoryGate)
+        {
+            _memoryCache.Clear();
+            _memoryLru.Clear();
+            _memoryBytes = 0;
+        }
+        _failedSources.Clear();
+        while (_failureLru.TryDequeue(out _)) { }
+    }
+
+    private void AddFailure(string key)
+    {
+        if (!_failedSources.TryAdd(key, 0)) return;
+        _failureLru.Enqueue(key);
+        while (_failedSources.Count > 4096 && _failureLru.TryDequeue(out var oldest))
+        {
+            _failedSources.TryRemove(oldest, out _);
+        }
+    }
+
+    public int QueuedRequestCount
+    {
+        get
+        {
+            lock (_queueGate) return _visibleQueue.Count + _prefetchQueue.Count;
+        }
+    }
+
+    public int MemoryCacheEntryCount
+    {
+        get
+        {
+            lock (_memoryGate) return _memoryCache.Count;
+        }
+    }
+
+    public Task ClearDiskCacheAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.Run(() =>
+        {
+            if (!Directory.Exists(_diskCacheDirectory)) return;
+            foreach (var file in Directory.EnumerateFiles(_diskCacheDirectory, "*.png"))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try { File.Delete(file); } catch { }
+            }
+        }, cancellationToken);
+    }
+
+    public void Dispose()
+    {
+        _workerCts.Cancel();
+        ClearCache();
+    }
+
+    private string GetDiskPath(string key) => Path.Combine(_diskCacheDirectory, key + ".png");
+
+    private static Bitmap? TryLoadDiskEntry(string diskPath)
+    {
+        try
+        {
+            if (!File.Exists(diskPath)) return null;
+            var bitmap = new Bitmap(diskPath);
+            try { File.SetLastAccessTimeUtc(diskPath, DateTime.UtcNow); } catch { }
+            return bitmap;
+        }
+        catch
+        {
+            try { File.Delete(diskPath); } catch { }
+            return null;
+        }
+    }
+
+    private void SaveDiskEntry(string diskPath, Bitmap bitmap)
+    {
+        string tempPath = diskPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                bitmap.Save(stream);
+            }
+            File.Move(tempPath, diskPath, true);
+            ScheduleDiskCleanup();
+        }
+        catch { }
+        finally
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+        }
+    }
+
+    private void ScheduleDiskCleanup()
+    {
+        long now = DateTime.UtcNow.Ticks;
+        long last = Interlocked.Read(ref _lastCleanupUtcTicks);
+        if (last != 0 && now - last < TimeSpan.FromMinutes(5).Ticks) return;
+        if (Interlocked.CompareExchange(ref _lastCleanupUtcTicks, now, last) != last) return;
+        if (Interlocked.Exchange(ref _cleanupScheduled, 1) != 0) return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                long limit = Math.Max(64 * 1024 * 1024, SettingsService.Instance.CurrentSettings.ThumbnailDiskCacheMaxBytes);
+                var files = new DirectoryInfo(_diskCacheDirectory)
+                    .EnumerateFiles("*.png")
+                    .OrderBy(file => file.LastAccessTimeUtc)
+                    .ToList();
+                long total = files.Sum(file => file.Length);
+                long target = (long)(limit * 0.9);
+                foreach (var file in files)
+                {
+                    if (total <= target) break;
+                    long length = file.Length;
+                    try
+                    {
+                        file.Delete();
+                        total -= length;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            finally
+            {
+                Volatile.Write(ref _cleanupScheduled, 0);
+            }
+        });
     }
 
     private static Bitmap? DecodeImageFile(string path, int targetWidth)
@@ -178,6 +473,15 @@ public class ThumbnailService
             return null;
         }
     }
+
+    private sealed record MemoryEntry(Bitmap Bitmap, LinkedListNode<string> Node, long ApproximateBytes);
+    private sealed record ThumbnailWorkItem(
+        FileItem Item,
+        int TargetSize,
+        ThumbnailPriority Priority,
+        CancellationToken CancellationToken,
+        TaskCompletionSource Completion);
+    private enum ThumbnailPriority { Visible, Prefetch }
 
     #region Windows Shell Thumbnail Extraction
 

@@ -16,9 +16,11 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 {
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _filterDebounceCts;
-    private CancellationTokenSource? _thumbnailCts;
     private long _loadGeneration = 0;
+    private long _filterGeneration = 0;
+    private int _selectionAnchorIndex = -1;
     private bool _isDisposed;
+    private DirectoryReadOptions _directoryReadOptions = DirectoryReadOptions.FromSettings(SettingsService.Instance.CurrentSettings);
 
     [ObservableProperty]
     private string _id = Guid.NewGuid().ToString("N");
@@ -191,7 +193,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
         try
         {
-            var (list, error) = await FileSystemService.Instance.ReadDirectoryAsync(CurrentPath, token);
+            var (list, error) = await FileSystemService.Instance.ReadDirectoryAsync(CurrentPath, token, _directoryReadOptions);
             if (token.IsCancellationRequested || generation != _loadGeneration || _isDisposed) return;
 
             if (error != null)
@@ -209,8 +211,9 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 item.IsCut = ClipboardFileService.IsPathCut(item.FullPath);
             }
 
+            ClearThumbnailSelection();
             Items = new ObservableCollection<FileItem>(list);
-            ApplyFilter();
+            await ApplyFilterAsync(token);
         }
         catch (OperationCanceledException) { }
         finally
@@ -223,8 +226,8 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     }
 
     partial void OnFilterTextChanged(string value) => ScheduleDebouncedFilter();
-    partial void OnIsFilterRegexChanged(bool value) => ApplyFilter();
-    partial void OnIsFilterWildcardChanged(bool value) => ApplyFilter();
+    partial void OnIsFilterRegexChanged(bool value) => _ = ApplyFilterAsync();
+    partial void OnIsFilterWildcardChanged(bool value) => _ = ApplyFilterAsync();
 
     private void ScheduleDebouncedFilter()
     {
@@ -243,7 +246,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                     {
                         if (!token.IsCancellationRequested && !_isDisposed)
                         {
-                            ApplyFilter();
+                            _ = ApplyFilterAsync(token);
                         }
                     });
                 }
@@ -255,25 +258,55 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     public void ApplyFilter()
     {
         if (_isDisposed || Items == null) return;
-        IEnumerable<FileItem> query = Items;
+        var result = BuildFilteredItems(Items, FilterText, IsFilterRegex, SortColumn, SortAscending);
+        FilteredItems = new ObservableCollection<FileItem>(result);
+    }
 
-        if (!string.IsNullOrWhiteSpace(FilterText))
+    public async Task ApplyFilterAsync(CancellationToken cancellationToken = default)
+    {
+        if (_isDisposed || Items == null) return;
+        long generation = Interlocked.Increment(ref _filterGeneration);
+        var snapshot = Items.ToArray();
+        string filterText = FilterText;
+        bool isRegex = IsFilterRegex;
+        string sortColumn = SortColumn;
+        bool sortAscending = SortAscending;
+
+        var result = await Task.Run(
+            () => BuildFilteredItems(snapshot, filterText, isRegex, sortColumn, sortAscending),
+            cancellationToken);
+        if (!_isDisposed && !cancellationToken.IsCancellationRequested && generation == _filterGeneration)
         {
-            if (IsFilterRegex)
+            FilteredItems = new ObservableCollection<FileItem>(result);
+        }
+    }
+
+    private static List<FileItem> BuildFilteredItems(
+        IEnumerable<FileItem> source,
+        string filterText,
+        bool isFilterRegex,
+        string sortColumn,
+        bool sortAscending)
+    {
+        IEnumerable<FileItem> query = source;
+
+        if (!string.IsNullOrWhiteSpace(filterText))
+        {
+            if (isFilterRegex)
             {
                 try
                 {
-                    var regex = new Regex(FilterText, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
+                    var regex = new Regex(filterText, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
                     query = query.Where(i => regex.IsMatch(i.Name) || regex.IsMatch(i.Extension));
                 }
                 catch
                 {
-                    query = query.Where(i => i.Name.Contains(FilterText, StringComparison.OrdinalIgnoreCase));
+                    query = query.Where(i => i.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase));
                 }
             }
-            else if (FilterText.Contains('*') || FilterText.Contains('?'))
+            else if (filterText.Contains('*') || filterText.Contains('?'))
             {
-                var glob = "^" + Regex.Escape(FilterText).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+                var glob = "^" + Regex.Escape(filterText).Replace("\\*", ".*").Replace("\\?", ".") + "$";
                 try
                 {
                     var regex = new Regex(glob, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
@@ -281,42 +314,52 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 }
                 catch
                 {
-                    query = query.Where(i => i.Name.Contains(FilterText, StringComparison.OrdinalIgnoreCase));
+                    query = query.Where(i => i.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase));
                 }
             }
             else
             {
-                query = query.Where(i => i.Name.Contains(FilterText, StringComparison.OrdinalIgnoreCase) ||
-                                         i.Extension.Contains(FilterText, StringComparison.OrdinalIgnoreCase));
+                query = query.Where(i => i.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase) ||
+                                         i.Extension.Contains(filterText, StringComparison.OrdinalIgnoreCase));
             }
         }
 
         // Sort: Folders always on top, then sort column
         IOrderedEnumerable<FileItem> sorted;
-        if (SortAscending)
+        if (sortAscending)
         {
-            sorted = SortColumn switch
+            sorted = sortColumn switch
             {
                 "Extension" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
                 "Size" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.SizeBytes).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
                 "Modified" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.ModifiedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Created" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.CreatedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Accessed" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.AccessedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Type" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
                 "Attributes" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.AttributesString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Permissions" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.PermissionsString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "OwnerGroup" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.OwnerGroupString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
                 _ => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase)
             };
         }
         else
         {
-            sorted = SortColumn switch
+            sorted = sortColumn switch
             {
                 "Extension" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
                 "Size" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.SizeBytes).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
                 "Modified" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.ModifiedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Created" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.CreatedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Accessed" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.AccessedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Type" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
                 "Attributes" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.AttributesString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Permissions" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.PermissionsString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "OwnerGroup" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.OwnerGroupString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
                 _ => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase)
             };
         }
 
-        FilteredItems = new ObservableCollection<FileItem>(sorted);
+        return sorted.ToList();
     }
 
     public void SortBy(string column)
@@ -330,7 +373,72 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             SortColumn = column;
             SortAscending = true;
         }
-        ApplyFilter();
+        _ = ApplyFilterAsync();
+    }
+
+    public bool SetDirectoryReadOptions(DirectoryReadOptions options)
+    {
+        if (_directoryReadOptions == options) return false;
+        _directoryReadOptions = options;
+        return true;
+    }
+
+    public void SelectThumbnailItem(FileItem item, bool control, bool shift)
+    {
+        int itemIndex = FilteredItems.IndexOf(item);
+        if (itemIndex < 0) return;
+
+        if (shift)
+        {
+            int anchor = _selectionAnchorIndex >= 0 ? _selectionAnchorIndex : itemIndex;
+            if (!control) ClearThumbnailSelection();
+            int start = Math.Min(anchor, itemIndex);
+            int end = Math.Max(anchor, itemIndex);
+            for (int index = start; index <= end; index++) AddThumbnailSelection(FilteredItems[index]);
+        }
+        else if (control)
+        {
+            if (item.IsThumbnailSelected) RemoveThumbnailSelection(item);
+            else AddThumbnailSelection(item);
+            _selectionAnchorIndex = itemIndex;
+        }
+        else
+        {
+            ClearThumbnailSelection();
+            AddThumbnailSelection(item);
+            _selectionAnchorIndex = itemIndex;
+        }
+
+        SelectedItem = item.IsThumbnailSelected ? item : SelectedItems.LastOrDefault();
+    }
+
+    public void ClearThumbnailSelection()
+    {
+        foreach (var selected in SelectedItems) selected.IsThumbnailSelected = false;
+        SelectedItems.Clear();
+        SelectedItem = null;
+    }
+
+    public void SelectAllThumbnails()
+    {
+        foreach (var item in FilteredItems) item.IsThumbnailSelected = true;
+        SelectedItems = new ObservableCollection<FileItem>(FilteredItems);
+        SelectedItem = SelectedItems.LastOrDefault();
+        _selectionAnchorIndex = SelectedItems.Count > 0 ? SelectedItems.Count - 1 : -1;
+    }
+
+    private void AddThumbnailSelection(FileItem item)
+    {
+        if (item.IsThumbnailSelected) return;
+        item.IsThumbnailSelected = true;
+        SelectedItems.Add(item);
+    }
+
+    private void RemoveThumbnailSelection(FileItem item)
+    {
+        if (!item.IsThumbnailSelected) return;
+        item.IsThumbnailSelected = false;
+        SelectedItems.Remove(item);
     }
 
     public ExplorerTabViewModel CloneTab()
@@ -358,26 +466,6 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         return cloned;
     }
 
-    public void LoadThumbnails(int targetSize)
-    {
-        if (_isDisposed || FilteredItems == null || FilteredItems.Count == 0) return;
-
-        _thumbnailCts?.Cancel();
-        _thumbnailCts = new CancellationTokenSource();
-        var token = _thumbnailCts.Token;
-
-        _ = ThumbnailService.Instance.LoadThumbnailsAsync(FilteredItems, targetSize, token);
-    }
-
-    public void CancelThumbnailLoading()
-    {
-        try
-        {
-            _thumbnailCts?.Cancel();
-        }
-        catch { }
-    }
-
     public void Dispose()
     {
         if (_isDisposed) return;
@@ -399,11 +487,5 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         }
         catch { }
 
-        try
-        {
-            _thumbnailCts?.Cancel();
-            _thumbnailCts?.Dispose();
-        }
-        catch { }
     }
 }

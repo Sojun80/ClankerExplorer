@@ -147,6 +147,9 @@ public partial class FileItem : ObservableObject
     [ObservableProperty]
     private bool _isThumbnailLoading;
 
+    [ObservableProperty]
+    private bool _isThumbnailSelected;
+
     // Visual Helpers
     public string IconKind => IsDirectory ? "Folder" : GetFileIconKind(Extension);
     public string SizeDisplay => IsDirectory ? "—" : FormattedSize;

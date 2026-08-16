@@ -17,7 +17,16 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     private readonly Action _clipboardChangedHandler;
     private readonly Action _quickAccessChangedHandler;
     private readonly Action<AppSettings> _settingsChangedHandler;
+    private readonly FolderViewStateService _folderViewStateService;
+    private AppSettings _lastObservedSettings;
     private bool _isDisposed;
+    private bool _applyingFolderViewState;
+    private string? _activeFolderStatePath;
+    private static readonly string[] DefaultColumnOrder =
+    {
+        "Name", "Ext", "Size", "Date Modified", "Date Created", "Date Accessed",
+        "Type", "Attributes", "Permissions", "Owner:Group"
+    };
 
     public string PaneId { get; }
     public string PaneLabel { get; }
@@ -62,12 +71,21 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
     private double _thumbnailViewportWidth;
 
+    public double DetailsHorizontalOffset { get; private set; }
+    public double DetailsVerticalOffset { get; private set; }
+    public double ThumbnailVerticalOffset { get; private set; }
+    public string? DetailsTopItemPath { get; private set; }
+    public string? ThumbnailTopItemPath { get; private set; }
+    public IReadOnlyList<string> CurrentColumnOrder { get; private set; } = Array.Empty<string>();
+    public event Action? FolderViewStateRestored;
+
     partial void OnViewModeChanged(string value)
     {
         if (value == "Thumbnails")
         {
             RebuildThumbnailRows();
         }
+        if (!_applyingFolderViewState) PersistCurrentFolderViewState();
     }
 
     partial void OnThumbnailSizeChanged(double value)
@@ -85,6 +103,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
                 settings.ThumbnailSize = value;
                 SettingsService.Instance.SaveSettings(settings);
             }
+            if (!_applyingFolderViewState) PersistCurrentFolderViewState();
         }
     }
 
@@ -292,6 +311,34 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public Avalonia.Controls.DataGridLength OwnerGroupColumnWidthDisplay =>
         new Avalonia.Controls.DataGridLength(ColumnWidthOwnerGroup > 0 ? ColumnWidthOwnerGroup : 115, Avalonia.Controls.DataGridLengthUnitType.Pixel);
 
+    public string NameColumnHeader => BuildColumnHeader("Name", "Name");
+    public string ExtColumnHeader => BuildColumnHeader("Ext", "Extension");
+    public string SizeColumnHeader => BuildColumnHeader("Size", "Size");
+    public string ModifiedColumnHeader => BuildColumnHeader("Date Modified", "Modified");
+    public string CreatedColumnHeader => BuildColumnHeader("Date Created", "Created");
+    public string AccessedColumnHeader => BuildColumnHeader("Date Accessed", "Accessed");
+    public string TypeColumnHeader => BuildColumnHeader("Type", "Type");
+    public string AttributesColumnHeader => BuildColumnHeader("Attributes", "Attributes");
+    public string PermissionsColumnHeader => BuildColumnHeader("Permissions", "Permissions");
+    public string OwnerGroupColumnHeader => BuildColumnHeader("Owner:Group", "OwnerGroup");
+
+    private string BuildColumnHeader(string title, string sortColumn) =>
+        SelectedTab?.SortColumn == sortColumn ? $"{title} {(SelectedTab.SortAscending ? "↑" : "↓")}" : title;
+
+    public void NotifySortHeadersChanged()
+    {
+        OnPropertyChanged(nameof(NameColumnHeader));
+        OnPropertyChanged(nameof(ExtColumnHeader));
+        OnPropertyChanged(nameof(SizeColumnHeader));
+        OnPropertyChanged(nameof(ModifiedColumnHeader));
+        OnPropertyChanged(nameof(CreatedColumnHeader));
+        OnPropertyChanged(nameof(AccessedColumnHeader));
+        OnPropertyChanged(nameof(TypeColumnHeader));
+        OnPropertyChanged(nameof(AttributesColumnHeader));
+        OnPropertyChanged(nameof(PermissionsColumnHeader));
+        OnPropertyChanged(nameof(OwnerGroupColumnHeader));
+    }
+
     public void NotifyColumnWidthsChanged()
     {
         OnPropertyChanged(nameof(NameColumnWidthDisplay));
@@ -306,10 +353,16 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(OwnerGroupColumnWidthDisplay));
     }
 
-    public ExplorerPaneViewModel(string paneId, string? initialPath = null, string label = "")
+    public ExplorerPaneViewModel(
+        string paneId,
+        string? initialPath = null,
+        string label = "",
+        FolderViewStateService? folderViewStateService = null)
     {
         PaneId = paneId;
         PaneLabel = label;
+        _folderViewStateService = folderViewStateService ?? FolderViewStateService.Instance;
+        _lastObservedSettings = SettingsService.Instance.CurrentSettings.Clone();
         var startPath = initialPath ?? FileSystemService.DefaultRootPath;
 
         LoadColumnSettings();
@@ -323,11 +376,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
         _clipboardChangedHandler = () => OnPropertyChanged(nameof(CanPaste));
         _quickAccessChangedHandler = NotifyContextMenuProperties;
-        _settingsChangedHandler = s =>
-        {
-            LoadColumnSettings();
-            NotifyColumnWidthsChanged();
-        };
+        _settingsChangedHandler = ApplyChangedSettingsToActiveFolder;
 
         ClipboardFileService.ClipboardChanged += _clipboardChangedHandler;
         QuickAccessService.Instance.QuickAccessChanged += _quickAccessChangedHandler;
@@ -367,6 +416,230 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         ThumbnailSize = s.ThumbnailSize >= 64 && s.ThumbnailSize <= 320 ? s.ThumbnailSize : 144.0;
     }
 
+    private void ApplyChangedSettingsToActiveFolder(AppSettings settings)
+    {
+        var old = _lastObservedSettings;
+        bool layoutChanged = false;
+        _applyingFolderViewState = true;
+        try
+        {
+            if (settings.ViewMode != old.ViewMode) { ViewMode = settings.ViewMode == "Thumbnails" ? "Thumbnails" : "Details"; layoutChanged = true; }
+            if (settings.ThumbnailSize != old.ThumbnailSize) { ThumbnailSize = settings.ThumbnailSize; layoutChanged = true; }
+            if (settings.SmartColumnSizing != old.SmartColumnSizing) { SmartColumnSizing = settings.SmartColumnSizing; layoutChanged = true; }
+            if (settings.ShowColumnExt != old.ShowColumnExt) { ShowColumnExt = settings.ShowColumnExt; layoutChanged = true; }
+            if (settings.ShowColumnSize != old.ShowColumnSize) { ShowColumnSize = settings.ShowColumnSize; layoutChanged = true; }
+            if (settings.ShowColumnDateModified != old.ShowColumnDateModified) { ShowColumnDateModified = settings.ShowColumnDateModified; layoutChanged = true; }
+            if (settings.ShowColumnDateCreated != old.ShowColumnDateCreated) { ShowColumnDateCreated = settings.ShowColumnDateCreated; layoutChanged = true; }
+            if (settings.ShowColumnDateAccessed != old.ShowColumnDateAccessed) { ShowColumnDateAccessed = settings.ShowColumnDateAccessed; layoutChanged = true; }
+            if (settings.ShowColumnAttributes != old.ShowColumnAttributes) { ShowColumnAttributes = settings.ShowColumnAttributes; layoutChanged = true; }
+            if (settings.ShowColumnItemType != old.ShowColumnItemType) { ShowColumnItemType = settings.ShowColumnItemType; layoutChanged = true; }
+            if (settings.ShowColumnPermissions != old.ShowColumnPermissions) { ShowColumnPermissions = settings.ShowColumnPermissions; layoutChanged = true; }
+            if (settings.ShowColumnOwnerGroup != old.ShowColumnOwnerGroup) { ShowColumnOwnerGroup = settings.ShowColumnOwnerGroup; layoutChanged = true; }
+            if (settings.ColumnWidthName != old.ColumnWidthName) { ColumnWidthName = settings.ColumnWidthName; layoutChanged = true; }
+            if (settings.ColumnWidthExt != old.ColumnWidthExt) { ColumnWidthExt = settings.ColumnWidthExt; layoutChanged = true; }
+            if (settings.ColumnWidthSize != old.ColumnWidthSize) { ColumnWidthSize = settings.ColumnWidthSize; layoutChanged = true; }
+            if (settings.ColumnWidthDateModified != old.ColumnWidthDateModified) { ColumnWidthDateModified = settings.ColumnWidthDateModified; layoutChanged = true; }
+            if (settings.ColumnWidthDateCreated != old.ColumnWidthDateCreated) { ColumnWidthDateCreated = settings.ColumnWidthDateCreated; layoutChanged = true; }
+            if (settings.ColumnWidthDateAccessed != old.ColumnWidthDateAccessed) { ColumnWidthDateAccessed = settings.ColumnWidthDateAccessed; layoutChanged = true; }
+            if (settings.ColumnWidthItemType != old.ColumnWidthItemType) { ColumnWidthItemType = settings.ColumnWidthItemType; layoutChanged = true; }
+            if (settings.ColumnWidthAttributes != old.ColumnWidthAttributes) { ColumnWidthAttributes = settings.ColumnWidthAttributes; layoutChanged = true; }
+            if (settings.ColumnWidthPermissions != old.ColumnWidthPermissions) { ColumnWidthPermissions = settings.ColumnWidthPermissions; layoutChanged = true; }
+            if (settings.ColumnWidthOwnerGroup != old.ColumnWidthOwnerGroup) { ColumnWidthOwnerGroup = settings.ColumnWidthOwnerGroup; layoutChanged = true; }
+            if (settings.TabWidth != old.TabWidth) TabWidth = settings.TabWidth;
+        }
+        finally
+        {
+            _applyingFolderViewState = false;
+            _lastObservedSettings = settings.Clone();
+        }
+
+        if (layoutChanged)
+        {
+            NotifyColumnWidthsChanged();
+            RefreshMetadataRequirementsIfChanged();
+            PersistCurrentFolderViewState();
+        }
+    }
+
+    public void PersistCurrentFolderViewState() => PersistCurrentFolderViewState(_activeFolderStatePath, SelectedTab);
+
+    private void PersistCurrentFolderViewState(string? path, ExplorerTabViewModel? tab)
+    {
+        if (_applyingFolderViewState || string.IsNullOrWhiteSpace(path) || tab == null) return;
+        _folderViewStateService.Set(path, new FolderViewState
+        {
+            ViewMode = ViewMode,
+            ThumbnailSize = ThumbnailSize,
+            SortColumn = tab.SortColumn,
+            SortAscending = tab.SortAscending,
+            SmartColumnSizing = SmartColumnSizing,
+            ShowColumnExt = ShowColumnExt,
+            ShowColumnSize = ShowColumnSize,
+            ShowColumnDateModified = ShowColumnDateModified,
+            ShowColumnDateCreated = ShowColumnDateCreated,
+            ShowColumnDateAccessed = ShowColumnDateAccessed,
+            ShowColumnAttributes = ShowColumnAttributes,
+            ShowColumnItemType = ShowColumnItemType,
+            ShowColumnPermissions = ShowColumnPermissions,
+            ShowColumnOwnerGroup = ShowColumnOwnerGroup,
+            ColumnWidthName = ColumnWidthName,
+            ColumnWidthExt = ColumnWidthExt,
+            ColumnWidthSize = ColumnWidthSize,
+            ColumnWidthDateModified = ColumnWidthDateModified,
+            ColumnWidthDateCreated = ColumnWidthDateCreated,
+            ColumnWidthDateAccessed = ColumnWidthDateAccessed,
+            ColumnWidthItemType = ColumnWidthItemType,
+            ColumnWidthAttributes = ColumnWidthAttributes,
+            ColumnWidthPermissions = ColumnWidthPermissions,
+            ColumnWidthOwnerGroup = ColumnWidthOwnerGroup,
+            ColumnOrder = new List<string>(CurrentColumnOrder),
+            DetailsHorizontalOffset = DetailsHorizontalOffset,
+            DetailsVerticalOffset = DetailsVerticalOffset,
+            ThumbnailVerticalOffset = ThumbnailVerticalOffset,
+            DetailsTopItemPath = DetailsTopItemPath,
+            ThumbnailTopItemPath = ThumbnailTopItemPath
+        });
+    }
+
+    private void ApplyFolderViewState(ExplorerTabViewModel tab)
+    {
+        _activeFolderStatePath = tab.CurrentPath;
+        FolderViewState state = _folderViewStateService.TryGet(tab.CurrentPath, out var saved)
+            ? saved
+            : CreateDefaultFolderViewState();
+
+        _applyingFolderViewState = true;
+        try
+        {
+            ViewMode = state.ViewMode == "Thumbnails" ? "Thumbnails" : "Details";
+            ThumbnailSize = double.IsFinite(state.ThumbnailSize) && state.ThumbnailSize is >= 64 and <= 320
+                ? state.ThumbnailSize : 144;
+            tab.SortColumn = NormalizeSortColumn(state.SortColumn);
+            tab.SortAscending = state.SortAscending;
+            SmartColumnSizing = state.SmartColumnSizing;
+            ShowColumnExt = state.ShowColumnExt;
+            ShowColumnSize = state.ShowColumnSize;
+            ShowColumnDateModified = state.ShowColumnDateModified;
+            ShowColumnDateCreated = state.ShowColumnDateCreated;
+            ShowColumnDateAccessed = state.ShowColumnDateAccessed;
+            ShowColumnAttributes = state.ShowColumnAttributes;
+            ShowColumnItemType = state.ShowColumnItemType;
+            ShowColumnPermissions = state.ShowColumnPermissions;
+            ShowColumnOwnerGroup = state.ShowColumnOwnerGroup;
+            ColumnWidthName = PositiveOr(state.ColumnWidthName, 280);
+            ColumnWidthExt = PositiveOr(state.ColumnWidthExt, 65);
+            ColumnWidthSize = PositiveOr(state.ColumnWidthSize, 95);
+            ColumnWidthDateModified = PositiveOr(state.ColumnWidthDateModified, 150);
+            ColumnWidthDateCreated = PositiveOr(state.ColumnWidthDateCreated, 150);
+            ColumnWidthDateAccessed = PositiveOr(state.ColumnWidthDateAccessed, 150);
+            ColumnWidthItemType = PositiveOr(state.ColumnWidthItemType, 110);
+            ColumnWidthAttributes = PositiveOr(state.ColumnWidthAttributes, 90);
+            ColumnWidthPermissions = PositiveOr(state.ColumnWidthPermissions, 110);
+            ColumnWidthOwnerGroup = PositiveOr(state.ColumnWidthOwnerGroup, 110);
+            CurrentColumnOrder = state.ColumnOrder?.ToArray() ?? Array.Empty<string>();
+            DetailsHorizontalOffset = NonNegative(state.DetailsHorizontalOffset);
+            DetailsVerticalOffset = NonNegative(state.DetailsVerticalOffset);
+            ThumbnailVerticalOffset = NonNegative(state.ThumbnailVerticalOffset);
+            DetailsTopItemPath = state.DetailsTopItemPath;
+            ThumbnailTopItemPath = state.ThumbnailTopItemPath;
+        }
+        finally
+        {
+            _applyingFolderViewState = false;
+        }
+
+        NotifyColumnWidthsChanged();
+        NotifySortHeadersChanged();
+        RebuildThumbnailRows();
+        bool metadataChanged = tab.SetDirectoryReadOptions(new DirectoryReadOptions(
+            state.ShowColumnDateCreated,
+            state.ShowColumnDateAccessed,
+            state.ShowColumnPermissions,
+            state.ShowColumnOwnerGroup));
+        if (metadataChanged) _ = tab.RefreshAsync();
+        else _ = tab.ApplyFilterAsync();
+        FolderViewStateRestored?.Invoke();
+    }
+
+    private FolderViewState CreateDefaultFolderViewState()
+    {
+        var s = SettingsService.Instance.CurrentSettings;
+        return new FolderViewState
+        {
+            ViewMode = s.ViewMode,
+            ThumbnailSize = s.ThumbnailSize,
+            SmartColumnSizing = s.SmartColumnSizing,
+            ShowColumnExt = s.ShowColumnExt,
+            ShowColumnSize = s.ShowColumnSize,
+            ShowColumnDateModified = s.ShowColumnDateModified,
+            ShowColumnDateCreated = s.ShowColumnDateCreated,
+            ShowColumnDateAccessed = s.ShowColumnDateAccessed,
+            ShowColumnAttributes = s.ShowColumnAttributes,
+            ShowColumnItemType = s.ShowColumnItemType,
+            ShowColumnPermissions = s.ShowColumnPermissions,
+            ShowColumnOwnerGroup = s.ShowColumnOwnerGroup,
+            ColumnWidthName = s.ColumnWidthName,
+            ColumnWidthExt = s.ColumnWidthExt,
+            ColumnWidthSize = s.ColumnWidthSize,
+            ColumnWidthDateModified = s.ColumnWidthDateModified,
+            ColumnWidthDateCreated = s.ColumnWidthDateCreated,
+            ColumnWidthDateAccessed = s.ColumnWidthDateAccessed,
+            ColumnWidthItemType = s.ColumnWidthItemType,
+            ColumnWidthAttributes = s.ColumnWidthAttributes,
+            ColumnWidthPermissions = s.ColumnWidthPermissions,
+            ColumnWidthOwnerGroup = s.ColumnWidthOwnerGroup
+        };
+    }
+
+    private static double PositiveOr(double value, double fallback) =>
+        double.IsFinite(value) && value > 0 ? value : fallback;
+
+    private static double NonNegative(double value) => double.IsFinite(value) ? Math.Max(0, value) : 0;
+
+    private static string NormalizeSortColumn(string? value) => value switch
+    {
+        "Name" or "Extension" or "Size" or "Modified" or "Created" or "Accessed" or
+        "Type" or "Attributes" or "Permissions" or "OwnerGroup" => value,
+        _ => "Name"
+    };
+
+    private void RefreshMetadataRequirementsIfChanged()
+    {
+        if (SelectedTab == null) return;
+        if (SelectedTab.SetDirectoryReadOptions(new DirectoryReadOptions(
+                ShowColumnDateCreated,
+                ShowColumnDateAccessed,
+                ShowColumnPermissions,
+                ShowColumnOwnerGroup)))
+        {
+            _ = SelectedTab.RefreshAsync();
+        }
+    }
+
+    public void UpdateFolderScrollState(
+        double detailsHorizontal,
+        double detailsVertical,
+        double thumbnailVertical,
+        bool persist = true)
+    {
+        DetailsHorizontalOffset = Math.Max(0, detailsHorizontal);
+        DetailsVerticalOffset = Math.Max(0, detailsVertical);
+        ThumbnailVerticalOffset = Math.Max(0, thumbnailVertical);
+        if (persist) PersistCurrentFolderViewState();
+    }
+
+    public void SetCurrentColumnOrder(IEnumerable<string> headers)
+    {
+        CurrentColumnOrder = headers.Where(header => !string.IsNullOrWhiteSpace(header)).Distinct().ToArray();
+        PersistCurrentFolderViewState();
+    }
+
+    public void UpdateFolderViewportAnchors(string? detailsTopItemPath, string? thumbnailTopItemPath)
+    {
+        DetailsTopItemPath = detailsTopItemPath;
+        ThumbnailTopItemPath = thumbnailTopItemPath;
+    }
+
     [RelayCommand]
     public void ToggleSmartSizing()
     {
@@ -375,6 +648,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         s.SmartColumnSizing = SmartColumnSizing;
         SettingsService.Instance.SaveSettings(s);
         NotifyColumnWidthsChanged();
+        PersistCurrentFolderViewState();
     }
 
     [RelayCommand]
@@ -406,6 +680,9 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         s.ColumnWidthOwnerGroup = 115;
         SettingsService.Instance.SaveSettings(s);
         NotifyColumnWidthsChanged();
+        CurrentColumnOrder = DefaultColumnOrder;
+        PersistCurrentFolderViewState();
+        FolderViewStateRestored?.Invoke();
     }
 
     [RelayCommand]
@@ -459,6 +736,8 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
                 break;
         }
         SettingsService.Instance.SaveSettings(s);
+        PersistCurrentFolderViewState();
+        RefreshMetadataRequirementsIfChanged();
     }
 
     public bool IsSuppressingPreview { get; set; }
@@ -479,7 +758,9 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         {
             if (e.PropertyName == nameof(ExplorerTabViewModel.CurrentPath) && tab == SelectedTab)
             {
+                PersistCurrentFolderViewState(_activeFolderStatePath, tab);
                 RawAddressInput = tab.CurrentPath;
+                ApplyFolderViewState(tab);
             }
             else if (e.PropertyName == nameof(ExplorerTabViewModel.SelectedItem) && tab == SelectedTab)
             {
@@ -492,6 +773,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             else if (e.PropertyName == nameof(ExplorerTabViewModel.FilteredItems) && tab == SelectedTab)
             {
                 RebuildThumbnailRows();
+                FolderViewStateRestored?.Invoke();
             }
         };
 
@@ -530,16 +812,18 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
         if (value != null)
         {
+            ApplyFolderViewState(value);
             value.IsSelected = true;
             value.LastActiveTime = DateTime.Now;
             RawAddressInput = value.CurrentPath;
             NotifyContextMenuProperties();
             FileSelectedForPreview?.Invoke(value.SelectedItem);
-            if (IsThumbnailView)
-            {
-                RebuildThumbnailRows();
-            }
         }
+    }
+
+    partial void OnSelectedTabChanging(ExplorerTabViewModel? oldValue, ExplorerTabViewModel? newValue)
+    {
+        PersistCurrentFolderViewState(_activeFolderStatePath, oldValue);
     }
 
     [RelayCommand]
@@ -929,6 +1213,8 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         if (_isDisposed) return;
+        PersistCurrentFolderViewState();
+        _folderViewStateService.Flush();
         _isDisposed = true;
 
         ClipboardFileService.ClipboardChanged -= _clipboardChangedHandler;

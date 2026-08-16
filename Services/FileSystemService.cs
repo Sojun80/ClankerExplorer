@@ -12,6 +12,19 @@ using ClankerExplorer.Models;
 
 namespace ClankerExplorer.Services;
 
+public readonly record struct DirectoryReadOptions(
+    bool LoadCreatedTime,
+    bool LoadAccessedTime,
+    bool LoadPermissions,
+    bool LoadOwnerGroup)
+{
+    public static DirectoryReadOptions FromSettings(AppSettings settings) => new(
+        settings.ShowColumnDateCreated,
+        settings.ShowColumnDateAccessed,
+        settings.ShowColumnPermissions,
+        settings.ShowColumnOwnerGroup);
+}
+
 public class FileSystemService
 {
     public static FileSystemService Instance { get; } = new();
@@ -245,8 +258,17 @@ public class FileSystemService
         return ReadDirectoryAsync(dirPath).GetAwaiter().GetResult();
     }
 
-    public async Task<(List<FileItem> items, string? error)> ReadDirectoryAsync(string dirPath, CancellationToken cancellationToken = default)
+    public async Task<(List<FileItem> items, string? error)> ReadDirectoryAsync(
+        string dirPath,
+        CancellationToken cancellationToken = default,
+        DirectoryReadOptions? readOptions = null)
     {
+        var options = readOptions ?? DirectoryReadOptions.FromSettings(SettingsService.Instance.CurrentSettings);
+        bool loadCreatedTime = options.LoadCreatedTime;
+        bool loadAccessedTime = options.LoadAccessedTime;
+        bool loadPermissions = options.LoadPermissions;
+        bool loadOwnerGroup = options.LoadOwnerGroup;
+
         return await Task.Run(() =>
         {
             var items = new List<FileItem>();
@@ -269,7 +291,7 @@ public class FileSystemService
                     try
                     {
                         bool isDir = (info.Attributes & FileAttributes.Directory) != 0;
-                        bool isSymlink = (info.Attributes & FileAttributes.ReparsePoint) != 0 || info.LinkTarget != null;
+                        bool isSymlink = (info.Attributes & FileAttributes.ReparsePoint) != 0;
                         bool isHidden = (info.Attributes & FileAttributes.Hidden) != 0 || info.Name.StartsWith(".");
                         bool isSystem = (info.Attributes & FileAttributes.System) != 0;
                         bool isReadOnly = (info.Attributes & FileAttributes.ReadOnly) != 0;
@@ -281,11 +303,7 @@ public class FileSystemService
                             try { size = fi.Length; } catch { }
                         }
 
-                        var attrChars = new List<string>();
-                        if (isReadOnly) attrChars.Add("R");
-                        if (isHidden) attrChars.Add("H");
-                        if (isSystem) attrChars.Add("S");
-                        if (isArchive) attrChars.Add("A");
+                        string attributes = FormatAttributes(isReadOnly, isHidden, isSystem, isArchive);
 
                         items.Add(new FileItem
                         {
@@ -298,15 +316,15 @@ public class FileSystemService
                             SizeBytes = size,
                             FormattedSize = isDir ? "<DIR>" : FormatBytes(size),
                             ModifiedTime = SafeGetTime(() => info.LastWriteTime),
-                            CreatedTime = SafeGetTime(() => info.CreationTime),
-                            AccessedTime = SafeGetTime(() => info.LastAccessTime),
+                            CreatedTime = loadCreatedTime ? SafeGetTime(() => info.CreationTime) : DateTime.MinValue,
+                            AccessedTime = loadAccessedTime ? SafeGetTime(() => info.LastAccessTime) : DateTime.MinValue,
                             IsHidden = isHidden,
                             IsSystem = isSystem,
                             IsReadOnly = isReadOnly,
                             IsArchive = isArchive,
-                            AttributesString = string.Join(" ", attrChars),
-                            PermissionsString = GetPermissionsDisplay(info, isDir, isReadOnly),
-                            OwnerGroupString = GetLinuxOwnerGroup(info)
+                            AttributesString = attributes,
+                            PermissionsString = loadPermissions ? GetPermissionsDisplay(info, isDir, isReadOnly) : string.Empty,
+                            OwnerGroupString = loadOwnerGroup ? GetLinuxOwnerGroup(info) : string.Empty
                         });
                     }
                     catch (OperationCanceledException) { throw; }
@@ -328,7 +346,7 @@ public class FileSystemService
                     }
                 }
 
-                return (items, null);
+                return (items, (string?)null);
             }
             catch (OperationCanceledException)
             {
@@ -344,6 +362,18 @@ public class FileSystemService
     private static DateTime SafeGetTime(Func<DateTime> getter)
     {
         try { return getter(); } catch { return DateTime.MinValue; }
+    }
+
+    private static string FormatAttributes(bool readOnly, bool hidden, bool system, bool archive)
+    {
+        int mask = (readOnly ? 8 : 0) | (hidden ? 4 : 0) | (system ? 2 : 0) | (archive ? 1 : 0);
+        return mask switch
+        {
+            0 => "", 1 => "A", 2 => "S", 3 => "S A",
+            4 => "H", 5 => "H A", 6 => "H S", 7 => "H S A",
+            8 => "R", 9 => "R A", 10 => "R S", 11 => "R S A",
+            12 => "R H", 13 => "R H A", 14 => "R H S", _ => "R H S A"
+        };
     }
 
     public async Task<FilePreviewData> GetPreviewDataAsync(string filePath, CancellationToken cancellationToken = default)

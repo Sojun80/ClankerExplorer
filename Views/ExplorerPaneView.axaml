@@ -474,7 +474,7 @@
 
       <DataGrid.Columns>
         <!-- Name Column (Segoe UI Variable, Semibold folders, Regular files) -->
-        <DataGridTemplateColumn Header="Name" Width="{Binding NameColumnWidthDisplay}" MinWidth="140" SortMemberPath="Name">
+        <DataGridTemplateColumn Header="{Binding NameColumnHeader}" Width="{Binding NameColumnWidthDisplay}" MinWidth="140" SortMemberPath="Name">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
@@ -503,7 +503,7 @@
         </DataGridTemplateColumn>
 
         <!-- Extension Tag Column (Clear tag pill, centered, comfortably sized) -->
-        <DataGridTemplateColumn Header="Ext" Width="{Binding ExtColumnWidthDisplay}" MinWidth="70" SortMemberPath="Extension"
+        <DataGridTemplateColumn Header="{Binding ExtColumnHeader}" Width="{Binding ExtColumnWidthDisplay}" MinWidth="70" SortMemberPath="Extension"
                                 IsVisible="{Binding ShowColumnExt}">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
@@ -520,7 +520,7 @@
         </DataGridTemplateColumn>
 
         <!-- Size Column with Logarithmic Size Bar Visualizer -->
-        <DataGridTemplateColumn Header="Size" Width="{Binding SizeColumnWidthDisplay}" MinWidth="95"
+        <DataGridTemplateColumn Header="{Binding SizeColumnHeader}" Width="{Binding SizeColumnWidthDisplay}" MinWidth="95"
                                 SortMemberPath="SizeBytes" IsVisible="{Binding ShowColumnSize}">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
@@ -545,40 +545,40 @@
         </DataGridTemplateColumn>
 
         <!-- Date Modified Column (Cascadia Mono, Chronological Sort) -->
-        <DataGridTextColumn Header="Date Modified" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="140"
+        <DataGridTextColumn Header="{Binding ModifiedColumnHeader}" Width="{Binding ModifiedColumnWidthDisplay}" MinWidth="140"
                             Binding="{Binding FormattedModifiedTime}" SortMemberPath="ModifiedTime"
                             IsVisible="{Binding ShowColumnDateModified}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
         <!-- Date Created Column (Cascadia Mono, Chronological Sort) -->
-        <DataGridTextColumn Header="Date Created" Width="{Binding CreatedColumnWidthDisplay}" MinWidth="140"
+        <DataGridTextColumn Header="{Binding CreatedColumnHeader}" Width="{Binding CreatedColumnWidthDisplay}" MinWidth="140"
                             Binding="{Binding FormattedCreatedTime}" SortMemberPath="CreatedTime"
                             IsVisible="{Binding ShowColumnDateCreated}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
         <!-- Date Accessed Column (Cascadia Mono, Chronological Sort) -->
-        <DataGridTextColumn Header="Date Accessed" Width="{Binding AccessedColumnWidthDisplay}" MinWidth="140"
+        <DataGridTextColumn Header="{Binding AccessedColumnHeader}" Width="{Binding AccessedColumnWidthDisplay}" MinWidth="140"
                             Binding="{Binding FormattedAccessedTime}" SortMemberPath="AccessedTime"
                             IsVisible="{Binding ShowColumnDateAccessed}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
         <!-- Item Type Column (Segoe UI Variable) -->
-        <DataGridTextColumn Header="Type" Width="{Binding TypeColumnWidthDisplay}" MinWidth="90" Binding="{Binding ItemTypeDisplay}"
+        <DataGridTextColumn Header="{Binding TypeColumnHeader}" Width="{Binding TypeColumnWidthDisplay}" MinWidth="90" Binding="{Binding ItemTypeDisplay}"
                             IsVisible="{Binding ShowColumnItemType}"
                             FontFamily="{DynamicResource AppUiFont}" FontSize="11.5"/>
 
         <!-- Attributes Column (Cascadia Mono) -->
-        <DataGridTextColumn Header="Attributes" Width="{Binding AttributesColumnWidthDisplay}" MinWidth="75" Binding="{Binding AttributesString}"
+        <DataGridTextColumn Header="{Binding AttributesColumnHeader}" Width="{Binding AttributesColumnWidthDisplay}" MinWidth="75" Binding="{Binding AttributesString}"
                             IsVisible="{Binding ShowColumnAttributes}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11.5"/>
 
         <!-- Permissions (Linux / POSIX) Column (Cascadia Mono) -->
-        <DataGridTextColumn Header="Permissions" Width="{Binding PermissionsColumnWidthDisplay}" MinWidth="85" Binding="{Binding PermissionsString}"
+        <DataGridTextColumn Header="{Binding PermissionsColumnHeader}" Width="{Binding PermissionsColumnWidthDisplay}" MinWidth="85" Binding="{Binding PermissionsString}"
                             IsVisible="{Binding ShowColumnPermissions}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
 
         <!-- Owner / Group (Linux / POSIX) Column (Cascadia Mono) -->
-        <DataGridTextColumn Header="Owner:Group" Width="{Binding OwnerGroupColumnWidthDisplay}" MinWidth="85" Binding="{Binding OwnerGroupString}"
+        <DataGridTextColumn Header="{Binding OwnerGroupColumnHeader}" Width="{Binding OwnerGroupColumnWidthDisplay}" MinWidth="85" Binding="{Binding OwnerGroupString}"
                             IsVisible="{Binding ShowColumnOwnerGroup}"
                             FontFamily="{DynamicResource AppMonoFont}" FontSize="11"/>
       </DataGrid.Columns>

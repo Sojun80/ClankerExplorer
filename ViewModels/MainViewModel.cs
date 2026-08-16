@@ -40,13 +40,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _isScanningNetwork;
 
     [ObservableProperty]
-    private ExplorerPaneViewModel _leftPane;
+    private ExplorerPaneViewModel _leftPane = null!;
 
     [ObservableProperty]
-    private ExplorerPaneViewModel _rightPane;
+    private ExplorerPaneViewModel _rightPane = null!;
 
     [ObservableProperty]
-    private ExplorerPaneViewModel _activePane;
+    private ExplorerPaneViewModel _activePane = null!;
 
     [ObservableProperty]
     private InspectorViewModel _inspector = new();
@@ -252,7 +252,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var targetPane = pane == LeftPane ? RightPane : LeftPane;
             targetPane.AddNewTab(path);
         };
-        pane.RequestPinFolder += path => QuickAccessService.Instance.PinFolder(path);
         pane.RequestRename += item => RequestRename?.Invoke(item);
         pane.RequestProperties += item => RequestProperties?.Invoke(item);
         pane.RequestDeleteWithConfirmation += (item, perm) => RequestDeleteWithConfirmation?.Invoke(item, perm);

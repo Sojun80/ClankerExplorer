@@ -1,0 +1,376 @@
+ClankerExplorer is bogging down badly in very large folders, especially now that thumbnail generation exists.
+
+I want a serious performance pass focused on large-directory scalability, with thumbnailing treated as one major contributor but not assumed to be the only problem.
+
+The goal is simple:
+
+A folder with tens of thousands of files should remain responsive.
+
+Do not just patch the thumbnail code. Profile and analyze the whole large-folder path from enumeration through UI rendering, sorting, selection state, metadata, thumbnail scheduling, watcher behavior, and bindings.
+
+### Part 1 — Profile before optimizing
+
+First identify where the time is actually going.
+
+Instrument/profile:
+
+* directory enumeration
+* file metadata/stat calls
+* sorting
+* filtering
+* item/view-model construction
+* Avalonia binding/layout/rendering
+* virtualization behavior
+* thumbnail scheduling
+* thumbnail decoding
+* thumbnail cache lookup
+* filesystem watcher activity
+* selection-state updates
+* extension/type/icon resolution
+* inspector-related work
+* any per-item converters or property calculations
+
+Test with realistically large folders, including:
+
+* 1,000 items
+* 10,000 items
+* 50,000+ items where practical
+
+Report the biggest bottlenecks before and after changes.
+
+Do not optimize based only on assumptions.
+
+### Part 2 — Thumbnailing must be viewport-driven
+
+The thumbnail system must never generate thumbnails for an entire directory just because the folder was opened.
+
+Thumbnail work should be driven by what the user can actually see.
+
+Generate thumbnails only for:
+
+* currently visible items
+* a small prefetch zone around the visible viewport
+
+Use roughly 1–2 viewport heights above and below as a starting point.
+
+Priority should be:
+
+1. visible items
+2. near-visible/preload items
+3. nothing else
+
+Do NOT enqueue thousands of thumbnail jobs for off-screen items.
+
+This is critical.
+
+### Part 3 — Cancel/deprioritize stale thumbnail work
+
+If the user scrolls quickly:
+
+* stop caring about items that are now far outside the viewport
+* cancel pending work where safe
+* otherwise deprioritize/drop stale queued jobs
+* immediately prioritize the newly visible area
+
+Do not allow a huge backlog of outdated thumbnail jobs to build up behind fast scrolling.
+
+A user who rapidly scrolls past 5,000 files should not cause 5,000 thumbnails to decode afterward.
+
+### Part 4 — Scroll debounce
+
+Add a very small debounce before expensive thumbnail generation.
+
+For example, something in the ~50–150 ms range may be appropriate.
+
+Intent:
+
+* if the user is rapidly scrolling, avoid doing expensive decode work for content that is only visible for a few milliseconds
+* once scrolling settles, populate the current viewport quickly
+
+Do not make normal slow scrolling feel laggy.
+
+### Part 5 — Persistent thumbnail cache
+
+Add a disk-backed thumbnail cache so thumbnails do not need to be regenerated every time a folder is revisited.
+
+The cache key must invalidate automatically when the source changes.
+
+Use something equivalent to:
+
+* normalized/full source path
+* file size
+* last-modified timestamp
+* thumbnail size class/version
+
+Hash this into a stable cache key/file name.
+
+Do NOT use pathname alone.
+
+If a file changes, the old cached thumbnail should naturally stop matching.
+
+### Part 6 — Thumbnail size classes
+
+ClankerExplorer supports variable thumbnail sizes.
+
+Do not cache every arbitrary display size.
+
+Use a small set of canonical thumbnail sizes, for example:
+
+* 128
+* 256
+* 512
+
+or another sensible set based on the actual UI.
+
+Choose the nearest suitable cached size and scale for display.
+
+Avoid generating a new cache entry every time the user slightly changes thumbnail size.
+
+### Part 7 — Memory cache
+
+Add a bounded in-memory LRU cache for recently displayed thumbnails.
+
+Purpose:
+
+* scrolling away and back should be instant
+* switching tabs/folders briefly should not immediately force disk reads
+* memory use must remain bounded
+
+Do not hold every thumbnail from every visited folder forever.
+
+### Part 8 — Disk cache limits and eviction
+
+The disk cache may become large, and that is acceptable if it provides real performance value, but it must be bounded.
+
+Implement:
+
+* configurable maximum disk-cache size
+* LRU or similarly sensible eviction
+* cache cleanup that does not block normal UI interaction
+* a future-compatible way to expose “Clear thumbnail cache”
+
+A starting default in the low-single-digit GB range is reasonable, but choose based on implementation realities.
+
+Keep the limit configurable rather than hard-wiring policy into the architecture.
+
+### Part 9 — Worker pool / concurrency control
+
+Thumbnail generation must use bounded concurrency.
+
+Do not start an unbounded Task per item.
+
+Use a worker queue/pool with a small configurable concurrency limit.
+
+Different file types may have very different costs:
+
+* image decode is relatively cheap
+* video frame extraction can be expensive
+* 3D preview generation can be expensive
+* archives may eventually require separate handling
+
+Prevent a set of expensive thumbnails from consuming all CPU, disk bandwidth, or memory and making the file browser unresponsive.
+
+UI responsiveness has higher priority than thumbnail completion.
+
+### Part 10 — Virtualization audit
+
+Verify that the file list/grid itself is truly virtualized.
+
+I want proof that opening a folder with 50,000 items does not instantiate/render 50,000 full visual rows/tiles.
+
+Check:
+
+* actual Avalonia virtualization behavior
+* whether custom controls/templates accidentally disable virtualization
+* whether measuring/layout forces realization of all items
+* whether dynamic thumbnail sizing breaks virtualization
+* whether selection/marquee logic enumerates every visual element
+* whether converters/bindings force expensive work for every item
+
+Fix any accidental de-virtualization.
+
+This is one of the highest-priority parts of the audit.
+
+### Part 11 — Avoid expensive eager metadata work
+
+Inspect what happens when directory entries are loaded.
+
+Do not eagerly compute expensive metadata for every file if it is not immediately required.
+
+Examples to examine:
+
+* file type descriptions
+* icons
+* MIME/type probing
+* media metadata
+* image dimensions
+* duration
+* archive information
+* shell properties
+* hash calculations
+* expensive extension resolution
+
+Cheap basic filesystem metadata is fine where needed.
+
+Anything expensive should be lazy/on-demand and preferably viewport-driven.
+
+### Part 12 — Enumeration and progressive loading
+
+Analyze whether directory enumeration itself blocks UI responsiveness.
+
+For very large folders:
+
+* enumerate asynchronously where practical
+* avoid blocking the UI thread
+* consider progressive/batched population if that improves responsiveness
+* do not force the user to wait for every item before seeing anything
+
+If progressive insertion creates expensive repeated sorting/layout, design the batching carefully.
+
+The UI should become usable quickly even if background enumeration is still finishing.
+
+### Part 13 — Sorting performance
+
+Large-folder sorting needs explicit attention.
+
+Inspect:
+
+* repeated sorts during enumeration
+* expensive comparison functions
+* natural-sort implementation cost
+* string allocations
+* case normalization allocations
+* sorting triggered repeatedly by property changes
+* thumbnail completion accidentally triggering resorting
+
+Avoid sorting the entire collection repeatedly while thousands of entries arrive.
+
+Batch or defer sorts where appropriate.
+
+### Part 14 — UI-thread audit
+
+Find work currently happening on the Avalonia UI thread that does not belong there.
+
+Especially inspect:
+
+* filesystem access
+* decoding
+* cache reads/writes
+* sorting
+* metadata extraction
+* directory enumeration
+* watcher processing
+* icon resolution
+
+Move appropriate work off the UI thread.
+
+Only marshal the minimum state necessary back to the UI.
+
+### Part 15 — Filesystem watcher scaling
+
+Audit the watcher behavior in massive directories.
+
+Make sure large bursts of events do not cause:
+
+* complete directory reloads
+* repeated full sorts
+* repeated thumbnail invalidation
+* duplicate refreshes
+* UI-thread storms
+
+Coalesce/debounce watcher events where appropriate.
+
+Prefer incremental updates over rebuilding the entire folder view.
+
+### Part 16 — Allocation and GC pressure
+
+Look for avoidable allocations in hot paths.
+
+Especially:
+
+* per-item strings
+* converters
+* LINQ in frequently executed code
+* repeated path normalization
+* thumbnail buffers
+* bitmap lifetimes
+* event subscriptions
+* repeated collection reconstruction
+
+Use profiling evidence.
+
+Do not micro-optimize irrelevant code, but eliminate obvious high-volume allocation problems that cause GC pauses.
+
+### Part 17 — Fast scrolling must remain smooth
+
+Explicitly test this scenario:
+
+1. Open a directory with many thousands of image/video files.
+2. Rapidly scroll through it.
+3. Stop at a random location.
+
+Expected behavior:
+
+* scrolling stays responsive
+* UI does not freeze while thumbnails catch up
+* thumbnail jobs from long-passed items do not continue dominating work
+* visible thumbnails populate first
+* cached thumbnails appear almost immediately
+* CPU/memory usage settles rather than continuously climbing
+
+### Part 18 — Cache correctness
+
+Test cache invalidation scenarios:
+
+* file modified
+* file replaced with different contents but same name
+* file renamed
+* file deleted
+* thumbnail-size-class changes
+* cache-format/version changes
+
+Make cache versioning explicit so future thumbnail format changes can invalidate old entries safely.
+
+### Part 19 — Failure handling
+
+Thumbnail failures should be cheap.
+
+If a corrupt/unsupported file cannot generate a thumbnail:
+
+* fail gracefully
+* show the normal file-type icon/fallback
+* do not retry continuously while it remains visible
+* optionally cache a short-lived or source-version-specific failure state
+
+One bad media file must not create a hot loop.
+
+### Part 20 — Protect responsiveness over completeness
+
+This is the governing rule:
+
+The file browser must stay responsive even if thumbnails are still loading.
+
+It is always acceptable for a thumbnail to appear later.
+
+It is not acceptable for scrolling, selection, navigation, tab switching, or opening a huge folder to freeze because thumbnail work is trying to finish.
+
+### Deliverables
+
+After the work, report:
+
+* what the main bottlenecks were
+* profiling evidence for the worst offenders
+* what was changed
+* whether list/grid virtualization was functioning correctly
+* thumbnail scheduling strategy
+* cache architecture
+* worker/concurrency strategy
+* large-folder benchmark results before and after
+* remaining known scaling problems
+* any architectural issues that should be addressed later
+
+Add regression/performance tests where practical.
+
+Do not rewrite unrelated parts of ClankerExplorer just for cleanliness.
+
+This is a focused scalability pass aimed at making massive directories feel fast and keeping thumbnail mode usable instead of catastrophic.

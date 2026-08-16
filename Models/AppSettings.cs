@@ -32,6 +32,11 @@ public class AppSettings
     public double TabWidth { get; set; } = 150.0;
     public string ViewMode { get; set; } = "Details"; // "Details", "Thumbnails"
     public double ThumbnailSize { get; set; } = 144.0; // 64.0 to 320.0
+    public int ThumbnailWorkerCount { get; set; } = 3;
+    public long ThumbnailMemoryCacheMaxBytes { get; set; } = 256L * 1024 * 1024;
+    public long ThumbnailDiskCacheMaxBytes { get; set; } = 2L * 1024 * 1024 * 1024;
+    public int ThumbnailScrollDebounceMilliseconds { get; set; } = 90;
+    public double ThumbnailPrefetchViewports { get; set; } = 1.5;
     public bool StartInDualPane { get; set; } = false;
     public bool ShowInspectorOnStartup { get; set; } = true;
     public bool ConfirmBeforeDelete { get; set; } = true;
@@ -84,6 +89,11 @@ public class AppSettings
             TabWidth = this.TabWidth,
             ViewMode = this.ViewMode,
             ThumbnailSize = this.ThumbnailSize,
+            ThumbnailWorkerCount = this.ThumbnailWorkerCount,
+            ThumbnailMemoryCacheMaxBytes = this.ThumbnailMemoryCacheMaxBytes,
+            ThumbnailDiskCacheMaxBytes = this.ThumbnailDiskCacheMaxBytes,
+            ThumbnailScrollDebounceMilliseconds = this.ThumbnailScrollDebounceMilliseconds,
+            ThumbnailPrefetchViewports = this.ThumbnailPrefetchViewports,
             StartInDualPane = this.StartInDualPane,
             ShowInspectorOnStartup = this.ShowInspectorOnStartup,
             ConfirmBeforeDelete = this.ConfirmBeforeDelete,
