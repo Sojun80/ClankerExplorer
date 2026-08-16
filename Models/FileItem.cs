@@ -167,13 +167,27 @@ public partial class FileItem : ObservableObject
     {
         get
         {
-            _fileIcon ??= FileIconService.Instance.GetFileIcon(this);
+            _fileIcon ??= FileIconService.Instance.GetFileIcon(this, isLarge: false);
             return _fileIcon;
         }
         set => _fileIcon = value;
     }
 
     public bool HasFileIcon => FileIcon != null;
+
+    // High-Resolution Large File / Folder Icon (Jumbo 256x256 for Thumbnail / Grid View)
+    private IImage? _largeIcon;
+    public IImage? LargeIcon
+    {
+        get
+        {
+            _largeIcon ??= FileIconService.Instance.GetFileIcon(this, isLarge: true);
+            return _largeIcon;
+        }
+        set => _largeIcon = value;
+    }
+
+    public bool HasLargeIcon => LargeIcon != null;
 
     // Visual Helpers
     public string IconKind => IsDirectory ? "Folder" : GetFileIconKind(Extension);

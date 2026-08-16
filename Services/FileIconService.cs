@@ -9,24 +9,31 @@ using ClankerExplorer.Models;
 namespace ClankerExplorer.Services;
 
 /// <summary>
-/// High-performance file icon service providing high-resolution Windows-associated icons with memory caching.
+/// High-performance file icon service providing pristine high-resolution (up to 256x256 Jumbo)
+/// Windows-associated icons with size-tiered memory caching.
 /// </summary>
 public class FileIconService
 {
     private static readonly Lazy<FileIconService> _instance = new(() => new FileIconService());
     public static FileIconService Instance => _instance.Value;
 
-    private readonly ConcurrentDictionary<string, IImage?> _extensionIconCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, IImage?> _fileIconCache = new(StringComparer.OrdinalIgnoreCase);
-    private IImage? _defaultGenericFileIcon;
+    // Separate caches for small (16-32px) and large (128-256px) icons
+    private readonly ConcurrentDictionary<string, IImage?> _extensionSmallIconCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, IImage?> _extensionLargeIconCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, IImage?> _fileSmallIconCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, IImage?> _fileLargeIconCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private IImage? _defaultGenericSmallIcon;
+    private IImage? _defaultGenericLargeIcon;
+    private IImage? _folderSmallIcon;
+    private IImage? _folderLargeIcon;
 
     private static readonly HashSet<string> PerFileIconExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".exe", ".ico", ".lnk", ".url", ".appx", ".msi"
     };
 
-    private static readonly Guid IID_IShellItemImageFactory = new("bcc18b79-ba16-442f-80c0-d459e9f86333");
-    private static readonly Guid IID_IImageList = new("46EB5926-582E-40E7-9F60-402D380C4F65");
+    private static readonly Guid IID_IUnknown = new("00000000-0000-0000-C000-000000000046");
 
     private const int SHIL_LARGE = 0;      // 32x32
     private const int SHIL_SMALL = 1;      // 16x16
@@ -34,103 +41,99 @@ public class FileIconService
     private const int SHIL_JUMBO = 4;      // 256x256
 
     private const uint SHGFI_ICON = 0x000000100;
+    private const uint SHGFI_SMALLICON = 0x000000001;
     private const uint SHGFI_LARGEICON = 0x000000000;
     private const uint SHGFI_SYSICONINDEX = 0x000004000;
     private const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
     private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
     private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
-    private const int ILD_TRANSPARENT = 0x00000001;
+    private const uint ILD_TRANSPARENT = 0x00000001;
     private const uint DI_NORMAL = 0x0003;
 
-    private IImage? _folderIcon;
-
-    public IImage? GetFileIcon(FileItem item)
+    public IImage? GetFileIcon(FileItem item, bool isLarge = false)
     {
         if (item == null) return null;
 
         if (item.IsDirectory)
         {
-            return GetFolderIcon();
+            return GetFolderIcon(isLarge);
         }
 
         var ext = item.Extension ?? string.Empty;
         var fullPath = item.FullPath;
 
-        // If file exists on disk, try exact extraction first (gives unique app/doc/media icons)
-        if (!string.IsNullOrEmpty(fullPath) && File.Exists(fullPath))
+        // If file exists on disk and is a per-file icon type (like .exe, .lnk) or if large icon is requested,
+        // try exact per-file shell extraction first
+        if (!string.IsNullOrEmpty(fullPath) && (PerFileIconExtensions.Contains(ext) || isLarge) && File.Exists(fullPath))
         {
-            return _fileIconCache.GetOrAdd(fullPath, path => ExtractFileIcon(path, isExactPath: true) ?? GetExtensionIcon(ext));
+            var cache = isLarge ? _fileLargeIconCache : _fileSmallIconCache;
+            return cache.GetOrAdd(fullPath, path => ExtractFileIcon(path, isExactPath: true, isLarge: isLarge) ?? GetExtensionIcon(ext, isLarge));
         }
 
-        return GetExtensionIcon(ext);
+        return GetExtensionIcon(ext, isLarge);
     }
 
-    public IImage? GetFolderIcon()
+    public IImage? GetFolderIcon(bool isLarge = false)
     {
-        if (_folderIcon != null) return _folderIcon;
+        if (isLarge && _folderLargeIcon != null) return _folderLargeIcon;
+        if (!isLarge && _folderSmallIcon != null) return _folderSmallIcon;
 
         if (OperatingSystem.IsWindows())
         {
             try
             {
-                // Try Jumbo (256x256) folder icon from System Image List
+                int imageListSize = isLarge ? SHIL_JUMBO : SHIL_SMALL;
                 var sfi = new SHFILEINFO();
                 IntPtr res = SHGetFileInfo("dummy", FILE_ATTRIBUTE_DIRECTORY, ref sfi, (uint)Marshal.SizeOf<SHFILEINFO>(), SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES);
                 if (res != IntPtr.Zero)
                 {
                     int iconIndex = sfi.iIcon;
-                    var iid = IID_IImageList;
-                    int hr = SHGetImageList(SHIL_JUMBO, ref iid, out var imageList);
-                    if (hr == 0 && imageList != null)
+                    var icon = ExtractFromImageListByIndex(iconIndex, imageListSize);
+                    if (icon != null)
                     {
-                        hr = imageList.GetIcon(iconIndex, ILD_TRANSPARENT, out IntPtr hIcon);
-                        if (hr == 0 && hIcon != IntPtr.Zero)
-                        {
-                            try
-                            {
-                                _folderIcon = ConvertHIconToBitmap(hIcon);
-                            }
-                            finally
-                            {
-                                DestroyIcon(hIcon);
-                            }
-                        }
+                        if (isLarge) _folderLargeIcon = icon;
+                        else _folderSmallIcon = icon;
+                        return icon;
                     }
                 }
 
-                if (_folderIcon == null)
+                // Fallback to standard SHGetFileInfo
+                uint flags = SHGFI_ICON | (isLarge ? SHGFI_LARGEICON : SHGFI_SMALLICON) | SHGFI_USEFILEATTRIBUTES;
+                SHGetFileInfo("dummy", FILE_ATTRIBUTE_DIRECTORY, ref sfi, (uint)Marshal.SizeOf<SHFILEINFO>(), flags);
+                if (sfi.hIcon != IntPtr.Zero)
                 {
-                    SHGetFileInfo("dummy", FILE_ATTRIBUTE_DIRECTORY, ref sfi, (uint)Marshal.SizeOf<SHFILEINFO>(), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES);
-                    if (sfi.hIcon != IntPtr.Zero)
+                    try
                     {
-                        try
-                        {
-                            _folderIcon = ConvertHIconToBitmap(sfi.hIcon);
-                        }
-                        finally
-                        {
-                            DestroyIcon(sfi.hIcon);
-                        }
+                        var icon = ConvertHIconToBitmap(sfi.hIcon);
+                        if (isLarge) _folderLargeIcon = icon;
+                        else _folderSmallIcon = icon;
+                        return icon;
+                    }
+                    finally
+                    {
+                        DestroyIcon(sfi.hIcon);
                     }
                 }
             }
             catch { }
         }
 
-        return _folderIcon;
+        return isLarge ? _folderLargeIcon : _folderSmallIcon;
     }
 
-    public IImage? GetExtensionIcon(string extension)
+    public IImage? GetExtensionIcon(string extension, bool isLarge = false)
     {
+        var cache = isLarge ? _extensionLargeIconCache : _extensionSmallIconCache;
+
         if (string.IsNullOrEmpty(extension))
         {
-            return _extensionIconCache.GetOrAdd(string.Empty, _ => ExtractGenericFileIcon());
+            return cache.GetOrAdd(string.Empty, _ => ExtractGenericFileIcon(isLarge));
         }
 
-        return _extensionIconCache.GetOrAdd(extension, ext => ExtractFileIcon(ext, isExactPath: false) ?? ExtractGenericFileIcon());
+        return cache.GetOrAdd(extension, ext => ExtractFileIcon(ext, isExactPath: false, isLarge: isLarge) ?? ExtractGenericFileIcon(isLarge));
     }
 
-    private IImage? ExtractFileIcon(string target, bool isExactPath)
+    private IImage? ExtractFileIcon(string target, bool isExactPath, bool isLarge)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -139,22 +142,23 @@ public class FileIconService
 
         try
         {
-            // 1. If file exists on disk, try high-resolution IShellItemImageFactory (up to 256x256)
-            if (isExactPath && File.Exists(target))
-            {
-                var highRes = ExtractFromShellItemImageFactory(target, 256);
-                if (highRes != null) return highRes;
-            }
-
-            // 2. Try Jumbo / Extra-Large system image list via SHGetImageList
+            // 1. Try System Image List (Jumbo 256x256 for large, Small 16x16 for small, Extra-Large 48x48 fallback)
             string dummyPath = target.StartsWith(".") ? $"dummy{target}" : (target.Contains('.') ? target : $"dummy.{target}");
-            var imageListIcon = ExtractFromImageList(dummyPath, SHIL_JUMBO) ?? ExtractFromImageList(dummyPath, SHIL_EXTRALARGE);
+            uint dwAttr = isExactPath ? 0 : FILE_ATTRIBUTE_NORMAL;
+            uint sfiFlags = isExactPath ? SHGFI_SYSICONINDEX : (SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES);
+
+            int imageListSize = isLarge ? SHIL_JUMBO : SHIL_SMALL;
+            var imageListIcon = ExtractFromImageListByPath(target, dwAttr, sfiFlags, imageListSize);
+            if (imageListIcon == null && isLarge)
+            {
+                imageListIcon = ExtractFromImageListByPath(target, dwAttr, sfiFlags, SHIL_EXTRALARGE) ?? ExtractFromImageListByPath(target, dwAttr, sfiFlags, SHIL_LARGE);
+            }
             if (imageListIcon != null) return imageListIcon;
 
-            // 3. Fallback to standard SHGetFileInfo
+            // 2. Fallback to standard SHGetFileInfo
             var sfi = new SHFILEINFO();
-            uint flags = SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES;
-            SHGetFileInfo(dummyPath, FILE_ATTRIBUTE_NORMAL, ref sfi, (uint)Marshal.SizeOf<SHFILEINFO>(), flags);
+            uint flags = SHGFI_ICON | (isLarge ? SHGFI_LARGEICON : SHGFI_SMALLICON) | (isExactPath ? 0 : SHGFI_USEFILEATTRIBUTES);
+            SHGetFileInfo(target, dwAttr, ref sfi, (uint)Marshal.SizeOf<SHFILEINFO>(), flags);
 
             if (sfi.hIcon != IntPtr.Zero)
             {
@@ -176,48 +180,33 @@ public class FileIconService
         return null;
     }
 
-    private IImage? ExtractFromShellItemImageFactory(string filePath, int targetSize)
+    private IImage? ExtractFromImageListByPath(string path, uint dwAttr, uint sfiFlags, int imageListSize)
     {
-        IntPtr hBitmap = IntPtr.Zero;
         try
         {
-            int hr = SHCreateItemFromParsingName(filePath, IntPtr.Zero, IID_IShellItemImageFactory, out var factory);
-            if (hr != 0 || factory == null) return null;
+            var sfi = new SHFILEINFO();
+            IntPtr res = SHGetFileInfo(path, dwAttr, ref sfi, (uint)Marshal.SizeOf<SHFILEINFO>(), sfiFlags);
+            if (res == IntPtr.Zero) return null;
 
-            var size = new SIZE(targetSize, targetSize);
-            hr = factory.GetImage(size, SIIGBF.SIIGBF_ICONONLY | SIIGBF.SIIGBF_BIGGERSIZEOK, out hBitmap);
-            if (hr == 0 && hBitmap != IntPtr.Zero)
-            {
-                return ConvertHBitmapToAvaloniaBitmap(hBitmap);
-            }
+            return ExtractFromImageListByIndex(sfi.iIcon, imageListSize);
         }
         catch
         {
-            // Ignore
+            return null;
         }
-        finally
-        {
-            if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
-        }
-        return null;
     }
 
-    private IImage? ExtractFromImageList(string dummyPath, int imageListSize)
+    private IImage? ExtractFromImageListByIndex(int iconIndex, int imageListSize)
     {
         IntPtr hIcon = IntPtr.Zero;
         try
         {
-            var sfi = new SHFILEINFO();
-            IntPtr res = SHGetFileInfo(dummyPath, FILE_ATTRIBUTE_NORMAL, ref sfi, (uint)Marshal.SizeOf<SHFILEINFO>(), SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES);
-            if (res == IntPtr.Zero) return null;
+            var iid = IID_IUnknown;
+            int hr = SHGetImageList(imageListSize, ref iid, out IntPtr himl);
+            if (hr != 0 || himl == IntPtr.Zero) return null;
 
-            int iconIndex = sfi.iIcon;
-            var iid = IID_IImageList;
-            int hr = SHGetImageList(imageListSize, ref iid, out var imageList);
-            if (hr != 0 || imageList == null) return null;
-
-            hr = imageList.GetIcon(iconIndex, ILD_TRANSPARENT, out hIcon);
-            if (hr == 0 && hIcon != IntPtr.Zero)
+            hIcon = ImageList_GetIcon(himl, iconIndex, ILD_TRANSPARENT);
+            if (hIcon != IntPtr.Zero)
             {
                 return ConvertHIconToBitmap(hIcon);
             }
@@ -233,15 +222,19 @@ public class FileIconService
         return null;
     }
 
-    private IImage? ExtractGenericFileIcon()
+    private IImage? ExtractGenericFileIcon(bool isLarge)
     {
-        if (_defaultGenericFileIcon != null) return _defaultGenericFileIcon;
+        if (isLarge && _defaultGenericLargeIcon != null) return _defaultGenericLargeIcon;
+        if (!isLarge && _defaultGenericSmallIcon != null) return _defaultGenericSmallIcon;
 
-        _defaultGenericFileIcon = ExtractFileIcon(".txt", isExactPath: false)
-            ?? ExtractFileIcon(".dat", isExactPath: false)
-            ?? ExtractFileIcon(".log", isExactPath: false);
+        var icon = ExtractFileIcon(".txt", isExactPath: false, isLarge: isLarge)
+            ?? ExtractFileIcon(".dat", isExactPath: false, isLarge: isLarge)
+            ?? ExtractFileIcon(".log", isExactPath: false, isLarge: isLarge);
 
-        return _defaultGenericFileIcon;
+        if (isLarge) _defaultGenericLargeIcon = icon;
+        else _defaultGenericSmallIcon = icon;
+
+        return icon;
     }
 
     private static Bitmap? ConvertHIconToBitmap(IntPtr hIcon)
@@ -295,8 +288,9 @@ public class FileIconService
 
             GdiFlush();
 
-            byte[] pixelData = new byte[width * height * 4];
-            Marshal.Copy(pBits, pixelData, 0, pixelData.Length);
+            int byteCount = width * height * 4;
+            byte[] pixelData = new byte[byteCount];
+            Marshal.Copy(pBits, pixelData, 0, byteCount);
 
             // Check if icon has non-zero alpha channel
             bool hasAlpha = false;
@@ -309,7 +303,7 @@ public class FileIconService
                 }
             }
 
-            // If no alpha was written by DrawIconEx, make non-zero color pixels fully opaque
+            // If no alpha channel was written by DrawIconEx, make visible color pixels fully opaque
             if (!hasAlpha)
             {
                 for (int i = 0; i < pixelData.Length; i += 4)
@@ -348,50 +342,6 @@ public class FileIconService
         }
     }
 
-    private static Bitmap? ConvertHBitmapToAvaloniaBitmap(IntPtr hBitmap)
-    {
-        IntPtr hdc = CreateCompatibleDC(IntPtr.Zero);
-        try
-        {
-            var bmi = new BITMAPINFO();
-            bmi.bmiHeader.biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>();
-
-            if (GetDIBits(hdc, hBitmap, 0, 0, null!, ref bmi, 0) == 0) return null;
-
-            int width = bmi.bmiHeader.biWidth;
-            int height = Math.Abs(bmi.bmiHeader.biHeight);
-            if (width <= 0 || height <= 0) return null;
-
-            bmi.bmiHeader.biBitCount = 32;
-            bmi.bmiHeader.biCompression = 0; // BI_RGB
-            bmi.bmiHeader.biHeight = -height; // Top-down DIB
-
-            byte[] pixelData = new byte[width * height * 4];
-            int lines = GetDIBits(hdc, hBitmap, 0, (uint)height, pixelData, ref bmi, 0);
-            if (lines == 0) return null;
-
-            var wbm = new WriteableBitmap(
-                new Avalonia.PixelSize(width, height),
-                new Avalonia.Vector(96, 96),
-                Avalonia.Platform.PixelFormat.Bgra8888,
-                Avalonia.Platform.AlphaFormat.Premul);
-
-            using (var fb = wbm.Lock())
-            {
-                Marshal.Copy(pixelData, 0, fb.Address, pixelData.Length);
-            }
-            return wbm;
-        }
-        catch
-        {
-            return null;
-        }
-        finally
-        {
-            if (hdc != IntPtr.Zero) DeleteDC(hdc);
-        }
-    }
-
     #region Win32 P/Invoke & COM Interfaces
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -404,21 +354,6 @@ public class FileIconService
         public string szDisplayName;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
         public string szTypeName;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct SIZE
-    {
-        public int cx;
-        public int cy;
-        public SIZE(int cx, int cy) { this.cx = cx; this.cy = cy; }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT
-    {
-        public int x;
-        public int y;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -443,61 +378,11 @@ public class FileIconService
         public IntPtr hbmColor;
     }
 
-    private enum SIIGBF
-    {
-        SIIGBF_RESIZETOFIT = 0x00000000,
-        SIIGBF_BIGGERSIZEOK = 0x00000001,
-        SIIGBF_MEMORYONLY = 0x00000002,
-        SIIGBF_ICONONLY = 0x00000004,
-        SIIGBF_THUMBNAILONLY = 0x00000008,
-        SIIGBF_INCACHEONLY = 0x00000010
-    }
-
-    [ComImport]
-    [Guid("bcc18b79-ba16-442f-80c0-d459e9f86333")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IShellItemImageFactory
-    {
-        [PreserveSig]
-        int GetImage(
-            [In, MarshalAs(UnmanagedType.Struct)] SIZE size,
-            [In] SIIGBF flags,
-            [Out] out IntPtr phbm);
-    }
-
-    [ComImport]
-    [Guid("46EB5926-582E-40E7-9F60-402D380C4F65")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IImageList
-    {
-        [PreserveSig] int ImageListSetIconSize(int cx, int cy);
-        [PreserveSig] int ImageListGetIconSize(out int cx, out int cy);
-        [PreserveSig] int ImageListSetImageCount(int uNewCount);
-        [PreserveSig] int ImageListGetImageCount(out int pi);
-        [PreserveSig] int ImageListSetBkColor(int clrBk, out int pclr);
-        [PreserveSig] int ImageListGetBkColor(out int pclr);
-        [PreserveSig] int ImageListBeginDrag(int iTrack, int dxHotspot, int dyHotspot);
-        [PreserveSig] int ImageListEndDrag();
-        [PreserveSig] int ImageListDragEnter(IntPtr hwndLock, int x, int y);
-        [PreserveSig] int ImageListDragLeave(IntPtr hwndLock);
-        [PreserveSig] int ImageListDragMove(int x, int y);
-        [PreserveSig] int ImageListSetDragCursorImage(ref IImageList punk, int iDrag, int dxHotspot, int dyHotspot);
-        [PreserveSig] int ImageListDragShowNolock(int fShow);
-        [PreserveSig] int ImageListGetDragImage(out POINT ppt, out POINT pptHotspot, ref Guid riid, out IntPtr ppv);
-        [PreserveSig] int GetItemFlags(int i, out int dwFlags);
-        [PreserveSig] int ImageListGetOverlayImage(int iOverlay, out int piIndex);
-        [PreserveSig] int GetIcon(int i, int flags, out IntPtr picon);
-    }
-
     [DllImport("shell32.dll", EntryPoint = "#727")]
-    private static extern int SHGetImageList(int iImageList, ref Guid riid, out IImageList ppv);
+    private static extern int SHGetImageList(int iImageList, ref Guid riid, out IntPtr ppv);
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern int SHCreateItemFromParsingName(
-        [In, MarshalAs(UnmanagedType.LPWStr)] string pszPath,
-        [In] IntPtr pbc,
-        [In, MarshalAs(UnmanagedType.LPStruct)] Guid riid,
-        [Out, MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory ppv);
+    [DllImport("comctl32.dll", SetLastError = true)]
+    private static extern IntPtr ImageList_GetIcon(IntPtr himl, int i, uint flags);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHGetFileInfoW")]
     private static extern IntPtr SHGetFileInfo(
@@ -547,9 +432,6 @@ public class FileIconService
 
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateDIBSection(IntPtr hdc, [In] ref BITMAPINFO pbmi, uint pila, out IntPtr ppvBits, IntPtr hSection, uint dwOffset);
-
-    [DllImport("gdi32.dll")]
-    private static extern int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint lines, [Out] byte[] lpBits, ref BITMAPINFO pbmi, uint usage);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct BITMAPINFOHEADER

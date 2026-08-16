@@ -974,6 +974,28 @@ public sealed class UiSmokeTests
     }
 
     [AvaloniaFact]
+    public void FileIconService_ExtractsJumboIconForExtensions()
+    {
+        // Large (Jumbo 256x256) folder icon
+        var folderLarge = FileIconService.Instance.GetFolderIcon(isLarge: true) as Avalonia.Media.Imaging.Bitmap;
+        Assert.NotNull(folderLarge);
+        Assert.True(folderLarge.PixelSize.Width >= 128, $"Folder large icon width: {folderLarge.PixelSize.Width}");
+
+        // Small (16x16) folder icon
+        var folderSmall = FileIconService.Instance.GetFolderIcon(isLarge: false) as Avalonia.Media.Imaging.Bitmap;
+        Assert.NotNull(folderSmall);
+        Assert.True(folderSmall.PixelSize.Width <= 32, $"Folder small icon width: {folderSmall.PixelSize.Width}");
+
+        // Large extension icons
+        foreach (var ext in new[] { ".pdf", ".zip", ".txt", ".cpp", ".exe" })
+        {
+            var large = FileIconService.Instance.GetExtensionIcon(ext, isLarge: true) as Avalonia.Media.Imaging.Bitmap;
+            Assert.NotNull(large);
+            Assert.True(large.PixelSize.Width >= 48, $"{ext} large icon width: {large.PixelSize.Width}");
+        }
+    }
+
+    [AvaloniaFact]
     public async Task ThumbnailService_ExtractsRealVideoThumbnailAsync()
     {
         string videoPath = @"C:\Users\5900x\Videos\Captures\297.mp4";

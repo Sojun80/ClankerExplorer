@@ -813,7 +813,7 @@
 
                   <!-- High-Resolution Native Shell Icon for both Files and Folders when no photo thumbnail is available -->
                   <Panel IsVisible="{Binding !HasThumbnail}" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <Image Source="{Binding FileIcon}" IsVisible="{Binding HasFileIcon}"
+                    <Image Source="{Binding LargeIcon}" IsVisible="{Binding HasLargeIcon}"
                            Width="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageWidth}"
                            Height="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageHeight}"
                            Stretch="Uniform"
@@ -831,7 +831,7 @@
                       <Path.IsVisible>
                         <MultiBinding Converter="{x:Static BoolConverters.And}">
                           <Binding Path="IsDirectory"/>
-                          <Binding Path="!HasFileIcon"/>
+                          <Binding Path="!HasLargeIcon"/>
                         </MultiBinding>
                       </Path.IsVisible>
                     </Path>
@@ -842,7 +842,7 @@
                       <Border.IsVisible>
                         <MultiBinding Converter="{x:Static BoolConverters.And}">
                           <Binding Path="!IsDirectory"/>
-                          <Binding Path="!HasFileIcon"/>
+                          <Binding Path="!HasLargeIcon"/>
                         </MultiBinding>
                       </Border.IsVisible>
                       <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4">
