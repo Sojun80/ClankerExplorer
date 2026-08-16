@@ -767,4 +767,36 @@ public sealed class UiSmokeTests
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }
+
+    [Fact]
+    public void EmptySpace_ClearingSelection_UpdatesContextMenuState()
+    {
+        var pane = new ExplorerPaneViewModel("pane1", @"C:\FakePath");
+        var tab = pane.SelectedTab!;
+
+        var file1 = new FileItem { Name = "test.txt", FullPath = @"C:\FakePath\test.txt", Extension = ".txt", IsDirectory = false };
+        tab.FilteredItems.Add(file1);
+
+        // Select file1
+        tab.SelectedItems.Add(file1);
+        tab.SelectedItem = file1;
+        file1.IsThumbnailSelected = true;
+
+        pane.NotifyContextMenuProperties();
+        Assert.True(pane.IsItemSelected);
+        Assert.True(pane.IsNormalFileSelected);
+
+        // Simulate empty space click: clear selection
+        tab.ClearThumbnailSelection();
+        tab.SelectedItems.Clear();
+        tab.SelectedItem = null;
+
+        pane.NotifyContextMenuProperties();
+
+        // Verify context menu state transitions to folder/background mode
+        Assert.False(pane.IsItemSelected);
+        Assert.False(pane.IsNormalFileSelected);
+        Assert.False(pane.IsFolderSelected);
+        Assert.False(file1.IsThumbnailSelected);
+    }
 }

@@ -174,11 +174,11 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     // Reactive Context Menu State
     public bool IsItemSelected => SelectedTab?.SelectedItem != null;
     public bool IsFolderSelected => SelectedTab?.SelectedItem?.IsDirectory == true;
-    public bool IsArchiveSelected => SelectedTab?.SelectedItem != null && !SelectedTab.SelectedItem.IsDirectory && ArchiveService.Instance.IsArchive(SelectedTab.SelectedItem.FullPath);
-    public bool IsNormalFileSelected => SelectedTab?.SelectedItem != null && !SelectedTab.SelectedItem.IsDirectory && !ArchiveService.Instance.IsArchive(SelectedTab.SelectedItem.FullPath);
-    public bool IsTextFileSelected => SelectedTab?.SelectedItem != null && !SelectedTab.SelectedItem.IsDirectory && FileSystemService.Instance.IsTextLikeFile(SelectedTab.SelectedItem.FullPath);
+    public bool IsArchiveSelected => SelectedTab?.SelectedItem is { IsDirectory: false, FullPath: { Length: > 0 } path } && ArchiveService.Instance.IsArchive(path);
+    public bool IsNormalFileSelected => SelectedTab?.SelectedItem is { IsDirectory: false, FullPath: { Length: > 0 } path } && !ArchiveService.Instance.IsArchive(path);
+    public bool IsTextFileSelected => SelectedTab?.SelectedItem is { IsDirectory: false, FullPath: { Length: > 0 } path } && FileSystemService.Instance.IsTextLikeFile(path);
 
-    public bool IsSelectedFolderPinned => SelectedTab?.SelectedItem?.IsDirectory == true && QuickAccessService.Instance.IsPinned(SelectedTab.SelectedItem.FullPath);
+    public bool IsSelectedFolderPinned => SelectedTab?.SelectedItem is { IsDirectory: true, FullPath: { Length: > 0 } path } && QuickAccessService.Instance.IsPinned(path);
     public string PinFolderLabel => IsSelectedFolderPinned ? "⭐ Unpin from Quick Access" : "⭐ Add to Quick Access";
 
     public string OpenArchiveLabel => "7-Zip: Open Archive";

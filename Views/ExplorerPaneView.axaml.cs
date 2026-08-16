@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -109,6 +110,11 @@ public partial class ExplorerPaneView : UserControl
                 FileDataGrid.Sorting += OnDataGridSorting;
             }
 
+            if (ThumbnailListBox != null)
+            {
+                ThumbnailListBox.AddHandler(PointerPressedEvent, OnThumbnailListBoxPointerPressedTunnel, RoutingStrategies.Tunnel);
+            }
+
             if (FileGridContainer != null)
             {
                 FileGridContainer.AddHandler(PointerPressedEvent, OnFileGridPointerPressedTunnel, RoutingStrategies.Tunnel);
@@ -121,6 +127,17 @@ public partial class ExplorerPaneView : UserControl
             if (GridContextMenu != null)
             {
                 GridContextMenu.Opening += (sender, args) =>
+                {
+                    if (DataContext is ExplorerPaneViewModel vm)
+                    {
+                        vm.NotifyContextMenuProperties();
+                    }
+                };
+            }
+
+            if (ThumbnailContextMenu != null)
+            {
+                ThumbnailContextMenu.Opening += (sender, args) =>
                 {
                     if (DataContext is ExplorerPaneViewModel vm)
                     {
@@ -606,17 +623,22 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnDataGridPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
     {
-        if (FileDataGrid != null && e.GetCurrentPoint(FileDataGrid).Properties.IsRightButtonPressed)
-        {
-            var source = e.Source as Visual;
-            while (source != null && source is not DataGridRow && source != FileDataGrid)
-            {
-                source = source.GetVisualParent();
-            }
+        if (FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+        var tab = vm.SelectedTab;
 
-            if (source is DataGridRow row && row.DataContext is FileItem item && DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null)
+        var source = e.Source as Visual;
+        while (source != null && source is not DataGridRow && source.GetType().Name != "DataGridColumnHeader" && source != FileDataGrid)
+        {
+            source = source.GetVisualParent();
+        }
+
+        bool isRightButton = e.GetCurrentPoint(FileDataGrid).Properties.IsRightButtonPressed;
+        bool isLeftButton = e.GetCurrentPoint(FileDataGrid).Properties.IsLeftButtonPressed;
+
+        if (source is DataGridRow row && row.DataContext is FileItem item)
+        {
+            if (isRightButton)
             {
-                var tab = vm.SelectedTab;
                 if (FileDataGrid.SelectedItems.Contains(item) || tab.SelectedItems.Contains(item))
                 {
                     // Right-clicking an item already part of a multi-selection preserves the multi-selection
@@ -633,6 +655,69 @@ public partial class ExplorerPaneView : UserControl
                 }
                 vm.NotifyContextMenuProperties();
             }
+        }
+        else if (source?.GetType().Name != "DataGridColumnHeader")
+        {
+            // Clicked on empty space (below rows or background area)
+            if (isRightButton)
+            {
+                FileDataGrid.SelectedItems.Clear();
+                tab.ClearThumbnailSelection();
+                tab.SelectedItems.Clear();
+                tab.SelectedItem = null;
+                vm.NotifyContextMenuProperties();
+                vm.TriggerPreviewForSelectedItem();
+            }
+            else if (isLeftButton && !e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            {
+                FileDataGrid.SelectedItems.Clear();
+                tab.ClearThumbnailSelection();
+                tab.SelectedItems.Clear();
+                tab.SelectedItem = null;
+                vm.NotifyContextMenuProperties();
+                vm.TriggerPreviewForSelectedItem();
+            }
+        }
+    }
+
+    private void OnThumbnailListBoxPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null || ThumbnailListBox == null) return;
+
+        var source = e.Source as Visual;
+        // Check if the click happened on a thumbnail card (FileItem DataContext)
+        while (source != null && source != ThumbnailListBox)
+        {
+            if (source is Control c && c.DataContext is FileItem)
+            {
+                // Clicked on a specific thumbnail item - let OnThumbnailItemPointerPressed handle it
+                return;
+            }
+            source = source.GetVisualParent();
+        }
+
+        // The click occurred on empty space inside the Thumbnail view!
+        var point = e.GetCurrentPoint(ThumbnailListBox);
+        var tab = vm.SelectedTab;
+
+        if (point.Properties.IsLeftButtonPressed)
+        {
+            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            {
+                tab.ClearThumbnailSelection();
+                tab.SelectedItems.Clear();
+                tab.SelectedItem = null;
+                vm.NotifyContextMenuProperties();
+                vm.TriggerPreviewForSelectedItem();
+            }
+        }
+        else if (point.Properties.IsRightButtonPressed)
+        {
+            tab.ClearThumbnailSelection();
+            tab.SelectedItems.Clear();
+            tab.SelectedItem = null;
+            vm.NotifyContextMenuProperties();
+            vm.TriggerPreviewForSelectedItem();
         }
     }
 
@@ -753,18 +838,26 @@ public partial class ExplorerPaneView : UserControl
     {
         if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null)
         {
-            // Left click on background strip begins marquee or deselects file row
-            if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            var props = e.GetCurrentPoint(this).Properties;
+            if (props.IsRightButtonPressed)
             {
-                if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && FileDataGrid != null)
+                if (FileDataGrid != null) FileDataGrid.SelectedItems.Clear();
+                vm.SelectedTab.ClearThumbnailSelection();
+                vm.SelectedTab.SelectedItems.Clear();
+                vm.SelectedTab.SelectedItem = null;
+                vm.NotifyContextMenuProperties();
+                vm.TriggerPreviewForSelectedItem();
+            }
+            else if (props.IsLeftButtonPressed)
+            {
+                if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
                 {
-                    if (vm.IsThumbnailView) vm.SelectedTab.ClearThumbnailSelection();
-                    else
-                    {
-                        FileDataGrid.SelectedItems.Clear();
-                        vm.SelectedTab.SelectedItem = null;
-                    }
+                    if (FileDataGrid != null) FileDataGrid.SelectedItems.Clear();
+                    vm.SelectedTab.ClearThumbnailSelection();
+                    vm.SelectedTab.SelectedItems.Clear();
+                    vm.SelectedTab.SelectedItem = null;
                     vm.NotifyContextMenuProperties();
+                    vm.TriggerPreviewForSelectedItem();
                 }
 
                 if (vm.IsThumbnailView) return;
@@ -1066,11 +1159,13 @@ public partial class ExplorerPaneView : UserControl
         else if (_isMouseDownForMarquee)
         {
             // Click on blank background space without dragging
-            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && FileDataGrid != null)
+            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
             {
-                FileDataGrid.SelectedItems.Clear();
+                if (FileDataGrid != null) FileDataGrid.SelectedItems.Clear();
                 if (DataContext is ExplorerPaneViewModel vmEmpty && vmEmpty.SelectedTab != null)
                 {
+                    vmEmpty.SelectedTab.ClearThumbnailSelection();
+                    vmEmpty.SelectedTab.SelectedItems.Clear();
                     vmEmpty.SelectedTab.SelectedItem = null;
                     vmEmpty.NotifyContextMenuProperties();
                     vmEmpty.TriggerPreviewForSelectedItem();

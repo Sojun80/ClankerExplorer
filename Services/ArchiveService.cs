@@ -9,13 +9,14 @@ namespace ClankerExplorer.Services;
 
 public class ArchiveService
 {
-    public static ArchiveService Instance { get; } = new();
-
-    private static readonly string[] ArchiveExtensions = new[]
+    private static readonly HashSet<string> ArchiveExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".zip", ".7z", ".rar", ".tar", ".gz", ".tgz", ".bz2", ".tbz2",
         ".xz", ".txz", ".iso", ".cab", ".zst", ".tzst", ".wim", ".vhd"
     };
+
+    private static readonly Lazy<ArchiveService> _instance = new(() => new ArchiveService());
+    public static ArchiveService Instance => _instance.Value;
 
     private string? _sevenZipGuiExe;
     private string? _sevenZipFmExe;
@@ -28,50 +29,58 @@ public class ArchiveService
 
     private void Locate7Zip()
     {
-        if (OperatingSystem.IsWindows())
+        try
         {
-            var candidates = new[]
+            if (OperatingSystem.IsWindows())
             {
-                @"C:\Program Files\7-Zip",
-                @"C:\Program Files (x86)\7-Zip",
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "7-Zip"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "7-Zip")
-            };
-
-            foreach (var dir in candidates.Distinct())
-            {
-                if (!Directory.Exists(dir)) continue;
-
-                var gui = Path.Combine(dir, "7zG.exe");
-                var fm = Path.Combine(dir, "7zFM.exe");
-                var cli = Path.Combine(dir, "7z.exe");
-
-                if (File.Exists(gui)) _sevenZipGuiExe = gui;
-                if (File.Exists(fm)) _sevenZipFmExe = fm;
-                if (File.Exists(cli)) _sevenZipCliExe = cli;
-
-                if (_sevenZipGuiExe != null) break;
-            }
-        }
-        else
-        {
-            // Linux / Unix standard locations
-            var linuxCandidates = new[] { "/usr/bin/7z", "/usr/local/bin/7z", "/usr/bin/7za", "/usr/bin/p7zip" };
-            foreach (var path in linuxCandidates)
-            {
-                if (File.Exists(path))
+                var candidates = new List<string>
                 {
-                    _sevenZipCliExe = path;
-                    break;
+                    @"C:\Program Files\7-Zip",
+                    @"C:\Program Files (x86)\7-Zip"
+                };
+
+                var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                if (!string.IsNullOrEmpty(pf)) candidates.Add(Path.Combine(pf, "7-Zip"));
+
+                var pfx86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+                if (!string.IsNullOrEmpty(pfx86)) candidates.Add(Path.Combine(pfx86, "7-Zip"));
+
+                foreach (var dir in candidates.Distinct())
+                {
+                    if (!Directory.Exists(dir)) continue;
+
+                    var gui = Path.Combine(dir, "7zG.exe");
+                    var fm = Path.Combine(dir, "7zFM.exe");
+                    var cli = Path.Combine(dir, "7z.exe");
+
+                    if (File.Exists(gui)) _sevenZipGuiExe = gui;
+                    if (File.Exists(fm)) _sevenZipFmExe = fm;
+                    if (File.Exists(cli)) _sevenZipCliExe = cli;
+
+                    if (_sevenZipGuiExe != null) break;
+                }
+            }
+            else
+            {
+                // Linux / Unix standard locations
+                var linuxCandidates = new[] { "/usr/bin/7z", "/usr/local/bin/7z", "/usr/bin/7za", "/usr/bin/p7zip" };
+                foreach (var path in linuxCandidates)
+                {
+                    if (File.Exists(path))
+                    {
+                        _sevenZipCliExe = path;
+                        break;
+                    }
                 }
             }
         }
+        catch { }
     }
 
-    public bool IsArchive(string filePath)
+    public bool IsArchive(string? filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath) || Directory.Exists(filePath)) return false;
-        var ext = Path.GetExtension(filePath).ToLowerInvariant();
+        var ext = Path.GetExtension(filePath)?.ToLowerInvariant() ?? string.Empty;
         var lower = filePath.ToLowerInvariant();
         if (lower.EndsWith(".tar.gz") || lower.EndsWith(".tar.bz2") || lower.EndsWith(".tar.xz")) return true;
         return ArchiveExtensions.Contains(ext);

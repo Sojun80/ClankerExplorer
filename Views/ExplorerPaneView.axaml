@@ -661,7 +661,8 @@
                KeyDown="OnThumbnailKeyDown"
                FontFamily="{DynamicResource AppUiFont}">
         <ListBox.ContextMenu>
-          <ContextMenu Background="{DynamicResource AppSurfaceBrush}"
+          <ContextMenu x:Name="ThumbnailContextMenu"
+                       Background="{DynamicResource AppSurfaceBrush}"
                        Foreground="{DynamicResource AppTextBrush}"
                        BorderBrush="{DynamicResource AppBorderBrush}"
                        BorderThickness="1">
