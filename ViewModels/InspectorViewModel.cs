@@ -261,6 +261,48 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     // PREVIEW LIFECYCLE & LOADING
     // ==========================================
 
+    /// <summary>
+    /// Completely stops all active media (video playback, audio) and unloads all cached bitmaps/models from memory.
+    /// </summary>
+    public void UnloadPreview()
+    {
+        _previewCts?.Cancel();
+        _previewCts = null;
+        _hashingCts?.Cancel();
+        _hashingCts = null;
+        _currentFilePath = null;
+
+        StopVideo();
+        IsVideoPlaybackAvailable = false;
+        VideoPosterImage = null;
+
+        ImagePreview = null;
+        ImageDimensions = string.Empty;
+
+        PdfCurrentPageBitmap = null;
+        PdfTotalPages = 0;
+        PdfCurrentPage = 1;
+
+        ZipEntries.Clear();
+        ZipSummaryDisplay = string.Empty;
+
+        StlBitmap = null;
+        StlModel = null;
+        StlDimensionsDisplay = string.Empty;
+        StlTrianglesDisplay = string.Empty;
+
+        PreviewData = null;
+        HexRows.Clear();
+        Sha256Hash = string.Empty;
+        Md5Hash = string.Empty;
+        HasHashes = false;
+        IsHashing = false;
+        PreviewErrorMessage = null;
+        ActivePreviewType = "none";
+        IsLoadingPreview = false;
+        StatusMessage = "Select a file to inspect";
+    }
+
     public async Task LoadPreviewAsync(string? filePath)
     {
         _previewCts?.Cancel();

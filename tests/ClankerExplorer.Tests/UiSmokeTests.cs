@@ -1429,6 +1429,44 @@ endsolid box";
         }
     }
 
+    [Fact]
+    public async Task MainViewModel_TogglingShowInspectorOff_StopsVideoAndUnloadsAssets()
+    {
+        using var fs = new ClankerExplorer.Tests.TestInfrastructure.TemporaryFileSystem();
+        ClankerExplorer.Tests.TestInfrastructure.TestEnvironment.ResetGlobalSettings(fs.FolderA);
+        using var main = new MainViewModel(loadSidebarData: false);
+
+        string testFile = Path.Combine(fs.FolderA, "sample.txt");
+        File.WriteAllText(testFile, "Sample content for preview inspection");
+
+        // 1. Initial State: Inspector Open
+        main.ShowInspector = true;
+        await main.Inspector.LoadPreviewAsync(testFile);
+        Assert.NotNull(main.Inspector.PreviewData);
+        Assert.Equal("text", main.Inspector.ActivePreviewType);
+
+        // 2. Toggle Inspector Off (Preview Window unclicked/disabled)
+        main.ShowInspector = false;
+        Assert.Null(main.Inspector.PreviewData);
+        Assert.Equal("none", main.Inspector.ActivePreviewType);
+        Assert.False(main.Inspector.IsVideoPlaying);
+        Assert.False(main.Inspector.IsVideoSessionActive);
+        Assert.Null(main.Inspector.ImagePreview);
+        Assert.Null(main.Inspector.PdfCurrentPageBitmap);
+        Assert.Null(main.Inspector.StlBitmap);
+
+        // 3. Toggle Inspector On: Reloads current selection
+        if (main.ActivePane?.SelectedTab != null)
+        {
+            main.ActivePane.SelectedTab.SelectedItem = new FileItem { FullPath = testFile, Name = "sample.txt" };
+        }
+        main.ShowInspector = true;
+        // Small delay for async load
+        await Task.Delay(50);
+        Assert.NotNull(main.Inspector.PreviewData);
+        Assert.Equal("text", main.Inspector.ActivePreviewType);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct PROPERTYKEY
     {

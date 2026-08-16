@@ -27,6 +27,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _showInspector = true;
 
+    partial void OnShowInspectorChanged(bool value)
+    {
+        if (!value)
+        {
+            // When preview pane is closed, immediately stop video/audio playback and unload all assets
+            Inspector.UnloadPreview();
+        }
+        else
+        {
+            // When preview pane is reopened, reload preview for the current selected file if any
+            var selectedItem = ActivePane?.SelectedTab?.SelectedItem;
+            if (selectedItem != null && !string.IsNullOrEmpty(selectedItem.FullPath))
+            {
+                _ = Inspector.LoadPreviewAsync(selectedItem.FullPath);
+            }
+        }
+    }
+
     [ObservableProperty]
     private double _inspectorWidth = 320.0;
 
@@ -244,7 +262,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         pane.FileSelectedForPreview += item =>
         {
-            _ = Inspector.LoadPreviewAsync(item?.FullPath);
+            if (ShowInspector)
+            {
+                _ = Inspector.LoadPreviewAsync(item?.FullPath);
+            }
             UpdateCurrentDrive();
             RefreshHistoryData();
         };
