@@ -310,4 +310,69 @@ public sealed class UiSmokeTests
             window.Close();
         }
     }
+
+    [AvaloniaFact]
+    public async Task DetailsView_TruncatesLongFilenames_AndShowsTooltipOnlyWhenTrimmed()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderA, "PANE 1");
+        await pane.SelectedTab!.RefreshAsync();
+        
+        var longFileName = "Very_Long_File_Name_That_Exceeds_Column_Width_To_Verify_Ellipsis_And_Tooltip.txt";
+        var shortFileName = "short.txt";
+
+        pane.SelectedTab.Items = new System.Collections.ObjectModel.ObservableCollection<FileItem>(new[]
+        {
+            new FileItem { Name = longFileName, FullPath = Path.Combine(fs.FolderA, longFileName), IsDirectory = false },
+            new FileItem { Name = shortFileName, FullPath = Path.Combine(fs.FolderA, shortFileName), IsDirectory = false }
+        });
+        pane.SelectedTab.ApplyFilter();
+
+        var view = new ExplorerPaneView { DataContext = pane };
+        var window = new Window { Content = view, Width = 800, Height = 500 };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var textBlocks = view.GetVisualDescendants()
+                .OfType<TextBlock>()
+                .Where(tb => tb.Text == longFileName || tb.Text == shortFileName)
+                .ToList();
+
+            Assert.NotEmpty(textBlocks);
+            foreach (var tb in textBlocks)
+            {
+                Assert.Equal(Avalonia.Media.TextTrimming.CharacterEllipsis, tb.TextTrimming);
+                Assert.True(ClankerExplorer.Behaviors.AutoToolTip.GetShowWhenTrimmed(tb));
+            }
+
+            // Test AutoToolTip.IsTextTrimmed behavior with simulated narrow vs wide bounds
+            var narrowTb = new TextBlock
+            {
+                Text = longFileName,
+                FontSize = 12.5,
+                Width = 60,
+                TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
+            };
+            narrowTb.Measure(new Size(60, 20));
+            narrowTb.Arrange(new Rect(0, 0, 60, 20));
+            Assert.True(ClankerExplorer.Behaviors.AutoToolTip.IsTextTrimmed(narrowTb));
+
+            var wideTb = new TextBlock
+            {
+                Text = shortFileName,
+                FontSize = 12.5,
+                Width = 500,
+                TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
+            };
+            wideTb.Measure(new Size(500, 20));
+            wideTb.Arrange(new Rect(0, 0, 500, 20));
+            Assert.False(ClankerExplorer.Behaviors.AutoToolTip.IsTextTrimmed(wideTb));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
 }

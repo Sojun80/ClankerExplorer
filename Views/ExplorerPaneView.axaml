@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:ClankerExplorer.ViewModels"
              xmlns:models="clr-namespace:ClankerExplorer.Models"
+             xmlns:behaviors="clr-namespace:ClankerExplorer.Behaviors"
              x:Class="ClankerExplorer.Views.ExplorerPaneView"
              x:DataType="vm:ExplorerPaneViewModel"
              PointerPressed="OnPanePointerPressed"
@@ -473,31 +474,38 @@
       </DataGrid.ContextMenu>
 
       <DataGrid.Columns>
-        <!-- Name Column (Segoe UI Variable, Semibold folders, Regular files) -->
+        <!-- Name Column (Segoe UI Variable, Semibold folders, Regular files, clean ellipsis truncation) -->
         <DataGridTemplateColumn Header="{Binding NameColumnHeader}" Width="{Binding NameColumnWidthDisplay}" MinWidth="140" SortMemberPath="Name">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate DataType="models:FileItem">
-              <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
-                <!-- Folder Icon: Slightly larger vector icon (16x13px) -->
-                <Border IsVisible="{Binding IsDirectory}" Width="20" Height="20" VerticalAlignment="Center">
-                  <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
-                        Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.8" Width="16" Height="13" Stretch="Uniform"
-                        VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                </Border>
+              <Grid ColumnDefinitions="Auto,*" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
+                <!-- Icon container -->
+                <Panel Grid.Column="0" Width="20" Height="20" Margin="0,0,8,0" VerticalAlignment="Center">
+                  <!-- Folder Icon: Slightly larger vector icon (16x13px) -->
+                  <Border IsVisible="{Binding IsDirectory}" Width="20" Height="20" VerticalAlignment="Center">
+                    <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
+                          Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.8" Width="16" Height="13" Stretch="Uniform"
+                          VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                  </Border>
 
-                <!-- File Icon: Standard 12px file icon -->
-                <Border IsVisible="{Binding !IsDirectory}" Width="20" Height="20" VerticalAlignment="Center">
-                  <TextBlock Text="📄" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
+                  <!-- File Icon: Standard 12px file icon -->
+                  <Border IsVisible="{Binding !IsDirectory}" Width="20" Height="20" VerticalAlignment="Center">
+                    <TextBlock Text="📄" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                </Panel>
 
                 <!-- Folder Name: Segoe UI Variable, Semibold, 13px -->
-                <TextBlock Text="{Binding Name}" IsVisible="{Binding IsDirectory}"
+                <TextBlock Grid.Column="1" Text="{Binding Name}" IsVisible="{Binding IsDirectory}"
+                           TextTrimming="CharacterEllipsis"
+                           behaviors:AutoToolTip.ShowWhenTrimmed="True"
                            FontFamily="{DynamicResource AppUiFont}" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
 
                 <!-- File Name: Segoe UI Variable, Regular Weight, 12.5px -->
-                <TextBlock Text="{Binding Name}" IsVisible="{Binding !IsDirectory}"
+                <TextBlock Grid.Column="1" Text="{Binding Name}" IsVisible="{Binding !IsDirectory}"
+                           TextTrimming="CharacterEllipsis"
+                           behaviors:AutoToolTip.ShowWhenTrimmed="True"
                            FontFamily="{DynamicResource AppUiFont}" FontWeight="Normal" FontSize="12.5" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
-              </StackPanel>
+              </Grid>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
