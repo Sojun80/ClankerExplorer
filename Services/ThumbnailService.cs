@@ -162,8 +162,13 @@ public class ThumbnailService : IDisposable
         {
             result = await Task.Run(() => DecodeImageFile(path, sizeBucket), cancellationToken);
         }
+        // 2. Smart Video Thumbnail Provider (Multi-candidate scoring, seek-based, non-blocking)
+        else if (VideoThumbnailService.IsVideoFile(path))
+        {
+            result = await VideoThumbnailService.Instance.ExtractSmartVideoThumbnailAsync(path, sizeBucket, cancellationToken);
+        }
 
-        // 2. Windows Shell Provider (for Videos, PDFs, Documents, and other formats)
+        // 3. Windows Shell Provider (for PDFs, 3D models, Documents, and fallback)
         if (result == null && OperatingSystem.IsWindows())
         {
             result = await Task.Run(() => ExtractWindowsShellThumbnail(path, sizeBucket), cancellationToken);

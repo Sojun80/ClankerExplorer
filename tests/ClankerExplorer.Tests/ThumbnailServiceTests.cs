@@ -193,5 +193,77 @@ public sealed class ThumbnailServiceTests : IDisposable
         return path;
     }
 
+    [Fact]
+    public void IsVideoFile_CorrectlyIdentifiesVideoExtensions()
+    {
+        Assert.True(VideoThumbnailService.IsVideoFile("movie.mp4"));
+        Assert.True(VideoThumbnailService.IsVideoFile("clip.mkv"));
+        Assert.True(VideoThumbnailService.IsVideoFile("video.avi"));
+        Assert.True(VideoThumbnailService.IsVideoFile("film.mov"));
+        Assert.True(VideoThumbnailService.IsVideoFile("recording.webm"));
+
+        Assert.False(VideoThumbnailService.IsVideoFile("picture.png"));
+        Assert.False(VideoThumbnailService.IsVideoFile("document.pdf"));
+        Assert.False(VideoThumbnailService.IsVideoFile("archive.zip"));
+        Assert.False(VideoThumbnailService.IsVideoFile("notes.txt"));
+        Assert.False(VideoThumbnailService.IsVideoFile(""));
+    }
+
+    [Fact]
+    public void ScoreCandidateFrame_HeavilyPenalizesBlackWhiteAndBlankFrames()
+    {
+        int w = 64;
+        int h = 64;
+
+        // 1. All-black frame
+        byte[] blackPixels = new byte[w * h * 4];
+        for (int i = 0; i < blackPixels.Length; i += 4)
+        {
+            blackPixels[i] = 0;     // B
+            blackPixels[i + 1] = 0; // G
+            blackPixels[i + 2] = 0; // R
+            blackPixels[i + 3] = 255;
+        }
+        double blackScore = VideoThumbnailService.ScoreCandidateFrame(blackPixels, w, h);
+
+        // 2. All-white frame
+        byte[] whitePixels = new byte[w * h * 4];
+        for (int i = 0; i < whitePixels.Length; i += 4)
+        {
+            whitePixels[i] = 255;
+            whitePixels[i + 1] = 255;
+            whitePixels[i + 2] = 255;
+            whitePixels[i + 3] = 255;
+        }
+        double whiteScore = VideoThumbnailService.ScoreCandidateFrame(whitePixels, w, h);
+
+        // 3. High detail / textured frame
+        byte[] texturedPixels = new byte[w * h * 4];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int offset = (y * w + x) * 4;
+                byte val = (byte)((x * 8 + y * 8) % 200 + 20); // healthy midtone contrast pattern
+                texturedPixels[offset] = val;
+                texturedPixels[offset + 1] = val;
+                texturedPixels[offset + 2] = val;
+                texturedPixels[offset + 3] = 255;
+            }
+        }
+        double texturedScore = VideoThumbnailService.ScoreCandidateFrame(texturedPixels, w, h);
+
+        // Textured frame should have a significantly higher score than blank black or white frames
+        Assert.True(texturedScore > blackScore, $"Textured ({texturedScore}) should be > Black ({blackScore})");
+        Assert.True(texturedScore > whiteScore, $"Textured ({texturedScore}) should be > White ({whiteScore})");
+    }
+
+    [Fact]
+    public async Task VideoThumbnailService_GracefulFallbackOnNonExistentFile()
+    {
+        var result = await VideoThumbnailService.Instance.ExtractSmartVideoThumbnailAsync(@"C:\NonExistent_fake_video_12345.mp4", 128);
+        Assert.Null(result);
+    }
+
     public void Dispose() => TestEnvironment.ResetGlobalSettings(TestEnvironment.DefaultFolder);
 }
