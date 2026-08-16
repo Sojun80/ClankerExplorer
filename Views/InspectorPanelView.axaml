@@ -158,30 +158,23 @@
             <Grid RowDefinitions="*,Auto">
               <!-- Video Viewport -->
               <Panel Grid.Row="0">
-                <!-- Native Video Control Host (renders when playing) -->
-                <views:NativeVideoHost x:Name="VideoHost"
-                                       IsVisible="{Binding IsVideoPlaying}"
-                                       HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                <Image Source="{Binding VideoPosterImage}"
+                       Stretch="Uniform"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       RenderOptions.BitmapInterpolationMode="HighQuality"/>
 
-                <!-- Poster Frame / Static Thumbnail (renders when stopped or paused) -->
-                <Panel IsVisible="{Binding !IsVideoPlaying}">
-                  <Image Source="{Binding VideoPosterImage}"
-                         Stretch="Uniform"
-                         HorizontalAlignment="Center"
-                         VerticalAlignment="Center"
-                         RenderOptions.BitmapInterpolationMode="HighQuality"/>
-
-                  <!-- Big Central Play Button -->
-                  <Button Command="{Binding TogglePlayPauseCommand}"
-                          Classes="power-btn"
-                          Width="56" Height="56" CornerRadius="28"
-                          HorizontalAlignment="Center" VerticalAlignment="Center"
-                          Padding="0" Background="#99000000" BorderBrush="{DynamicResource AppHighlightBrush}" BorderThickness="2"
-                          ToolTip.Tip="Play Video">
-                    <TextBlock Text="▶" FontSize="22" Foreground="{DynamicResource AppHighlightBrush}"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" Margin="3,0,0,0"/>
-                  </Button>
-                </Panel>
+                <!-- Big Central Play Button -->
+                <Button Command="{Binding TogglePlayPauseCommand}"
+                        Classes="power-btn"
+                        Width="56" Height="56" CornerRadius="28"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Padding="0" Background="#99000000" BorderBrush="{DynamicResource AppHighlightBrush}" BorderThickness="2"
+                        ToolTip.Tip="Play Video"
+                        IsVisible="{Binding !IsVideoPlaying}">
+                  <TextBlock Text="▶" FontSize="22" Foreground="{DynamicResource AppHighlightBrush}"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                </Button>
               </Panel>
 
               <!-- Video Media Controls Toolbar -->

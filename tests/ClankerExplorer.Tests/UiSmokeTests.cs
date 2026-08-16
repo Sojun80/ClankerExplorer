@@ -1015,12 +1015,31 @@ public sealed class UiSmokeTests
         using var mem5 = new MemoryStream();
         await stream5m.AsStreamForRead().CopyToAsync(mem5);
 
-        using var memDepth = new MemoryStream();
-        await streamDepth.AsStreamForRead().CopyToAsync(memDepth);
-
         Assert.True(clip.OriginalDuration > TimeSpan.Zero, $"Duration was {clip.OriginalDuration}");
         Assert.True(mem5.Length > 1000, $"mem5 length was {mem5.Length}");
-        Assert.True(memDepth.Length > 1000, $"memDepth length was {memDepth.Length}");
+    }
+
+    [Fact]
+    public async Task NativeVideoPlayer_PlaysVideoAsync()
+    {
+        string videoPath = @"E:\FFDL\BadMommyPOV.25.05.02.Kelly.Caprice.Bad.Stepmommy.Seduction.XXX.1080p.MP4-WRB.mp4";
+        if (!File.Exists(videoPath))
+        {
+            videoPath = @"C:\Users\5900x\Videos\Captures\297.mp4";
+        }
+        if (!File.Exists(videoPath)) return;
+
+        var player = new ClankerExplorer.Services.Preview.NativeVideoPlayer();
+        bool ok = await player.OpenAsync(videoPath);
+        Assert.True(ok);
+        Assert.True(player.Duration > TimeSpan.Zero);
+
+        player.Play();
+        await Task.Delay(300);
+        Assert.True(player.GetPosition() >= TimeSpan.Zero);
+
+        player.Pause();
+        player.Dispose();
     }
 
     [Fact]

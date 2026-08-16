@@ -25,9 +25,6 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     // Video Player
     private readonly NativeVideoPlayer _videoPlayer = new();
     private readonly DispatcherTimer _videoPositionTimer;
-    private IntPtr _videoHwnd = IntPtr.Zero;
-    private int _videoHostWidth;
-    private int _videoHostHeight;
 
     public InspectorViewModel()
     {
@@ -345,32 +342,11 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     }
 
     // ==========================================
-    // VIDEO CONTROLS & HWND ATTACH
+    // VIDEO CONTROLS
     // ==========================================
 
-    public void RegisterVideoHostHwnd(IntPtr hwnd)
-    {
-        _videoHwnd = hwnd;
-        if (IsVideoPlaying && !string.IsNullOrEmpty(_currentFilePath))
-        {
-            _videoPlayer.Open(_currentFilePath, _videoHwnd);
-            _videoPlayer.SetBounds(0, 0, _videoHostWidth, _videoHostHeight);
-            _videoPlayer.Play();
-        }
-    }
-
-    public void UpdateVideoHostBounds(int width, int height)
-    {
-        _videoHostWidth = width;
-        _videoHostHeight = height;
-        if (IsVideoPlaying)
-        {
-            _videoPlayer.SetBounds(0, 0, width, height);
-        }
-    }
-
     [RelayCommand]
-    public void TogglePlayPause()
+    public async Task TogglePlayPauseAsync()
     {
         if (IsVideoPlaying)
         {
@@ -378,26 +354,21 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
         }
         else
         {
-            PlayVideo();
+            await PlayVideoAsync();
         }
     }
 
-    public void PlayVideo()
+    public async Task PlayVideoAsync()
     {
         if (string.IsNullOrEmpty(_currentFilePath) || !File.Exists(_currentFilePath)) return;
 
         if (!_videoPlayer.IsInitialized)
         {
-            bool ok = _videoPlayer.Open(_currentFilePath, _videoHwnd);
+            bool ok = await _videoPlayer.OpenAsync(_currentFilePath);
             if (!ok)
             {
                 IsVideoPlaybackAvailable = false;
                 return;
-            }
-
-            if (_videoHostWidth > 0 && _videoHostHeight > 0)
-            {
-                _videoPlayer.SetBounds(0, 0, _videoHostWidth, _videoHostHeight);
             }
 
             if (VideoPosition > TimeSpan.Zero)
@@ -435,13 +406,27 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    public void SeekVideo(double seconds)
+    public async Task SeekVideoAsync(double seconds)
     {
         var target = TimeSpan.FromSeconds(Math.Clamp(seconds, 0, VideoDuration.TotalSeconds));
         VideoPosition = target;
         if (_videoPlayer.IsInitialized)
         {
             _videoPlayer.SetPosition(target);
+        }
+
+        if (!string.IsNullOrEmpty(_currentFilePath))
+        {
+            try
+            {
+                var frameStream = await VideoThumbnailService.Instance.ExtractFrameDirectAsync(_currentFilePath, target, 640, 360);
+                if (frameStream != null && frameStream.Length > 0)
+                {
+                    frameStream.Position = 0;
+                    VideoPosterImage = new Bitmap(frameStream);
+                }
+            }
+            catch { }
         }
     }
 
@@ -457,7 +442,8 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
         _videoPlayer.SetVolume(IsVideoMuted ? 0.0 : value);
     }
 
-    private void OnVideoTimerTick(object? sender, EventArgs e)
+    private int _frameSkip = 0;
+    private async void OnVideoTimerTick(object? sender, EventArgs e)
     {
         if (!IsVideoPlaying) return;
         var current = _videoPlayer.GetPosition();
@@ -468,6 +454,21 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
             {
                 PauseVideo();
                 VideoPosition = VideoDuration;
+            }
+
+            // Periodically refresh preview frame during playback
+            if (++_frameSkip % 5 == 0 && !string.IsNullOrEmpty(_currentFilePath))
+            {
+                try
+                {
+                    var stream = await VideoThumbnailService.Instance.ExtractFrameDirectAsync(_currentFilePath, current, 640, 360);
+                    if (stream != null && stream.Length > 0 && IsVideoPlaying)
+                    {
+                        stream.Position = 0;
+                        VideoPosterImage = new Bitmap(stream);
+                    }
+                }
+                catch { }
             }
         }
     }

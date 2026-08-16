@@ -189,6 +189,57 @@ public class VideoThumbnailService : IDisposable
     }
 
     /// <summary>
+    /// Fast frame extractor returning MemoryStream for video scrubbing and playback preview.
+    /// </summary>
+    public async Task<MemoryStream?> ExtractFrameDirectAsync(string filePath, TimeSpan timeOffset, int targetWidth, int targetHeight, CancellationToken cancellationToken = default)
+    {
+        if (_isDisposed || !OperatingSystem.IsWindows() || !File.Exists(filePath)) return null;
+
+        if (targetWidth <= 0) targetWidth = 640;
+
+        await _decodeThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (cancellationToken.IsCancellationRequested) return null;
+
+            var storageFile = await StorageFile.GetFileFromPathAsync(filePath).AsTask(cancellationToken).ConfigureAwait(false);
+            var clip = await MediaClip.CreateFromFileAsync(storageFile).AsTask(cancellationToken).ConfigureAwait(false);
+
+            if (timeOffset < TimeSpan.Zero) timeOffset = TimeSpan.Zero;
+            if (clip.OriginalDuration > TimeSpan.Zero && timeOffset > clip.OriginalDuration)
+            {
+                timeOffset = clip.OriginalDuration - TimeSpan.FromMilliseconds(100);
+                if (timeOffset < TimeSpan.Zero) timeOffset = TimeSpan.Zero;
+            }
+
+            var composition = new MediaComposition();
+            composition.Clips.Add(clip);
+
+            var imageStream = await composition.GetThumbnailAsync(
+                timeOffset,
+                targetWidth,
+                targetHeight,
+                VideoFramePrecision.NearestFrame).AsTask(cancellationToken).ConfigureAwait(false);
+
+            if (imageStream == null || imageStream.Size == 0) return null;
+
+            using var netStream = imageStream.AsStreamForRead();
+            var mem = new MemoryStream();
+            await netStream.CopyToAsync(mem, cancellationToken).ConfigureAwait(false);
+            mem.Position = 0;
+            return mem;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            _decodeThrottle.Release();
+        }
+    }
+
+    /// <summary>
     /// Asynchronously extracts the best representative video thumbnail using default offset (10% depth).
     /// </summary>
     public async Task<Bitmap?> ExtractSmartVideoThumbnailAsync(string filePath, int targetSize, CancellationToken cancellationToken = default)
