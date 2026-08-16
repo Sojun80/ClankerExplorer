@@ -534,34 +534,20 @@ public class ThumbnailService : IDisposable
 
     private static readonly Guid IShellItemImageFactoryGuid = new("bcc18b79-ba16-442f-80c0-d459e9f86333");
 
-    private static Bitmap? ExtractWindowsShellThumbnail(string filePath, int targetSize)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BITMAP
     {
-        IntPtr hBitmap = IntPtr.Zero;
-        try
-        {
-            int hr = SHCreateItemFromParsingName(filePath, IntPtr.Zero, IShellItemImageFactoryGuid, out var factory);
-            if (hr != 0 || factory == null) return null;
-
-            var size = new SIZE(targetSize, targetSize);
-            hr = factory.GetImage(size, SIIGBF.SIIGBF_BIGGERSIZEOK | SIIGBF.SIIGBF_RESIZETOFIT, out hBitmap);
-            if (hr == 0 && hBitmap != IntPtr.Zero)
-            {
-                return ConvertHBitmapToAvaloniaBitmap(hBitmap);
-            }
-        }
-        catch
-        {
-            // Fall back gracefully if COM extraction fails
-        }
-        finally
-        {
-            if (hBitmap != IntPtr.Zero)
-            {
-                DeleteObject(hBitmap);
-            }
-        }
-        return null;
+        public int bmType;
+        public int bmWidth;
+        public int bmHeight;
+        public int bmWidthBytes;
+        public ushort bmPlanes;
+        public ushort bmBitsPixel;
+        public IntPtr bmBits;
     }
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern int GetObject(IntPtr hgdiobj, int cbBuffer, out BITMAP lpvObject);
 
     [DllImport("gdi32.dll")]
     private static extern int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint lines, [Out] byte[] lpBits, ref BITMAPINFO pbmi, uint usage);
@@ -595,31 +581,95 @@ public class ThumbnailService : IDisposable
         public BITMAPINFOHEADER bmiHeader;
     }
 
-    private static Bitmap? ConvertHBitmapToAvaloniaBitmap(IntPtr hBitmap)
+    private static Bitmap? ExtractWindowsShellThumbnail(string filePath, int targetSize)
     {
-        IntPtr hdc = CreateCompatibleDC(IntPtr.Zero);
+        IntPtr hBitmap = IntPtr.Zero;
         try
         {
-            var bmi = new BITMAPINFO();
-            bmi.bmiHeader.biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>();
+            int hr = SHCreateItemFromParsingName(filePath, IntPtr.Zero, IShellItemImageFactoryGuid, out var factory);
+            if (hr != 0 || factory == null) return null;
 
-            // Query bitmap dimensions
-            if (GetDIBits(hdc, hBitmap, 0, 0, null!, ref bmi, 0) == 0) return null;
+            var size = new SIZE(targetSize, targetSize);
+            hr = factory.GetImage(size, SIIGBF.SIIGBF_BIGGERSIZEOK | SIIGBF.SIIGBF_RESIZETOFIT, out hBitmap);
+            if (hr != 0 || hBitmap == IntPtr.Zero)
+            {
+                hr = factory.GetImage(size, SIIGBF.SIIGBF_RESIZETOFIT, out hBitmap);
+            }
 
-            int width = bmi.bmiHeader.biWidth;
-            int height = Math.Abs(bmi.bmiHeader.biHeight);
+            if (hr == 0 && hBitmap != IntPtr.Zero)
+            {
+                return ConvertHBitmapToAvaloniaBitmap(hBitmap);
+            }
+        }
+        catch
+        {
+            // Fall back gracefully if COM extraction fails
+        }
+        finally
+        {
+            if (hBitmap != IntPtr.Zero)
+            {
+                DeleteObject(hBitmap);
+            }
+        }
+        return null;
+    }
+
+    private static Bitmap? ConvertHBitmapToAvaloniaBitmap(IntPtr hBitmap)
+    {
+        if (hBitmap == IntPtr.Zero) return null;
+
+        try
+        {
+            if (GetObject(hBitmap, Marshal.SizeOf<BITMAP>(), out BITMAP bm) == 0)
+            {
+                return null;
+            }
+
+            int width = bm.bmWidth;
+            int height = Math.Abs(bm.bmHeight);
             if (width <= 0 || height <= 0) return null;
 
-            bmi.bmiHeader.biBitCount = 32;
-            bmi.bmiHeader.biCompression = 0; // BI_RGB
-            bmi.bmiHeader.biHeight = -height; // Top-down DIB
+            byte[] pixelData;
 
-            byte[] pixelData = new byte[width * height * 4];
-            int lines = GetDIBits(hdc, hBitmap, 0, (uint)height, pixelData, ref bmi, 0);
-            if (lines == 0) return null;
+            // If Shell returned a 32-bit DIB section with direct memory pointer:
+            if (bm.bmBits != IntPtr.Zero && bm.bmBitsPixel == 32)
+            {
+                int byteCount = width * height * 4;
+                pixelData = new byte[byteCount];
+                Marshal.Copy(bm.bmBits, pixelData, 0, byteCount);
+            }
+            else
+            {
+                // Fallback to GetDIBits for DDBs
+                IntPtr hdc = CreateCompatibleDC(IntPtr.Zero);
+                try
+                {
+                    var bmi = new BITMAPINFO();
+                    bmi.bmiHeader.biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>();
+                    bmi.bmiHeader.biWidth = width;
+                    bmi.bmiHeader.biHeight = -height; // Top-down DIB
+                    bmi.bmiHeader.biPlanes = 1;
+                    bmi.bmiHeader.biBitCount = 32;
+                    bmi.bmiHeader.biCompression = 0; // BI_RGB
+
+                    pixelData = new byte[width * height * 4];
+                    int lines = GetDIBits(hdc, hBitmap, 0, (uint)height, pixelData, ref bmi, 0);
+                    if (lines == 0) return null;
+                }
+                finally
+                {
+                    if (hdc != IntPtr.Zero) DeleteDC(hdc);
+                }
+            }
 
             // Create WriteableBitmap from raw 32bpp BGRA pixels
-            var wbm = new WriteableBitmap(new Avalonia.PixelSize(width, height), new Avalonia.Vector(96, 96), Avalonia.Platform.PixelFormat.Bgra8888, Avalonia.Platform.AlphaFormat.Premul);
+            var wbm = new WriteableBitmap(
+                new Avalonia.PixelSize(width, height),
+                new Avalonia.Vector(96, 96),
+                Avalonia.Platform.PixelFormat.Bgra8888,
+                Avalonia.Platform.AlphaFormat.Premul);
+
             using (var fb = wbm.Lock())
             {
                 Marshal.Copy(pixelData, 0, fb.Address, pixelData.Length);
@@ -629,13 +679,6 @@ public class ThumbnailService : IDisposable
         catch
         {
             return null;
-        }
-        finally
-        {
-            if (hdc != IntPtr.Zero)
-            {
-                DeleteDC(hdc);
-            }
         }
     }
 
