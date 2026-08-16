@@ -430,8 +430,14 @@ public partial class ExplorerPaneView : UserControl
 
         if (rightClick)
         {
-            if (!item.IsThumbnailSelected)
+            if (item.IsThumbnailSelected || tab.SelectedItems.Contains(item))
             {
+                // Preserve existing multi-selection if right-clicked item is already selected
+                tab.SelectedItem = item;
+            }
+            else
+            {
+                // Select only this item before context menu
                 tab.SelectThumbnailItem(item, control: false, shift: false);
             }
         }
@@ -575,7 +581,7 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnDataGridPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
     {
-        if (e.GetCurrentPoint(FileDataGrid).Properties.IsRightButtonPressed)
+        if (FileDataGrid != null && e.GetCurrentPoint(FileDataGrid).Properties.IsRightButtonPressed)
         {
             var source = e.Source as Visual;
             while (source != null && source is not DataGridRow && source != FileDataGrid)
@@ -583,13 +589,24 @@ public partial class ExplorerPaneView : UserControl
                 source = source.GetVisualParent();
             }
 
-            if (source is DataGridRow row && row.DataContext is FileItem item && DataContext is ExplorerPaneViewModel vm)
+            if (source is DataGridRow row && row.DataContext is FileItem item && DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null)
             {
-                if (vm.SelectedTab != null)
+                var tab = vm.SelectedTab;
+                if (FileDataGrid.SelectedItems.Contains(item) || tab.SelectedItems.Contains(item))
                 {
-                    vm.SelectedTab.SelectedItem = item;
-                    vm.NotifyContextMenuProperties();
+                    // Right-clicking an item already part of a multi-selection preserves the multi-selection
+                    tab.SelectedItem = item;
                 }
+                else
+                {
+                    // Right-clicking an unselected item selects that item before showing context menu
+                    FileDataGrid.SelectedItems.Clear();
+                    FileDataGrid.SelectedItems.Add(item);
+                    tab.SelectedItems.Clear();
+                    tab.SelectedItems.Add(item);
+                    tab.SelectedItem = item;
+                }
+                vm.NotifyContextMenuProperties();
             }
         }
     }
@@ -1238,8 +1255,28 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (DataContext is ExplorerPaneViewModel vm)
+        if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null && FileDataGrid != null)
         {
+            var tab = vm.SelectedTab;
+            var currentGridSelected = FileDataGrid.SelectedItems.Cast<FileItem>().ToList();
+            if (currentGridSelected.Count > 0)
+            {
+                tab.SelectedItems.Clear();
+                foreach (var item in currentGridSelected)
+                {
+                    tab.SelectedItems.Add(item);
+                }
+            }
+            else if (tab.SelectedItem != null)
+            {
+                tab.SelectedItems.Clear();
+                tab.SelectedItems.Add(tab.SelectedItem);
+            }
+            else
+            {
+                tab.SelectedItems.Clear();
+            }
+
             vm.NotifyContextMenuProperties();
         }
     }

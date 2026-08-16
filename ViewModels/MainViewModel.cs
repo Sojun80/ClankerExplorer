@@ -93,6 +93,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public event Action<FileItem>? RequestRename;
     public event Action<FileItem?>? RequestProperties;
     public event Action<FileItem, bool>? RequestDeleteWithConfirmation;
+    public event Action<List<FileItem>, bool>? RequestDeleteMultipleWithConfirmation;
 
     public MainViewModel(bool loadSidebarData = true)
     {
@@ -258,6 +259,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         pane.RequestRename += item => RequestRename?.Invoke(item);
         pane.RequestProperties += item => RequestProperties?.Invoke(item);
         pane.RequestDeleteWithConfirmation += (item, perm) => RequestDeleteWithConfirmation?.Invoke(item, perm);
+        pane.RequestDeleteMultipleWithConfirmation += (items, perm) => RequestDeleteMultipleWithConfirmation?.Invoke(items, perm);
     }
 
     public void SetActivePane(string paneId)

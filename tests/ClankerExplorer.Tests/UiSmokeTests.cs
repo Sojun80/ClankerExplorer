@@ -485,4 +485,76 @@ public sealed class UiSmokeTests
             window.Close();
         }
     }
+
+    [AvaloniaFact]
+    public async Task RightClickSelection_UnselectedAndMultiSelection_PreservesCorrectSelection()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+
+        var file1 = Path.Combine(fs.FolderA, "alpha.txt");
+        var file2 = Path.Combine(fs.FolderA, "beta.txt");
+        var file3 = Path.Combine(fs.FolderA, "gamma.txt");
+        File.WriteAllText(file3, "gamma");
+
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderA, "PANE 1");
+        await pane.SelectedTab!.RefreshAsync();
+
+        var tab = pane.SelectedTab;
+        var item1 = tab.FilteredItems.First(i => i.Name == "alpha.txt");
+        var item2 = tab.FilteredItems.First(i => i.Name == "beta.txt");
+        var item3 = tab.FilteredItems.First(i => i.Name == "gamma.txt");
+
+        // 1. Initial multi-selection in Thumbnail mode
+        tab.SelectThumbnailItem(item1, control: false, shift: false);
+        tab.SelectThumbnailItem(item2, control: true, shift: false);
+        Assert.Equal(2, tab.SelectedItems.Count);
+        Assert.True(item1.IsThumbnailSelected);
+        Assert.True(item2.IsThumbnailSelected);
+
+        // 2. Right-click on item2 (which is part of the multi-selection)
+        // Thumbnail mode simulation
+        if (item2.IsThumbnailSelected || tab.SelectedItems.Contains(item2))
+        {
+            tab.SelectedItem = item2;
+        }
+        else
+        {
+            tab.SelectThumbnailItem(item2, control: false, shift: false);
+        }
+
+        // Multi-selection is preserved!
+        Assert.Equal(2, tab.SelectedItems.Count);
+        Assert.Contains(item1, tab.SelectedItems);
+        Assert.Contains(item2, tab.SelectedItems);
+        Assert.Equal(item2, tab.SelectedItem);
+
+        // Verify context menu actions operate on multi-selection
+        var selectedFiles = pane.GetSelectedFileItems();
+        Assert.Equal(2, selectedFiles.Count);
+        Assert.Contains(item1, selectedFiles);
+        Assert.Contains(item2, selectedFiles);
+
+        pane.CopyFiles();
+        Assert.Equal(2, ClipboardFileService.StoredPaths.Count);
+        Assert.Contains(file1, ClipboardFileService.StoredPaths);
+        Assert.Contains(file2, ClipboardFileService.StoredPaths);
+
+        // 3. Right-click on item3 (unselected item)
+        if (item3.IsThumbnailSelected || tab.SelectedItems.Contains(item3))
+        {
+            tab.SelectedItem = item3;
+        }
+        else
+        {
+            tab.SelectThumbnailItem(item3, control: false, shift: false);
+        }
+
+        // Selected only item3
+        Assert.Single(tab.SelectedItems);
+        Assert.Equal(item3, tab.SelectedItem);
+        Assert.True(item3.IsThumbnailSelected);
+        Assert.False(item1.IsThumbnailSelected);
+        Assert.False(item2.IsThumbnailSelected);
+    }
 }

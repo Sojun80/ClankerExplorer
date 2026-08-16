@@ -1002,25 +1002,41 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         }
     }
 
+    public List<FileItem> GetSelectedFileItems()
+    {
+        if (SelectedTab == null) return new();
+        if (SelectedTab.SelectedItems.Count > 0)
+        {
+            return SelectedTab.SelectedItems.ToList();
+        }
+        if (SelectedTab.SelectedItem != null)
+        {
+            return new List<FileItem> { SelectedTab.SelectedItem };
+        }
+        return new();
+    }
+
     [RelayCommand]
     public void CopyFiles()
     {
-        var target = SelectedTab?.SelectedItem;
-        if (target != null)
+        var targets = GetSelectedFileItems();
+        if (targets.Count > 0)
         {
-            ClipboardFileService.Copy(new[] { target.FullPath });
-            RequestSetClipboardText?.Invoke(target.FullPath);
+            var paths = targets.Select(t => t.FullPath).ToArray();
+            ClipboardFileService.Copy(paths);
+            RequestSetClipboardText?.Invoke(string.Join(Environment.NewLine, paths));
         }
     }
 
     [RelayCommand]
     public void CutFiles()
     {
-        var target = SelectedTab?.SelectedItem;
-        if (target != null)
+        var targets = GetSelectedFileItems();
+        if (targets.Count > 0)
         {
-            ClipboardFileService.Cut(new[] { target.FullPath });
-            RequestSetClipboardText?.Invoke(target.FullPath);
+            var paths = targets.Select(t => t.FullPath).ToArray();
+            ClipboardFileService.Cut(paths);
+            RequestSetClipboardText?.Invoke(string.Join(Environment.NewLine, paths));
         }
     }
 
@@ -1042,10 +1058,10 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void CopyPath()
     {
-        var target = SelectedTab?.SelectedItem;
-        if (target != null)
+        var targets = GetSelectedFileItems();
+        if (targets.Count > 0)
         {
-            RequestSetClipboardText?.Invoke(target.FullPath);
+            RequestSetClipboardText?.Invoke(string.Join(Environment.NewLine, targets.Select(t => t.FullPath)));
         }
     }
 
@@ -1217,15 +1233,24 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         FileSystemService.Instance.OpenEditor(path);
     }
 
+    public event Action<List<FileItem>, bool>? RequestDeleteMultipleWithConfirmation;
     public event Action<FileItem, bool>? RequestDeleteWithConfirmation;
 
     [RelayCommand]
     public void DeleteSelected(bool permanent = false)
     {
-        var item = SelectedTab?.SelectedItem;
-        if (item != null)
+        var items = GetSelectedFileItems();
+        if (items.Count > 1 && RequestDeleteMultipleWithConfirmation != null)
         {
-            RequestDeleteWithConfirmation?.Invoke(item, permanent);
+            RequestDeleteMultipleWithConfirmation.Invoke(items, permanent);
+        }
+        else
+        {
+            var item = items.FirstOrDefault() ?? SelectedTab?.SelectedItem;
+            if (item != null)
+            {
+                RequestDeleteWithConfirmation?.Invoke(item, permanent);
+            }
         }
     }
 

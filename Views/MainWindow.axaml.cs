@@ -130,6 +130,28 @@ public partial class MainWindow : Window
                         await ShowErrorDialogAsync("Delete Failed", ex.Message);
                     }
                 };
+
+                vm.RequestDeleteMultipleWithConfirmation += async (items, perm) =>
+                {
+                    if (items == null || items.Count == 0) return;
+                    try
+                    {
+                        var settings = SettingsService.Instance.CurrentSettings;
+                        if (settings.ConfirmBeforeDelete)
+                        {
+                            var dlg = new ConfirmDeleteWindow($"{items.Count} items", $"{items.Count} selected files and folders", perm);
+                            var res = await dlg.ShowDialog<bool>(this);
+                            if (!res) return;
+                        }
+
+                        await FileSystemService.Instance.DeleteAsync(items.Select(i => i.FullPath).ToArray(), perm);
+                        await vm.ActivePane.RefreshAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        await ShowErrorDialogAsync("Delete Failed", ex.Message);
+                    }
+                };
             }
         };
 
