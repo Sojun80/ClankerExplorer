@@ -693,7 +693,18 @@ public partial class ExplorerPaneView : UserControl
         if (FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
         var tab = vm.SelectedTab;
 
-        var source = e.Source as Visual;
+        var rawSource = e.Source as Visual;
+        var check = rawSource;
+        while (check != null && check != FileDataGrid)
+        {
+            if (check is ScrollBar || check is Thumb || check is Track || check is DataGridColumnHeader || check is Button)
+            {
+                return; // Ignore scrollbar and column header clicks completely
+            }
+            check = check.GetVisualParent();
+        }
+
+        var source = rawSource;
         while (source != null && source is not DataGridRow && source.GetType().Name != "DataGridColumnHeader" && source != FileDataGrid)
         {
             source = source.GetVisualParent();
@@ -757,7 +768,18 @@ public partial class ExplorerPaneView : UserControl
     {
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null || ThumbnailListBox == null) return;
 
-        var source = e.Source as Visual;
+        var rawSource = e.Source as Visual;
+        var check = rawSource;
+        while (check != null && check != ThumbnailListBox)
+        {
+            if (check is ScrollBar || check is Thumb || check is Track || check is Button)
+            {
+                return; // Ignore scrollbar clicks completely
+            }
+            check = check.GetVisualParent();
+        }
+
+        var source = rawSource;
         // Check if the click happened on a thumbnail card (FileItem DataContext)
         while (source != null && source != ThumbnailListBox)
         {
