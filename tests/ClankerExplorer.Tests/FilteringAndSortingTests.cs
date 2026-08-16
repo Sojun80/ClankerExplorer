@@ -9,7 +9,7 @@ namespace ClankerExplorer.Tests;
 public sealed class FilteringAndSortingTests
 {
     [Fact]
-    public async Task NameSort_IsNaturalAndKeepsFoldersFirst()
+    public async Task NameSort_IsNaturalAndTreatsFilesAndFoldersAsEquals()
     {
         using var fs = new TemporaryFileSystem();
         using var tab = new ExplorerTabViewModel(fs.Root);
@@ -28,7 +28,7 @@ public sealed class FilteringAndSortingTests
         tab.ApplyFilter();
 
         Assert.Equal(
-            new[] { "FolderA", "FolderZ", "file1.txt", "file2.txt", "file10.txt" },
+            new[] { "file1.txt", "file2.txt", "file10.txt", "FolderA", "FolderZ" },
             tab.FilteredItems.Select(item => item.Name));
     }
 

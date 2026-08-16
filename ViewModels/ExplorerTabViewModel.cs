@@ -380,38 +380,38 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             }
         }
 
-        // Sort: Folders always on top, then sort column
+        // Sort: files and folders are treated as equals when sorting
         IOrderedEnumerable<FileItem> sorted;
         if (sortAscending)
         {
             sorted = sortColumn switch
             {
-                "Extension" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Size" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.SizeBytes).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Modified" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.ModifiedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Created" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.CreatedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Accessed" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.AccessedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Type" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Attributes" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.AttributesString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Permissions" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.PermissionsString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "OwnerGroup" => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.OwnerGroupString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                _ => query.OrderByDescending(i => i.IsDirectory).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase)
+                "Extension" => query.OrderBy(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Size" => query.OrderBy(i => i.SizeBytes).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Modified" => query.OrderBy(i => i.ModifiedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Created" => query.OrderBy(i => i.CreatedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Accessed" => query.OrderBy(i => i.AccessedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Type" => query.OrderBy(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Attributes" => query.OrderBy(i => i.AttributesString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Permissions" => query.OrderBy(i => i.PermissionsString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "OwnerGroup" => query.OrderBy(i => i.OwnerGroupString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                _ => query.OrderBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase)
             };
         }
         else
         {
             sorted = sortColumn switch
             {
-                "Extension" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Size" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.SizeBytes).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Modified" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.ModifiedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Created" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.CreatedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Accessed" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.AccessedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Type" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Attributes" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.AttributesString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "Permissions" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.PermissionsString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                "OwnerGroup" => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.OwnerGroupString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
-                _ => query.OrderByDescending(i => i.IsDirectory).ThenByDescending(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase)
+                "Extension" => query.OrderByDescending(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Size" => query.OrderByDescending(i => i.SizeBytes).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Modified" => query.OrderByDescending(i => i.ModifiedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Created" => query.OrderByDescending(i => i.CreatedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Accessed" => query.OrderByDescending(i => i.AccessedTime).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Type" => query.OrderByDescending(i => i.Extension).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Attributes" => query.OrderByDescending(i => i.AttributesString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "Permissions" => query.OrderByDescending(i => i.PermissionsString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                "OwnerGroup" => query.OrderByDescending(i => i.OwnerGroupString).ThenBy(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase),
+                _ => query.OrderByDescending(i => i.Name, NaturalStringComparer.OrdinalIgnoreCase)
             };
         }
 
