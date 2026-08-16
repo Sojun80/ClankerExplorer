@@ -490,35 +490,22 @@ public class ThumbnailService : IDisposable
 
     #region Windows Shell Thumbnail Extraction
 
-    [ComImport]
-    [Guid("bcc18b79-ba16-442f-80c0-d459e9f86333")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IShellItemImageFactory
+    [ComImport, Guid("e357fccd-a995-4576-b01f-234630154e96"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IThumbnailProvider
     {
         [PreserveSig]
-        int GetImage(
-            [In, MarshalAs(UnmanagedType.Struct)] SIZE size,
-            [In] SIIGBF flags,
-            [Out] out IntPtr phbm);
+        int GetThumbnail(uint cx, out IntPtr phbmp, out uint pdwAlpha);
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct SIZE
+    [ComImport, Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellItem
     {
-        public int cx;
-        public int cy;
-        public SIZE(int cx, int cy) { this.cx = cx; this.cy = cy; }
-    }
-
-    [Flags]
-    private enum SIIGBF
-    {
-        SIIGBF_RESIZETOFIT = 0x00,
-        SIIGBF_BIGGERSIZEOK = 0x01,
-        SIIGBF_MEMORYONLY = 0x02,
-        SIIGBF_ICONONLY = 0x04,
-        SIIGBF_THUMBNAILONLY = 0x08,
-        SIIGBF_INCACHEONLY = 0x10
+        [PreserveSig]
+        int BindToHandler([In] IntPtr pbc, [In, MarshalAs(UnmanagedType.LPStruct)] Guid bhid, [In, MarshalAs(UnmanagedType.LPStruct)] Guid riid, [Out] out IntPtr ppv);
+        void GetParent();
+        void GetDisplayName();
+        void GetAttributes();
+        void Compare();
     }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -526,13 +513,11 @@ public class ThumbnailService : IDisposable
         [In, MarshalAs(UnmanagedType.LPWStr)] string pszPath,
         [In] IntPtr pbc,
         [In, MarshalAs(UnmanagedType.LPStruct)] Guid riid,
-        [Out, MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory ppv);
+        [Out, MarshalAs(UnmanagedType.Interface)] out IShellItem ppv);
 
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DeleteObject(IntPtr hObject);
-
-    private static readonly Guid IShellItemImageFactoryGuid = new("bcc18b79-ba16-442f-80c0-d459e9f86333");
 
     [StructLayout(LayoutKind.Sequential)]
     private struct BITMAP
@@ -581,19 +566,30 @@ public class ThumbnailService : IDisposable
         public BITMAPINFOHEADER bmiHeader;
     }
 
+    private static readonly Guid IShellItemGuid = new("43826d1e-e718-42ee-bc55-a1e261c37bfe");
+    private static readonly Guid BHID_ThumbnailHandler = new("7b2e650a-8e20-4f4a-b09e-6597afc72fb0");
+    private static readonly Guid IID_IThumbnailProvider = new("e357fccd-a995-4576-b01f-234630154e96");
+
     private static Bitmap? ExtractWindowsShellThumbnail(string filePath, int targetSize)
     {
         IntPtr hBitmap = IntPtr.Zero;
         try
         {
-            int hr = SHCreateItemFromParsingName(filePath, IntPtr.Zero, IShellItemImageFactoryGuid, out var factory);
-            if (hr != 0 || factory == null) return null;
+            int hr = SHCreateItemFromParsingName(filePath, IntPtr.Zero, IShellItemGuid, out var shellItem);
+            if (hr != 0 || shellItem == null) return null;
 
-            var size = new SIZE(targetSize, targetSize);
-            hr = factory.GetImage(size, SIIGBF.SIIGBF_BIGGERSIZEOK | SIIGBF.SIIGBF_RESIZETOFIT, out hBitmap);
-            if (hr != 0 || hBitmap == IntPtr.Zero)
+            int hrBind = shellItem.BindToHandler(IntPtr.Zero, BHID_ThumbnailHandler, IID_IThumbnailProvider, out var pProvider);
+            if (hrBind == 0 && pProvider != IntPtr.Zero)
             {
-                hr = factory.GetImage(size, SIIGBF.SIIGBF_RESIZETOFIT, out hBitmap);
+                try
+                {
+                    var provider = (IThumbnailProvider)Marshal.GetObjectForIUnknown(pProvider);
+                    hr = provider.GetThumbnail((uint)targetSize, out hBitmap, out _);
+                }
+                finally
+                {
+                    Marshal.Release(pProvider);
+                }
             }
 
             if (hr == 0 && hBitmap != IntPtr.Zero)

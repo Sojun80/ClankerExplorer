@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
@@ -970,5 +971,18 @@ public sealed class UiSmokeTests
         {
             try { Directory.Delete(tempRoot, true); } catch { }
         }
+    }
+
+    [AvaloniaFact]
+    public async Task ThumbnailService_ExtractsRealVideoThumbnailAsync()
+    {
+        string videoPath = @"C:\Users\5900x\Videos\Captures\297.mp4";
+        if (!File.Exists(videoPath)) return;
+
+        ThumbnailService.Instance.ClearCache();
+        var bmp = await ThumbnailService.Instance.GetThumbnailAsync(videoPath, File.GetLastWriteTimeUtc(videoPath), 256);
+        Assert.NotNull(bmp);
+        Assert.True(bmp.PixelSize.Width > 0);
+        Assert.True(bmp.PixelSize.Height > 0);
     }
 }
