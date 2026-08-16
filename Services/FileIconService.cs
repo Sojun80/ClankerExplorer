@@ -38,23 +38,86 @@ public class FileIconService
     private const uint SHGFI_SYSICONINDEX = 0x000004000;
     private const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
     private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+    private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
     private const int ILD_TRANSPARENT = 0x00000001;
     private const uint DI_NORMAL = 0x0003;
 
+    private IImage? _folderIcon;
+
     public IImage? GetFileIcon(FileItem item)
     {
-        if (item == null || item.IsDirectory) return null;
+        if (item == null) return null;
+
+        if (item.IsDirectory)
+        {
+            return GetFolderIcon();
+        }
 
         var ext = item.Extension ?? string.Empty;
         var fullPath = item.FullPath;
 
-        // For files with unique per-file embedded icons (exes, icos, shortcuts)
-        if (PerFileIconExtensions.Contains(ext) && !string.IsNullOrEmpty(fullPath))
+        // If file exists on disk, try exact extraction first (gives unique app/doc/media icons)
+        if (!string.IsNullOrEmpty(fullPath) && File.Exists(fullPath))
         {
             return _fileIconCache.GetOrAdd(fullPath, path => ExtractFileIcon(path, isExactPath: true) ?? GetExtensionIcon(ext));
         }
 
         return GetExtensionIcon(ext);
+    }
+
+    public IImage? GetFolderIcon()
+    {
+        if (_folderIcon != null) return _folderIcon;
+
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                // Try Jumbo (256x256) folder icon from System Image List
+                var sfi = new SHFILEINFO();
+                IntPtr res = SHGetFileInfo("dummy", FILE_ATTRIBUTE_DIRECTORY, ref sfi, (uint)Marshal.SizeOf<SHFILEINFO>(), SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES);
+                if (res != IntPtr.Zero)
+                {
+                    int iconIndex = sfi.iIcon;
+                    var iid = IID_IImageList;
+                    int hr = SHGetImageList(SHIL_JUMBO, ref iid, out var imageList);
+                    if (hr == 0 && imageList != null)
+                    {
+                        hr = imageList.GetIcon(iconIndex, ILD_TRANSPARENT, out IntPtr hIcon);
+                        if (hr == 0 && hIcon != IntPtr.Zero)
+                        {
+                            try
+                            {
+                                _folderIcon = ConvertHIconToBitmap(hIcon);
+                            }
+                            finally
+                            {
+                                DestroyIcon(hIcon);
+                            }
+                        }
+                    }
+                }
+
+                if (_folderIcon == null)
+                {
+                    SHGetFileInfo("dummy", FILE_ATTRIBUTE_DIRECTORY, ref sfi, (uint)Marshal.SizeOf<SHFILEINFO>(), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES);
+                    if (sfi.hIcon != IntPtr.Zero)
+                    {
+                        try
+                        {
+                            _folderIcon = ConvertHIconToBitmap(sfi.hIcon);
+                        }
+                        finally
+                        {
+                            DestroyIcon(sfi.hIcon);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        return _folderIcon;
     }
 
     public IImage? GetExtensionIcon(string extension)

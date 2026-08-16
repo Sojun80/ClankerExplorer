@@ -524,19 +524,32 @@
               <Grid ColumnDefinitions="Auto,*" VerticalAlignment="Center" Margin="6,0" Opacity="{Binding RowOpacity}">
                 <!-- Icon container -->
                 <Panel Grid.Column="0" Width="20" Height="20" Margin="0,0,8,0" VerticalAlignment="Center">
-                  <!-- Folder Icon: Vector icon (16x13px) -->
-                  <Border IsVisible="{Binding IsDirectory}" Width="20" Height="20" VerticalAlignment="Center">
+                  <!-- Native High-Res Windows Icon (Folders & Files) -->
+                  <Image Source="{Binding FileIcon}" IsVisible="{Binding HasFileIcon}" Width="16" Height="16" Stretch="Uniform"
+                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                  <!-- Fallback Vector Folder (only if OS icon unavailable) -->
+                  <Border Width="20" Height="20" VerticalAlignment="Center">
+                    <Border.IsVisible>
+                      <MultiBinding Converter="{x:Static BoolConverters.And}">
+                        <Binding Path="IsDirectory"/>
+                        <Binding Path="!HasFileIcon"/>
+                      </MultiBinding>
+                    </Border.IsVisible>
                     <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
                           Fill="{DynamicResource AppAccentBrush}" Stroke="{DynamicResource AppHighlightBrush}" StrokeThickness="0.8" Width="16" Height="13" Stretch="Uniform"
                           VerticalAlignment="Center" HorizontalAlignment="Center"/>
                   </Border>
 
-                  <!-- File Icon: Windows-associated / cached 16x16 icon with generic fallback -->
-                  <Panel IsVisible="{Binding !IsDirectory}" Width="20" Height="20" VerticalAlignment="Center">
-                    <Image Source="{Binding FileIcon}" IsVisible="{Binding HasFileIcon}" Width="16" Height="16" Stretch="Uniform"
-                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    <TextBlock Text="📄" IsVisible="{Binding !HasFileIcon}" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                  </Panel>
+                  <!-- Fallback Generic File Text (only if OS icon unavailable) -->
+                  <TextBlock Text="📄" FontSize="12" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock.IsVisible>
+                      <MultiBinding Converter="{x:Static BoolConverters.And}">
+                        <Binding Path="!IsDirectory"/>
+                        <Binding Path="!HasFileIcon"/>
+                      </MultiBinding>
+                    </TextBlock.IsVisible>
+                  </TextBlock>
                 </Panel>
 
                 <!-- Folder Name: Segoe UI Variable, Semibold, 13px -->
@@ -756,38 +769,46 @@
                          Stretch="Uniform"
                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
-                  <!-- Fallback Vector Icon when thumbnail is not yet loaded / unsupported -->
+                  <!-- High-Resolution Native Shell Icon for both Files and Folders when no photo thumbnail is available -->
                   <Panel IsVisible="{Binding !HasThumbnail}" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <!-- Folder Vector Icon -->
-                    <Path IsVisible="{Binding IsDirectory}"
-                          Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
+                    <Image Source="{Binding FileIcon}" IsVisible="{Binding HasFileIcon}"
+                           Width="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageWidth}"
+                           Height="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageHeight}"
+                           Stretch="Uniform"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                    <!-- Fallback Vector Icon only if OS icon cannot be loaded -->
+                    <Path Data="M 2 4 C 2 2.9 2.9 2 4 2 L 7.5 2 C 8.3 2 9.1 2.5 9.5 3.2 L 10.5 4.8 C 10.8 5.2 11.2 5.5 11.7 5.5 L 18 5.5 C 19.1 5.5 20 6.4 20 7.5 L 20 15 C 20 16.1 19.1 17 18 17 L 4 17 C 2.9 17 2 16.1 2 15 Z"
                           Fill="{DynamicResource AppAccentBrush}"
                           Stroke="{DynamicResource AppHighlightBrush}"
                           StrokeThickness="1"
                           Width="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageWidth}"
                           Height="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageHeight}"
                           Stretch="Uniform"
-                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <Path.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                          <Binding Path="IsDirectory"/>
+                          <Binding Path="!HasFileIcon"/>
+                        </MultiBinding>
+                      </Path.IsVisible>
+                    </Path>
 
-                    <!-- File Icon in Thumbnail Mode: High-Resolution full-size icon matching thumbnail tile -->
-                    <Panel IsVisible="{Binding !IsDirectory}" HorizontalAlignment="Center" VerticalAlignment="Center">
-                      <Image Source="{Binding FileIcon}" IsVisible="{Binding HasFileIcon}"
-                             Width="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageWidth}"
-                             Height="{Binding $parent[UserControl].((vm:ExplorerPaneViewModel)DataContext).ThumbnailImageHeight}"
-                             Stretch="Uniform"
-                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
-
-                      <!-- Generic File Type Badge when no icon available -->
-                      <Border IsVisible="{Binding !HasFileIcon}"
-                              Background="#121D30" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
-                              CornerRadius="8" Padding="12,10" HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4">
-                          <TextBlock Text="{Binding IconKind}" FontSize="18" HorizontalAlignment="Center" Foreground="{DynamicResource AppHighlightBrush}"/>
-                          <TextBlock Text="{Binding ExtensionDisplay}" FontSize="10" FontWeight="Bold" FontFamily="{DynamicResource AppMonoFont}"
-                                     Foreground="{DynamicResource AppTextBrush}" HorizontalAlignment="Center"/>
-                        </StackPanel>
-                      </Border>
-                    </Panel>
+                    <!-- Generic File Type Badge only if OS icon cannot be loaded -->
+                    <Border Background="#121D30" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                            CornerRadius="8" Padding="12,10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <Border.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                          <Binding Path="!IsDirectory"/>
+                          <Binding Path="!HasFileIcon"/>
+                        </MultiBinding>
+                      </Border.IsVisible>
+                      <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="4">
+                        <TextBlock Text="{Binding IconKind}" FontSize="18" HorizontalAlignment="Center" Foreground="{DynamicResource AppHighlightBrush}"/>
+                        <TextBlock Text="{Binding ExtensionDisplay}" FontSize="10" FontWeight="Bold" FontFamily="{DynamicResource AppMonoFont}"
+                                   Foreground="{DynamicResource AppTextBrush}" HorizontalAlignment="Center"/>
+                      </StackPanel>
+                    </Border>
                   </Panel>
                 </Panel>
 

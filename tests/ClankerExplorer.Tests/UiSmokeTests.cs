@@ -630,9 +630,11 @@ public sealed class UiSmokeTests
             IsDirectory = true
         };
 
-        // Folders return null for FileIcon and retain their folder vector icon
-        Assert.Null(folder.FileIcon);
-        Assert.False(folder.HasFileIcon);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.NotNull(folder.FileIcon);
+            Assert.True(folder.HasFileIcon);
+        }
 
         // Files obtain an icon
         var icon1 = textFile.FileIcon;

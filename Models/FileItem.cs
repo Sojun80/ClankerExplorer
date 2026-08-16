@@ -150,16 +150,13 @@ public partial class FileItem : ObservableObject
     [ObservableProperty]
     private bool _isThumbnailSelected;
 
-    // File Icon (Windows-associated / extension cached)
+    // File / Folder Icon (Windows-associated / extension cached)
     private IImage? _fileIcon;
     public IImage? FileIcon
     {
         get
         {
-            if (_fileIcon == null && !IsDirectory)
-            {
-                _fileIcon = FileIconService.Instance.GetFileIcon(this);
-            }
+            _fileIcon ??= FileIconService.Instance.GetFileIcon(this);
             return _fileIcon;
         }
         set => _fileIcon = value;
