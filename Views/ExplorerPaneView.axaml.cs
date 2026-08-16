@@ -839,11 +839,6 @@ public partial class ExplorerPaneView : UserControl
                     StartDragAsync(e, _dragCandidateItem);
                 }
             }
-            else
-            {
-                _dragCandidateItem = null;
-                _isDragActive = false;
-            }
         }
     }
 
@@ -1798,12 +1793,12 @@ public partial class ExplorerPaneView : UserControl
                     var fileUri = new Uri(Path.GetFullPath(p));
                     if (Directory.Exists(p))
                     {
-                        var f = await storageProvider.TryGetFolderFromPathAsync(fileUri);
+                        var f = storageProvider.TryGetFolderFromPathAsync(fileUri).GetAwaiter().GetResult();
                         if (f != null) storageItems.Add(f);
                     }
                     else if (File.Exists(p))
                     {
-                        var f = await storageProvider.TryGetFileFromPathAsync(fileUri);
+                        var f = storageProvider.TryGetFileFromPathAsync(fileUri).GetAwaiter().GetResult();
                         if (f != null) storageItems.Add(f);
                     }
                 }
