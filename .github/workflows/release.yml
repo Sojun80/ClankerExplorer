@@ -1,0 +1,49 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Publish Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore Dependencies
+        run: dotnet restore ClankerExplorer.csproj
+
+      - name: Build and Publish Windows x64
+        run: |
+          dotnet publish ClankerExplorer.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish/win-x64
+
+      - name: Package Windows x64 ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "publish/win-x64/*" -DestinationPath "ClankerExplorer-Windows-x64.zip" -Force
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ClankerExplorer-Windows-x64.zip
+            publish/win-x64/ClankerExplorer.exe
+          name: ClankerExplorer ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true

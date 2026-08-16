@@ -78,7 +78,7 @@
     <None Include="libvlc\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <Target Name="SyncNet8LegacyOutput" AfterTargets="Build">
+  <Target Name="SyncNet8LegacyOutput" AfterTargets="Build" Condition="'$(SolutionDir)' != '' and '$(SolutionDir)' != '*Undefined*'">
     <ItemGroup>
       <OutputFiles Include="$(TargetDir)**\*.*" />
     </ItemGroup>

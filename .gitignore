@@ -1,8 +1,10 @@
 ## .NET / C# Build Artifacts
 [Bb]in/
 [Oo]bj/
+[Pp]ublish/
 [Ll]og/
 [Ll]ogs/
+*.zip
 *.user
 *.suo
 *.userprefs
