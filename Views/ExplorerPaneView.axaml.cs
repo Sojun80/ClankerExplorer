@@ -108,6 +108,8 @@ public partial class ExplorerPaneView : UserControl
             if (FileDataGrid != null)
             {
                 FileDataGrid.AddHandler(PointerPressedEvent, OnDataGridPointerPressedTunnel, RoutingStrategies.Tunnel);
+                FileDataGrid.AddHandler(PointerMovedEvent, OnPointerMovedTunnel, RoutingStrategies.Tunnel);
+                FileDataGrid.AddHandler(PointerReleasedEvent, OnPointerReleasedTunnel, RoutingStrategies.Tunnel);
                 FileDataGrid.AddHandler(PointerReleasedEvent, (sender, args) =>
                 {
                     SaveCurrentColumnLayout();
@@ -125,11 +127,15 @@ public partial class ExplorerPaneView : UserControl
             if (ThumbnailListBox != null)
             {
                 ThumbnailListBox.AddHandler(PointerPressedEvent, OnThumbnailListBoxPointerPressedTunnel, RoutingStrategies.Tunnel);
+                ThumbnailListBox.AddHandler(PointerMovedEvent, OnPointerMovedTunnel, RoutingStrategies.Tunnel);
+                ThumbnailListBox.AddHandler(PointerReleasedEvent, OnPointerReleasedTunnel, RoutingStrategies.Tunnel);
             }
 
             if (FileGridContainer != null)
             {
                 FileGridContainer.AddHandler(PointerPressedEvent, OnFileGridPointerPressedTunnel, RoutingStrategies.Tunnel);
+                FileGridContainer.AddHandler(PointerMovedEvent, OnPointerMovedTunnel, RoutingStrategies.Tunnel);
+                FileGridContainer.AddHandler(PointerReleasedEvent, OnPointerReleasedTunnel, RoutingStrategies.Tunnel);
             }
             AddHandler(KeyDownEvent, OnPaneKeyDownTunnel, RoutingStrategies.Tunnel);
 
@@ -698,7 +704,13 @@ public partial class ExplorerPaneView : UserControl
 
         if (source is DataGridRow row && row.DataContext is FileItem item)
         {
-            if (isRightButton)
+            if (isLeftButton)
+            {
+                _dragStartPoint = e.GetPosition(this);
+                _dragCandidateItem = item;
+                _isDragActive = false;
+            }
+            else if (isRightButton)
             {
                 if (FileDataGrid.SelectedItems.Contains(item) || tab.SelectedItems.Contains(item))
                 {
@@ -749,9 +761,15 @@ public partial class ExplorerPaneView : UserControl
         // Check if the click happened on a thumbnail card (FileItem DataContext)
         while (source != null && source != ThumbnailListBox)
         {
-            if (source is Control c && c.DataContext is FileItem)
+            if (source is Control c && c.DataContext is FileItem thumbItem)
             {
-                // Clicked on a specific thumbnail item - let OnThumbnailItemPointerPressed handle it
+                if (e.GetCurrentPoint(ThumbnailListBox).Properties.IsLeftButtonPressed)
+                {
+                    _dragStartPoint = e.GetPosition(this);
+                    _dragCandidateItem = thumbItem;
+                    _isDragActive = false;
+                }
+                // Clicked on a specific thumbnail item - let OnThumbnailItemPointerPressed handle selection
                 return;
             }
             source = source.GetVisualParent();
@@ -780,6 +798,37 @@ public partial class ExplorerPaneView : UserControl
             vm.NotifyContextMenuProperties();
             vm.TriggerPreviewForSelectedItem();
         }
+    }
+
+    private void OnPointerMovedTunnel(object? sender, PointerEventArgs e)
+    {
+        if (_dragCandidateItem != null && !_isDragActive)
+        {
+            var point = e.GetCurrentPoint(this);
+            if (point.Properties.IsLeftButtonPressed)
+            {
+                var delta = e.GetPosition(this) - _dragStartPoint;
+                if (Math.Abs(delta.X) >= 4 || Math.Abs(delta.Y) >= 4)
+                {
+                    _isDragActive = true;
+                    _isMouseDownForMarquee = false;
+                    _isMarqueeActive = false;
+                    if (MarqueeBox != null) MarqueeBox.IsVisible = false;
+                    StartDragAsync(e, _dragCandidateItem);
+                }
+            }
+            else
+            {
+                _dragCandidateItem = null;
+                _isDragActive = false;
+            }
+        }
+    }
+
+    private void OnPointerReleasedTunnel(object? sender, PointerReleasedEventArgs e)
+    {
+        _dragCandidateItem = null;
+        _isDragActive = false;
     }
 
     private void OnPanePointerPressed(object? sender, PointerPressedEventArgs e)
@@ -1685,14 +1734,15 @@ public partial class ExplorerPaneView : UserControl
             {
                 try
                 {
+                    var fileUri = new Uri(Path.GetFullPath(p));
                     if (Directory.Exists(p))
                     {
-                        var f = await storageProvider.TryGetFolderFromPathAsync(new Uri(p, UriKind.Absolute));
+                        var f = await storageProvider.TryGetFolderFromPathAsync(fileUri);
                         if (f != null) storageItems.Add(f);
                     }
                     else if (File.Exists(p))
                     {
-                        var f = await storageProvider.TryGetFileFromPathAsync(new Uri(p, UriKind.Absolute));
+                        var f = await storageProvider.TryGetFileFromPathAsync(fileUri);
                         if (f != null) storageItems.Add(f);
                     }
                 }
