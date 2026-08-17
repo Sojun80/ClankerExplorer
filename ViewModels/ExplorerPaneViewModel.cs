@@ -283,6 +283,9 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Action<FileItem?>? RequestProperties;
     public event Action<FileItem>? RequestVideoThumbnailAtTime;
     public event Action<string>? RequestSetClipboardText;
+    public event Func<IEnumerable<string>, Task>? RequestCopyFiles;
+    public event Func<IEnumerable<string>, Task>? RequestCutFiles;
+    public event Func<Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)>>? RequestPasteFiles;
     public event Action<FileItem>? RequestScrollItemIntoView;
     public event Action? RequestSyncSelection;
 
@@ -1162,7 +1165,14 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         {
             var paths = targets.Select(t => t.FullPath).ToArray();
             ClipboardFileService.Copy(paths);
-            RequestSetClipboardText?.Invoke(string.Join(Environment.NewLine, paths));
+            if (RequestCopyFiles != null)
+            {
+                _ = RequestCopyFiles.Invoke(paths);
+            }
+            else
+            {
+                RequestSetClipboardText?.Invoke(string.Join(Environment.NewLine, paths));
+            }
         }
     }
 
@@ -1174,7 +1184,14 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         {
             var paths = targets.Select(t => t.FullPath).ToArray();
             ClipboardFileService.Cut(paths);
-            RequestSetClipboardText?.Invoke(string.Join(Environment.NewLine, paths));
+            if (RequestCutFiles != null)
+            {
+                _ = RequestCutFiles.Invoke(paths);
+            }
+            else
+            {
+                RequestSetClipboardText?.Invoke(string.Join(Environment.NewLine, paths));
+            }
         }
     }
 
@@ -1183,7 +1200,19 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     {
         if (SelectedTab != null)
         {
-            var (successCount, failedPaths, createdPaths) = await ClipboardFileService.PasteAsync(SelectedTab.CurrentPath);
+            int successCount;
+            List<string> failedPaths;
+            List<string> createdPaths;
+
+            if (RequestPasteFiles != null)
+            {
+                (successCount, failedPaths, createdPaths) = await RequestPasteFiles.Invoke();
+            }
+            else
+            {
+                (successCount, failedPaths, createdPaths) = await ClipboardFileService.PasteAsync(SelectedTab.CurrentPath);
+            }
+
             if (createdPaths != null && createdPaths.Count > 0)
             {
                 SelectedTab.PendingSelectPaths = createdPaths;
@@ -1191,6 +1220,14 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             await SelectedTab.RefreshAsync();
             NotifyContextMenuProperties();
         }
+    }
+
+    [RelayCommand]
+    public void SelectAll()
+    {
+        if (SelectedTab == null) return;
+        SelectedTab.SelectAll(IsThumbnailView);
+        NotifyContextMenuProperties();
     }
 
     public async Task ExecuteDropAsync(IEnumerable<string> sourcePaths, string destinationDirectory, bool isMove)
@@ -1373,6 +1410,33 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
         item.EditingName = item.Name;
         item.IsRenaming = true;
+    }
+
+    public void CancelRename()
+    {
+        if (SelectedTab == null) return;
+        if (SelectedTab.Items != null)
+        {
+            foreach (var item in SelectedTab.Items)
+            {
+                if (item.IsRenaming)
+                {
+                    item.IsRenaming = false;
+                    item.EditingName = item.Name;
+                }
+            }
+        }
+        if (SelectedTab.FilteredItems != null)
+        {
+            foreach (var item in SelectedTab.FilteredItems)
+            {
+                if (item.IsRenaming)
+                {
+                    item.IsRenaming = false;
+                    item.EditingName = item.Name;
+                }
+            }
+        }
     }
 
     [RelayCommand]

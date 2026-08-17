@@ -85,6 +85,24 @@ public partial class ExplorerPaneView : UserControl
                     }
                 };
 
+                vm.RequestCopyFiles += async paths =>
+                {
+                    var topLevel = TopLevel.GetTopLevel(this);
+                    await ClipboardFileService.CopyToSystemClipboardAsync(topLevel?.Clipboard, topLevel?.StorageProvider, paths);
+                };
+
+                vm.RequestCutFiles += async paths =>
+                {
+                    var topLevel = TopLevel.GetTopLevel(this);
+                    await ClipboardFileService.CutToSystemClipboardAsync(topLevel?.Clipboard, topLevel?.StorageProvider, paths);
+                };
+
+                vm.RequestPasteFiles += async () =>
+                {
+                    var topLevel = TopLevel.GetTopLevel(this);
+                    return await ClipboardFileService.PasteFromSystemClipboardAsync(topLevel?.Clipboard, vm.SelectedTab?.CurrentPath ?? string.Empty);
+                };
+
                 vm.Tabs.CollectionChanged += (s2, e2) =>
                 {
                     Dispatcher.UIThread.Post(UpdateTabScrollButtonsVisibility, DispatcherPriority.Loaded);
@@ -1173,7 +1191,12 @@ public partial class ExplorerPaneView : UserControl
                 // TopLevel capture release
             }
             e.Handled = true;
+            return;
         }
+
+        if (DataContext is not ExplorerPaneViewModel vm) return;
+        var focused = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() as Control;
+        KeyboardShortcutHandler.HandlePaneKeyDown(vm, e, focused);
     }
 
     private void OnMiddleScrollTick(object? sender, EventArgs e)
@@ -1751,96 +1774,16 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnDataGridKeyDownTunnel(object? sender, KeyEventArgs e)
     {
-        if (e.Source is TextBox) return;
-        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
-
-        // Enter: Open selected item(s) without triggering inline cell edit or row jumping
-        if (e.Key == Key.Enter)
-        {
-            vm.OpenSelected();
-            e.Handled = true;
-        }
-        // F2: Rename
-        else if (e.Key == Key.F2)
-        {
-            if (vm.SelectedTab.SelectedItem != null)
-            {
-                vm.TriggerRename();
-                e.Handled = true;
-            }
-        }
-        // Delete / Shift+Delete
-        else if (e.Key == Key.Delete)
-        {
-            bool isPermanent = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-            vm.DeleteSelected(isPermanent);
-            e.Handled = true;
-        }
-        // F5: Refresh
-        else if (e.Key == Key.F5)
-        {
-            vm.Refresh();
-            e.Handled = true;
-        }
+        if (DataContext is not ExplorerPaneViewModel vm) return;
+        var focused = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() as Control;
+        KeyboardShortcutHandler.HandlePaneKeyDown(vm, e, focused);
     }
 
     private void OnThumbnailKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Source is TextBox) return;
-        if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
-
-        // Enter: Open
-        if (e.Key == Key.Enter)
-        {
-            vm.OpenSelected();
-            e.Handled = true;
-        }
-        // F2: Rename
-        else if (e.Key == Key.F2)
-        {
-            if (vm.SelectedTab.SelectedItem != null)
-            {
-                vm.TriggerRename();
-                e.Handled = true;
-            }
-        }
-        // Delete / Shift+Delete
-        else if (e.Key == Key.Delete)
-        {
-            bool isPermanent = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-            vm.DeleteSelected(isPermanent);
-            e.Handled = true;
-        }
-        // Ctrl+C: Copy
-        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.C)
-        {
-            vm.CopyFiles();
-            e.Handled = true;
-        }
-        // Ctrl+X: Cut
-        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.X)
-        {
-            vm.CutFiles();
-            e.Handled = true;
-        }
-        // Ctrl+V: Paste
-        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.V)
-        {
-            _ = vm.PasteFilesAsync();
-            e.Handled = true;
-        }
-        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.A)
-        {
-            vm.SelectedTab.SelectAllThumbnails();
-            vm.NotifyContextMenuProperties();
-            e.Handled = true;
-        }
-        // F5: Refresh
-        else if (e.Key == Key.F5)
-        {
-            vm.Refresh();
-            e.Handled = true;
-        }
+        if (DataContext is not ExplorerPaneViewModel vm) return;
+        var focused = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() as Control;
+        KeyboardShortcutHandler.HandlePaneKeyDown(vm, e, focused);
     }
 
     private void OnRowDoubleTapped(object? sender, TappedEventArgs e)

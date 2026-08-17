@@ -649,6 +649,24 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         SelectedItem = null;
     }
 
+    public void SelectAll(bool isThumbnailView)
+    {
+        if (isThumbnailView)
+        {
+            SelectAllThumbnails();
+        }
+        else
+        {
+            SelectedItems.Clear();
+            foreach (var item in FilteredItems)
+            {
+                SelectedItems.Add(item);
+            }
+            SelectedItem = FilteredItems.LastOrDefault();
+            _selectionAnchorIndex = FilteredItems.Count > 0 ? FilteredItems.Count - 1 : -1;
+        }
+    }
+
     public void SelectAllThumbnails()
     {
         foreach (var item in FilteredItems) item.IsThumbnailSelected = true;

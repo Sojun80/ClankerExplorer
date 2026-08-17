@@ -163,71 +163,12 @@ public partial class MainWindow : Window
             }
         };
 
-        // Hotkey bindings & Mouse navigation
+        // Centralized Hotkey bindings & Mouse navigation
         KeyDown += (s, e) =>
         {
             if (DataContext is not MainViewModel vm) return;
-
-            // Delete / Shift+Delete Key: Delete Selected
-            if (e.Key == Key.Delete)
-            {
-                if (e.Source is not TextBox)
-                {
-                    bool isPermanent = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-                    vm.ActivePane.DeleteSelected(isPermanent);
-                    e.Handled = true;
-                    return;
-                }
-            }
-
-            // F3: Toggle Inspector
-            if (e.Key == Key.F3)
-            {
-                vm.ToggleInspector();
-                e.Handled = true;
-            }
-            // Ctrl+Shift+D: Toggle Dual Pane
-            else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.D)
-            {
-                vm.ToggleDualPane();
-                e.Handled = true;
-            }
-            // Ctrl+T: New Tab
-            else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.T)
-            {
-                vm.ActivePane.AddNewTab();
-                e.Handled = true;
-            }
-            // Ctrl+W: Close Tab
-            else if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.W)
-            {
-                vm.ActivePane.CloseTab(null);
-                e.Handled = true;
-            }
-            // Alt+Left / Backspace: Go Back
-            else if ((e.KeyModifiers.HasFlag(KeyModifiers.Alt) && e.Key == Key.Left) || e.Key == Key.Back)
-            {
-                if (e.Source is not TextBox)
-                {
-                    vm.ActivePane.GoBack();
-                    e.Handled = true;
-                }
-            }
-            // Alt+Right: Go Forward
-            else if (e.KeyModifiers.HasFlag(KeyModifiers.Alt) && e.Key == Key.Right)
-            {
-                if (e.Source is not TextBox)
-                {
-                    vm.ActivePane.GoForward();
-                    e.Handled = true;
-                }
-            }
-            // F5: Refresh
-            else if (e.Key == Key.F5)
-            {
-                vm.RefreshAll();
-                e.Handled = true;
-            }
+            var focused = FocusManager?.GetFocusedElement() as Control;
+            KeyboardShortcutHandler.HandleWindowKeyDown(vm, e, focused);
         };
 
         void SyncPreviewColumn(MainViewModel? vm)
