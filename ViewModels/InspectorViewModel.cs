@@ -394,17 +394,60 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
                 ActivePreviewType = "video";
                 IsVideoPlaybackAvailable = true;
                 IsVideoPlaying = false;
-
-                // Load poster thumbnail first
-                var poster = await ThumbnailService.Instance.GetThumbnailAsync(filePath, File.GetLastWriteTime(filePath), 512, token);
-                if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
-                VideoPosterImage = poster;
-
-                // Query video duration
-                var duration = await VideoThumbnailService.Instance.GetVideoDurationAsync(filePath, token);
-                if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
-                VideoDuration = duration;
                 VideoPosition = TimeSpan.Zero;
+
+                // Load poster thumbnail and duration concurrently with a short timeout so preview controls show immediately
+                var posterTask = ThumbnailService.Instance.GetThumbnailAsync(filePath, File.GetLastWriteTime(filePath), 512, token);
+                var durationTask = VideoThumbnailService.Instance.GetVideoDurationAsync(filePath, token);
+
+                var timeoutTask = Task.Delay(400, token);
+                await Task.WhenAny(Task.WhenAll(posterTask, durationTask), timeoutTask);
+
+                if (token.IsCancellationRequested || generation != _previewGeneration || _currentFilePath != filePath) return;
+
+                if (posterTask.IsCompletedSuccessfully)
+                {
+                    VideoPosterImage = posterTask.Result;
+                }
+                else
+                {
+                    // Continue background loading poster image without blocking UI
+                    _ = posterTask.ContinueWith(t =>
+                    {
+                        if (t.IsCompletedSuccessfully && t.Result != null && generation == _previewGeneration && _currentFilePath == filePath)
+                        {
+                            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                            {
+                                if (generation == _previewGeneration && _currentFilePath == filePath)
+                                {
+                                    VideoPosterImage = t.Result;
+                                }
+                            });
+                        }
+                    }, token);
+                }
+
+                if (durationTask.IsCompletedSuccessfully)
+                {
+                    VideoDuration = durationTask.Result;
+                }
+                else
+                {
+                    // Continue background duration query without blocking UI
+                    _ = durationTask.ContinueWith(t =>
+                    {
+                        if (t.IsCompletedSuccessfully && generation == _previewGeneration && _currentFilePath == filePath)
+                        {
+                            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                            {
+                                if (generation == _previewGeneration && _currentFilePath == filePath)
+                                {
+                                    VideoDuration = t.Result;
+                                }
+                            });
+                        }
+                    }, token);
+                }
             }
             // 3. PDF Preview
             else if (PdfPreviewService.Instance.IsPdfFile(filePath))

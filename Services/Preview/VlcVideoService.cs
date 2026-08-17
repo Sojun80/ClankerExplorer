@@ -105,7 +105,7 @@ public class VlcVideoService : IDisposable
                 EnableHardwareDecoding = true
             };
 
-            media = new Media(vlc, new Uri(filePath));
+            media = new Media(vlc, filePath, FromType.FromPath);
             media.AddOption(":no-audio");
             media.AddOption(":video-filter=null");
 
