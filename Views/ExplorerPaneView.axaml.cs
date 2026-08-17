@@ -797,13 +797,21 @@ public partial class ExplorerPaneView : UserControl
             source = source.GetVisualParent();
         }
 
-        // The click occurred on empty space inside the Thumbnail view!
+        // The click occurred on empty space inside the Thumbnail view (e.g. to the right of cards, between rows, or below)!
         var point = e.GetCurrentPoint(ThumbnailListBox);
         var tab = vm.SelectedTab;
 
         if (point.Properties.IsLeftButtonPressed)
         {
-            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            _isMouseDownForMarquee = true;
+            _isMarqueeActive = false;
+            _marqueeStartPos = e.GetPosition(FileGridContainer);
+            _lastMarqueePos = _marqueeStartPos;
+            _marqueeBaseSelection = e.KeyModifiers.HasFlag(KeyModifiers.Control) && tab != null
+                ? tab.SelectedItems.ToHashSet()
+                : new HashSet<FileItem>();
+
+            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift) && tab != null)
             {
                 tab.ClearThumbnailSelection();
                 tab.SelectedItems.Clear();
@@ -812,7 +820,7 @@ public partial class ExplorerPaneView : UserControl
                 vm.TriggerPreviewForSelectedItem();
             }
         }
-        else if (point.Properties.IsRightButtonPressed)
+        else if (point.Properties.IsRightButtonPressed && tab != null)
         {
             tab.ClearThumbnailSelection();
             tab.SelectedItems.Clear();
@@ -824,6 +832,17 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnPointerMovedTunnel(object? sender, PointerEventArgs e)
     {
+        if (_isMiddleAutoScrolling && FileGridContainer != null)
+        {
+            _currentPointerPos = e.GetPosition(FileGridContainer);
+            var delta = _currentPointerPos - _autoScrollAnchorPos;
+            if (Math.Abs(delta.X) > 8 || Math.Abs(delta.Y) > 8)
+            {
+                _hasMovedDuringMiddleScroll = true;
+            }
+            return;
+        }
+
         if (_dragCandidateItem != null && !_isDragActive)
         {
             var point = e.GetCurrentPoint(this);
@@ -837,7 +856,57 @@ public partial class ExplorerPaneView : UserControl
                     _isMarqueeActive = false;
                     if (MarqueeBox != null) MarqueeBox.IsVisible = false;
                     StartDragAsync(e, _dragCandidateItem);
+                    return;
                 }
+            }
+        }
+
+        if (!_isMouseDownForMarquee || FileGridContainer == null || DataContext is not ExplorerPaneViewModel vm) return;
+
+        var cur = e.GetPosition(FileGridContainer);
+        var deltaMarquee = cur - _marqueeStartPos;
+
+        if (!_isMarqueeActive && PointerGestureClassifier.ExceedsDragThreshold(deltaMarquee.X, deltaMarquee.Y, 4))
+        {
+            _isMarqueeActive = true;
+            vm.IsSuppressingPreview = true;
+            e.Pointer.Capture(FileGridContainer);
+            if (MarqueeBox != null) MarqueeBox.IsVisible = true;
+            _autoScrollTimer.Start();
+        }
+
+        if (_isMarqueeActive)
+        {
+            vm.IsSuppressingPreview = true;
+            _lastMarqueePos = cur;
+
+            if (MarqueeBox != null)
+            {
+                double minX = Math.Min(_marqueeStartPos.X, cur.X);
+                double minY = Math.Min(_marqueeStartPos.Y, cur.Y);
+                double width = Math.Abs(cur.X - _marqueeStartPos.X);
+                double height = Math.Abs(cur.Y - _marqueeStartPos.Y);
+
+                Canvas.SetLeft(MarqueeBox, minX);
+                Canvas.SetTop(MarqueeBox, minY);
+                MarqueeBox.Width = width;
+                MarqueeBox.Height = height;
+            }
+
+            UpdateMarqueeSelection(e.KeyModifiers.HasFlag(KeyModifiers.Control));
+
+            // Velocity-based auto-scroll calculation
+            if (cur.Y < 20)
+            {
+                _autoScrollVelocity = Math.Min(-2.0, (cur.Y - 20) * 0.8);
+            }
+            else if (cur.Y > FileGridContainer.Bounds.Height - 20)
+            {
+                _autoScrollVelocity = Math.Max(2.0, (cur.Y - (FileGridContainer.Bounds.Height - 20)) * 0.8);
+            }
+            else
+            {
+                _autoScrollVelocity = 0;
             }
         }
     }
@@ -846,6 +915,23 @@ public partial class ExplorerPaneView : UserControl
     {
         _dragCandidateItem = null;
         _isDragActive = false;
+
+        if (_isMouseDownForMarquee)
+        {
+            _isMouseDownForMarquee = false;
+            if (_isMarqueeActive)
+            {
+                _isMarqueeActive = false;
+                _autoScrollTimer.Stop();
+                _autoScrollVelocity = 0;
+                e.Pointer.Capture(null);
+                if (MarqueeBox != null) MarqueeBox.IsVisible = false;
+                if (DataContext is ExplorerPaneViewModel vm)
+                {
+                    vm.IsSuppressingPreview = false;
+                }
+            }
+        }
     }
 
     private void OnPanePointerPressed(object? sender, PointerPressedEventArgs e)
