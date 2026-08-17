@@ -108,6 +108,8 @@ public class VlcVideoService : IDisposable
             media = new Media(vlc, filePath, FromType.FromPath);
             media.AddOption(":no-audio");
             media.AddOption(":video-filter=null");
+            media.AddOption(":no-video-title-show");
+            media.AddOption(":no-osd");
 
             var tcs = new TaskCompletionSource<bool>();
             using var reg = cancellationToken.Register(() => tcs.TrySetCanceled());

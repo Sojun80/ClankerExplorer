@@ -236,9 +236,9 @@ public class NativeVideoPlayer : IDisposable
         {
             if (_mediaPlayer != null)
             {
-                _mediaPlayer.Stop();
-                _mediaPlayer.Media = null;
-                _mediaPlayer.Dispose();
+                try { _mediaPlayer.Stop(); } catch { }
+                try { _mediaPlayer.Media = null; } catch { }
+                try { _mediaPlayer.Dispose(); } catch { }
                 _mediaPlayer = null;
             }
             _currentMedia?.Dispose();

@@ -179,10 +179,14 @@ public class VideoThumbnailService : IDisposable
         }
         catch
         {
-            // Fallback to LibVLC snapshot extraction for exotic codecs/containers
+            // Silent, headless fallback to Windows Shell Thumbnail Provider
             try
             {
-                return await ClankerExplorer.Services.Preview.VlcVideoService.Instance.ExtractSnapshotAsync(filePath, timeOffset, cancellationToken).ConfigureAwait(false);
+                if (OperatingSystem.IsWindows())
+                {
+                    return ThumbnailService.ExtractWindowsShellThumbnail(filePath, targetSize);
+                }
+                return null;
             }
             catch
             {

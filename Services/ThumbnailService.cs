@@ -181,10 +181,18 @@ public class ThumbnailService : IDisposable
         {
             result = await Task.Run(() => DecodeImageFile(path, sizeBucket), cancellationToken);
         }
-        // 2. Smart Video Thumbnail Provider (Multi-candidate scoring, seek-based, non-blocking)
+        // 2. Video Provider (Use Windows Shell provider first for 100% silent, headless background extraction)
         else if (VideoThumbnailService.IsVideoFile(path))
         {
-            result = await VideoThumbnailService.Instance.ExtractSmartVideoThumbnailAsync(path, sizeBucket, cancellationToken);
+            if (OperatingSystem.IsWindows())
+            {
+                result = await Task.Run(() => ExtractWindowsShellThumbnail(path, sizeBucket), cancellationToken);
+            }
+
+            if (result == null)
+            {
+                result = await VideoThumbnailService.Instance.ExtractSmartVideoThumbnailAsync(path, sizeBucket, cancellationToken);
+            }
         }
         // 3. 3D Model Provider (STL)
         else if (Preview.StlPreviewService.Instance.IsStlFile(path))
@@ -594,7 +602,7 @@ public class ThumbnailService : IDisposable
     private static readonly Guid BHID_ThumbnailHandler = new("7b2e650a-8e20-4f4a-b09e-6597afc72fb0");
     private static readonly Guid IID_IThumbnailProvider = new("e357fccd-a995-4576-b01f-234630154e96");
 
-    private static Bitmap? ExtractWindowsShellThumbnail(string filePath, int targetSize)
+    internal static Bitmap? ExtractWindowsShellThumbnail(string filePath, int targetSize)
     {
         IntPtr hBitmap = IntPtr.Zero;
         try
