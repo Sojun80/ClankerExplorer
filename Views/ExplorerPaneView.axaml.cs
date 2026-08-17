@@ -1142,20 +1142,43 @@ public partial class ExplorerPaneView : UserControl
             if (vm.IsThumbnailView)
             {
                 bool isThumbnailCard = false;
-                while (source != null && source != FileGridContainer)
+                FileItem? thumbItem = null;
+                var curr = source;
+                while (curr != null && curr != FileGridContainer)
                 {
-                    if (source is Border border && border.Classes.Contains("thumbnail-card"))
+                    if (curr is ScrollBar || curr is Avalonia.Controls.Primitives.Thumb || curr is Avalonia.Controls.Primitives.Track ||
+                        curr is Button || curr is GridSplitter)
+                    {
+                        return;
+                    }
+                    if (curr is Control { DataContext: FileItem fi })
+                    {
+                        thumbItem = fi;
+                    }
+                    if (curr is Border border && border.Classes.Contains("thumbnail-card"))
                     {
                         isThumbnailCard = true;
                         break;
                     }
-                    source = source.GetVisualParent();
+                    curr = curr.GetVisualParent();
                 }
 
-                if (!isThumbnailCard && !e.KeyModifiers.HasFlag(KeyModifiers.Control))
+                if (isThumbnailCard && thumbItem != null)
                 {
-                    vm.SelectedTab?.ClearThumbnailSelection();
-                    vm.NotifyContextMenuProperties();
+                    _dragStartPoint = e.GetPosition(this);
+                    _dragCandidateItem = thumbItem;
+                    _isDragActive = false;
+                }
+                else
+                {
+                    // Clicked on empty space (the area on the right, between rows, or below cards)
+                    _isMouseDownForMarquee = true;
+                    _isMarqueeActive = false;
+                    _marqueeStartPos = e.GetPosition(FileGridContainer);
+                    _lastMarqueePos = _marqueeStartPos;
+                    _marqueeBaseSelection = e.KeyModifiers.HasFlag(KeyModifiers.Control) && vm.SelectedTab != null
+                        ? vm.SelectedTab.SelectedItems.ToHashSet()
+                        : new HashSet<FileItem>();
                 }
                 return;
             }
@@ -1163,25 +1186,25 @@ public partial class ExplorerPaneView : UserControl
             bool isInteractiveChrome = false;
             bool isRowOrCell = false;
             FileItem? rowItem = null;
-            var curr = source;
-            while (curr != null && curr != FileGridContainer)
+            var currGrid = source;
+            while (currGrid != null && currGrid != FileGridContainer)
             {
-                if (curr is ScrollBar || curr is Avalonia.Controls.Primitives.Thumb || curr is Avalonia.Controls.Primitives.Track ||
-                    curr is DataGridColumnHeader || curr is DataGridRowHeader || curr is Button || curr is GridSplitter)
+                if (currGrid is ScrollBar || currGrid is Avalonia.Controls.Primitives.Thumb || currGrid is Avalonia.Controls.Primitives.Track ||
+                    currGrid is DataGridColumnHeader || currGrid is DataGridRowHeader || currGrid is Button || currGrid is GridSplitter)
                 {
                     isInteractiveChrome = true;
                     break;
                 }
-                if (curr is Control { DataContext: FileItem fi })
+                if (currGrid is Control { DataContext: FileItem fi })
                 {
                     rowItem = fi;
                 }
-                if (curr is DataGridRow || curr is DataGridCell)
+                if (currGrid is DataGridRow || currGrid is DataGridCell)
                 {
                     isRowOrCell = true;
                     break;
                 }
-                curr = curr.GetVisualParent();
+                currGrid = currGrid.GetVisualParent();
             }
 
             if (isInteractiveChrome)
@@ -1243,7 +1266,7 @@ public partial class ExplorerPaneView : UserControl
             }
         }
 
-        if (!_isMouseDownForMarquee || FileGridContainer == null || FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm) return;
+        if (!_isMouseDownForMarquee || FileGridContainer == null || DataContext is not ExplorerPaneViewModel vm) return;
 
         var cur = e.GetPosition(FileGridContainer);
         var deltaMarquee = cur - _marqueeStartPos;
@@ -1365,12 +1388,69 @@ public partial class ExplorerPaneView : UserControl
 
     private void UpdateMarqueeSelection(bool isCtrl)
     {
-        if (FileDataGrid == null || FileGridContainer == null || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
-        var items = vm.SelectedTab.FilteredItems;
+        if (FileGridContainer == null || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+        var tab = vm.SelectedTab;
+        var items = tab.FilteredItems;
         if (items.Count == 0) return;
 
+        double minX = Math.Min(_marqueeStartPos.X, _lastMarqueePos.X);
+        double maxX = Math.Max(_marqueeStartPos.X, _lastMarqueePos.X);
         double minY = Math.Min(_marqueeStartPos.Y, _lastMarqueePos.Y);
         double maxY = Math.Max(_marqueeStartPos.Y, _lastMarqueePos.Y);
+
+        if (vm.IsThumbnailView && ThumbnailListBox != null)
+        {
+            var visibleCards = ThumbnailListBox.GetVisualDescendants()
+                .OfType<Border>()
+                .Where(b => b.Classes.Contains("thumbnail-card") && b.DataContext is FileItem)
+                .Select(b =>
+                {
+                    var pt = b.TranslatePoint(new Point(0, 0), FileGridContainer);
+                    return new
+                    {
+                        Border = b,
+                        Left = pt?.X ?? -1000,
+                        Top = pt?.Y ?? -1000,
+                        Width = b.Bounds.Width,
+                        Height = b.Bounds.Height,
+                        Item = (FileItem)b.DataContext!
+                    };
+                })
+                .Where(x => x.Left >= -100 && x.Top >= -100 && x.Width > 0 && x.Height > 0)
+                .ToList();
+
+            var matchingItems = new HashSet<FileItem>();
+            if (isCtrl)
+            {
+                foreach (var baseItem in _marqueeBaseSelection)
+                {
+                    matchingItems.Add(baseItem);
+                }
+            }
+
+            foreach (var card in visibleCards)
+            {
+                double cardRight = card.Left + card.Width;
+                double cardBottom = card.Top + card.Height;
+                bool intersects = cardRight >= minX && card.Left <= maxX && cardBottom >= minY && card.Top <= maxY;
+                if (intersects)
+                {
+                    matchingItems.Add(card.Item);
+                }
+            }
+
+            // Apply thumbnail selection
+            tab.ClearThumbnailSelection();
+            foreach (var item in matchingItems)
+            {
+                tab.AddThumbnailSelection(item);
+            }
+            tab.SelectedItem = matchingItems.LastOrDefault();
+            vm.NotifyContextMenuProperties();
+            return;
+        }
+
+        if (FileDataGrid == null) return;
 
         var visibleRows = FileDataGrid.GetVisualDescendants()
             .OfType<DataGridRow>()
@@ -1454,9 +1534,12 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnAutoScrollTick(object? sender, EventArgs e)
     {
-        if (_isMarqueeActive && _autoScrollVelocity != 0 && FileDataGrid != null)
+        if (_isMarqueeActive && _autoScrollVelocity != 0 && DataContext is ExplorerPaneViewModel vm)
         {
-            var sv = FileDataGrid.FindDescendantOfType<ScrollViewer>();
+            ScrollViewer? sv = vm.IsThumbnailView && ThumbnailListBox != null
+                ? ThumbnailListBox.FindDescendantOfType<ScrollViewer>()
+                : FileDataGrid?.FindDescendantOfType<ScrollViewer>();
+
             if (sv != null)
             {
                 sv.Offset = new Vector(sv.Offset.X, Math.Max(0, sv.Offset.Y + _autoScrollVelocity));
