@@ -18,6 +18,13 @@ public partial class SearchWorkspaceView : UserControl
 
         DataContextChanged += OnDataContextChanged;
         AttachedToVisualTree += OnAttachedToVisualTree;
+        PropertyChanged += (s, e) =>
+        {
+            if (e.Property.Name == nameof(IsVisible) && IsVisible)
+            {
+                FocusSearchBox();
+            }
+        };
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -25,6 +32,7 @@ public partial class SearchWorkspaceView : UserControl
         if (_wiredVm != null)
         {
             _wiredVm.RequestSetClipboardText -= OnRequestSetClipboardText;
+            _wiredVm.RequestFocusSearchBox -= FocusSearchBox;
             _wiredVm = null;
         }
 
@@ -32,6 +40,7 @@ public partial class SearchWorkspaceView : UserControl
         {
             _wiredVm = vm;
             vm.RequestSetClipboardText += OnRequestSetClipboardText;
+            vm.RequestFocusSearchBox += FocusSearchBox;
         }
     }
 

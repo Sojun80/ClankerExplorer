@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using ClankerExplorer.Models;
@@ -314,5 +315,277 @@ public sealed class SearchTests
 
         Assert.Single(matches);
         Assert.Equal("alpha.txt", matches[0].Name);
+    }
+
+    [Fact]
+    public async Task SearchWorkspaceViewModel_StaleGenerationProtection_SearchBClobbersSearchA()
+    {
+        var fakeProvider = new ControllableFakeSearchProvider();
+        var searchService = new SearchService(fakeProvider);
+
+        using var vm = new SearchWorkspaceViewModel(searchService, getCurrentFolder: () => @"C:\Test");
+
+        // First search takes a while and returns Item A
+        fakeProvider.DelayMs = 150;
+        fakeProvider.ItemsToReturn.Clear();
+        fakeProvider.ItemsToReturn.Add(new SearchResultItem { Name = "itemA.txt", FullPath = @"C:\Test\itemA.txt" });
+
+        vm.Query = "queryA";
+        vm.SubmitSearch();
+
+        // Immediately start search B with 0 delay and Item B
+        fakeProvider.DelayMs = 0;
+        fakeProvider.ItemsToReturn.Clear();
+        fakeProvider.ItemsToReturn.Add(new SearchResultItem { Name = "itemB.txt", FullPath = @"C:\Test\itemB.txt" });
+
+        vm.Query = "queryB";
+        vm.SubmitSearch();
+
+        bool completed = await WaitForConditionAsync(() => !vm.IsSearching && vm.Results.Count > 0);
+        Assert.True(completed);
+
+        await Task.Delay(250);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        // Only Item B should exist in Results, never Item A
+        Assert.Single(vm.Results);
+        Assert.Equal("itemB.txt", vm.Results[0].Name);
+    }
+
+    [Fact]
+    public async Task SearchWorkspaceViewModel_ClearQueryInvalidation_PreventsLateStatusUpdate()
+    {
+        var fakeProvider = new ControllableFakeSearchProvider();
+        fakeProvider.DelayMs = 150;
+        fakeProvider.ItemsToReturn.Add(new SearchResultItem { Name = "slowItem.txt", FullPath = @"C:\Test\slowItem.txt" });
+
+        var searchService = new SearchService(fakeProvider);
+        using var vm = new SearchWorkspaceViewModel(searchService, getCurrentFolder: () => @"C:\Test");
+
+        vm.Query = "slow";
+        vm.SubmitSearch();
+        Assert.True(vm.IsSearching);
+
+        // Clear query while search is in progress
+        vm.ClearQuery();
+
+        Assert.Equal(string.Empty, vm.Query);
+        Assert.Empty(vm.Results);
+        Assert.False(vm.IsSearching);
+        Assert.Equal("Enter a query to search", vm.StatusText);
+
+        // Wait for the delayed task to cancel/complete
+        await Task.Delay(250);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        // Late callbacks must NOT have overwritten StatusText with "Search stopped" or results
+        Assert.Empty(vm.Results);
+        Assert.False(vm.IsSearching);
+        Assert.Equal("Enter a query to search", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task SearchWorkspaceViewModel_OnWorkspaceHidden_CancelsActiveSearch()
+    {
+        var fakeProvider = new ControllableFakeSearchProvider();
+        fakeProvider.DelayMs = 200;
+        fakeProvider.ItemsToReturn.Add(new SearchResultItem { Name = "item.txt", FullPath = @"C:\Test\item.txt" });
+
+        var searchService = new SearchService(fakeProvider);
+        using var vm = new SearchWorkspaceViewModel(searchService, getCurrentFolder: () => @"C:\Test");
+
+        vm.Query = "item";
+        vm.SubmitSearch();
+        Assert.True(vm.IsSearching);
+
+        // Hide workspace
+        vm.OnWorkspaceHidden();
+
+        Assert.False(vm.IsSearching);
+        Assert.True(fakeProvider.LastCancellationToken.IsCancellationRequested);
+
+        await Task.Delay(250);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.False(vm.IsSearching);
+    }
+
+    [Fact]
+    public async Task SearchWorkspaceViewModel_CurrentFolderContextChange_RerunsFolderSearch()
+    {
+        using var fs = new TemporaryFileSystem();
+        string currentFolder = fs.FolderA;
+
+        var fakeProvider = new ControllableFakeSearchProvider();
+        fakeProvider.ItemsToReturn.Add(new SearchResultItem { Name = "res.txt", FullPath = Path.Combine(fs.FolderA, "res.txt") });
+
+        var searchService = new SearchService(fakeProvider);
+        using var vm = new SearchWorkspaceViewModel(searchService, getCurrentFolder: () => currentFolder);
+
+        vm.Query = "res";
+        vm.SubmitSearch();
+
+        bool firstSearchCompleted = await WaitForConditionAsync(() => !vm.IsSearching);
+        Assert.True(firstSearchCompleted);
+        Assert.Equal(1, fakeProvider.SearchCallCount);
+        Assert.Equal(fs.FolderA, fakeProvider.RecordedRequests[0].CurrentFolder);
+
+        // Hide workspace
+        vm.OnWorkspaceHidden();
+
+        // User navigates Explorer to FolderB
+        var folderB = Path.Combine(Path.GetTempPath(), $"clanker-test-b-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folderB);
+        try
+        {
+            currentFolder = folderB;
+
+            // Reopen Search in Folder B (CurrentFolderAndSubfolders scope)
+            vm.OnWorkspaceOpened();
+
+            bool secondSearchCompleted = await WaitForConditionAsync(() => !vm.IsSearching && fakeProvider.SearchCallCount == 2);
+            Assert.True(secondSearchCompleted);
+            Assert.Equal(2, fakeProvider.SearchCallCount);
+            Assert.Equal(folderB, fakeProvider.RecordedRequests[1].CurrentFolder);
+
+            // Switch to Everywhere scope and change folder to Folder C
+            vm.SelectedScopeOption = vm.ScopeOptions.First(o => o.Scope == SearchScope.Everywhere);
+            int callCountAfterScopeChange = fakeProvider.SearchCallCount;
+
+            var folderC = Path.Combine(Path.GetTempPath(), $"clanker-test-c-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(folderC);
+            try
+            {
+                currentFolder = folderC;
+                vm.OnWorkspaceOpened();
+
+                // Changing folder in Everywhere scope must NOT rerun search
+                await Task.Delay(100);
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Assert.Equal(callCountAfterScopeChange, fakeProvider.SearchCallCount);
+                Assert.Equal(folderC, vm.CurrentFolderPath);
+            }
+            finally
+            {
+                if (Directory.Exists(folderC)) Directory.Delete(folderC);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(folderB)) Directory.Delete(folderB);
+        }
+    }
+
+    [Fact]
+    public async Task SearchWorkspaceViewModel_ProgressSkippedFolderCount_AtomicallyUpdatedInStatus()
+    {
+        var fakeProvider = new ControllableFakeSearchProvider();
+        fakeProvider.SkippedFoldersToReport = 3;
+        fakeProvider.ItemsToReturn.Add(new SearchResultItem { Name = "file1.txt", FullPath = @"C:\file1.txt" });
+        fakeProvider.ItemsToReturn.Add(new SearchResultItem { Name = "file2.txt", FullPath = @"C:\file2.txt" });
+
+        var searchService = new SearchService(fakeProvider);
+        using var vm = new SearchWorkspaceViewModel(searchService, getCurrentFolder: () => @"C:\Test");
+
+        vm.Query = "file";
+        vm.SubmitSearch();
+
+        bool completed = await WaitForConditionAsync(() => !vm.IsSearching);
+        Assert.True(completed);
+
+        Assert.Equal(2, vm.TotalResultCount);
+        Assert.Equal(3, vm.FoldersSkippedCount);
+        Assert.Contains("completed with 3 inaccessible folders skipped", vm.StatusText);
+        Assert.Contains("2 results", vm.StatusText);
+    }
+
+    [Fact]
+    public void SearchPathHelper_And_PathCycleComparer_WindowsAndWslSemantics()
+    {
+        // 1. Ordinary Windows paths are case-insensitive
+        Assert.False(SearchPathHelper.IsCaseSensitivePath(@"C:\Users\John\Documents"));
+        Assert.False(SearchPathHelper.IsCaseSensitivePath(@"D:\Data\SubFolder"));
+        Assert.Equal(StringComparison.OrdinalIgnoreCase, SearchPathHelper.GetPathStringComparison(@"C:\Users"));
+
+        // 2. WSL UNC paths are case-sensitive
+        Assert.True(SearchPathHelper.IsCaseSensitivePath(@"\\wsl$\Ubuntu\home\user"));
+        Assert.True(SearchPathHelper.IsCaseSensitivePath(@"\\wsl.localhost\Ubuntu\home\user"));
+        Assert.True(SearchPathHelper.IsCaseSensitivePath("//wsl$/Debian/var"));
+        Assert.True(SearchPathHelper.IsCaseSensitivePath("//wsl.localhost/Debian/var"));
+        Assert.Equal(StringComparison.Ordinal, SearchPathHelper.GetPathStringComparison(@"\\wsl$\Ubuntu\home"));
+
+        // 3. PathCycleComparer respects case per path type
+        var comparer = PathCycleComparer.Instance;
+
+        // Windows paths with different case should match (avoid duplicates/cycles)
+        Assert.True(comparer.Equals(@"C:\Temp\DirA", @"c:\temp\dira"));
+        Assert.Equal(comparer.GetHashCode(@"C:\Temp\DirA"), comparer.GetHashCode(@"c:\temp\dira"));
+
+        // WSL paths with different case are distinct Linux directories and must NOT be collapsed
+        Assert.False(comparer.Equals(@"\\wsl$\Ubuntu\home\User", @"\\wsl$\Ubuntu\home\user"));
+        Assert.NotEqual(comparer.GetHashCode(@"\\wsl$\Ubuntu\Foo"), comparer.GetHashCode(@"\\wsl$\Ubuntu\foo"));
+    }
+
+    [Fact]
+    public void SearchWorkspaceViewModel_OnWorkspaceOpened_FiresRequestFocusSearchBox()
+    {
+        using var vm = new SearchWorkspaceViewModel();
+        bool focusRequested = false;
+        vm.RequestFocusSearchBox += () => focusRequested = true;
+
+        vm.OnWorkspaceOpened();
+
+        Assert.True(focusRequested);
+    }
+
+    private static async Task<bool> WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 20)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            if (condition()) return true;
+            await Task.Delay(pollIntervalMs);
+        }
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        return condition();
+    }
+
+    private sealed class ControllableFakeSearchProvider : ISearchProvider
+    {
+        public string Id => "fake";
+        public string DisplayName => "Fake Provider";
+        public bool IsAvailable => true;
+
+        public int DelayMs { get; set; } = 0;
+        public List<SearchResultItem> ItemsToReturn { get; } = new();
+        public int SkippedFoldersToReport { get; set; } = 0;
+        public int SearchCallCount { get; private set; }
+        public List<SearchRequest> RecordedRequests { get; } = new();
+        public CancellationToken LastCancellationToken { get; private set; }
+
+        public async IAsyncEnumerable<SearchResultItem> SearchAsync(
+            SearchRequest request,
+            IProgress<SearchProgressReport>? progress = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            SearchCallCount++;
+            RecordedRequests.Add(request);
+            LastCancellationToken = cancellationToken;
+
+            if (SkippedFoldersToReport > 0)
+            {
+                progress?.Report(new SearchProgressReport(SkippedFoldersToReport, 0, null));
+            }
+
+            foreach (var item in ItemsToReturn)
+            {
+                if (DelayMs > 0)
+                {
+                    await Task.Delay(DelayMs, cancellationToken).ConfigureAwait(false);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return item;
+            }
+        }
     }
 }

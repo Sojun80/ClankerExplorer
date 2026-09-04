@@ -39,7 +39,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (value)
         {
             ShowOperationsWorkspace = false;
-            Search.RefreshCurrentFolderContext();
+            Search.OnWorkspaceOpened();
+        }
+        else
+        {
+            Search.OnWorkspaceHidden();
         }
     }
 
@@ -511,11 +515,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void ToggleSearch()
     {
         ShowSearchWorkspace = !ShowSearchWorkspace;
-        if (ShowSearchWorkspace)
-        {
-            ShowOperationsWorkspace = false;
-            Search.RefreshCurrentFolderContext();
-        }
     }
 
     [RelayCommand]

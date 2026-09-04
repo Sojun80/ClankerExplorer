@@ -40,13 +40,9 @@ public sealed class NativeSearchProvider : ISearchProvider
         bool isRecursive = request.Scope != SearchScope.CurrentFolder;
         var comparison = request.CaseSensitive
             ? StringComparison.Ordinal
-            : (OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.OrdinalIgnoreCase);
+            : StringComparison.OrdinalIgnoreCase;
 
-        var pathComparer = OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
-
-        var visitedDirs = new HashSet<string>(pathComparer);
+        var visitedDirs = new HashSet<string>(PathCycleComparer.Instance);
         var dirQueue = new Queue<string>();
 
         foreach (var root in roots)

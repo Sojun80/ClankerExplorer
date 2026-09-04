@@ -31,6 +31,9 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
     private long _searchGeneration = 0;
     private bool _isDisposed;
 
+    private string? _lastSearchedFolder;
+    private readonly object _bufferLock = new();
+
     public IReadOnlyList<SearchScopeOption> ScopeOptions { get; } = new[]
     {
         new SearchScopeOption(SearchScope.CurrentFolderAndSubfolders, "Subtree (Folder + Subfolders)"),
@@ -74,6 +77,7 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
     public SearchScope Scope => SelectedScopeOption?.Scope ?? SearchScope.CurrentFolderAndSubfolders;
 
     public event Action? RequestClose;
+    public event Action? RequestFocusSearchBox;
     public event Action<string, string?>? RequestNavigate; // (targetFolder, optionalSelectItemPath)
     public event Action<string>? RequestOpenFile;          // (targetFilePath)
     public event Action<string>? RequestSetClipboardText;
@@ -97,6 +101,47 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
         CurrentFolderPath = path;
     }
 
+    public void OnWorkspaceOpened()
+    {
+        RefreshCurrentFolderContext();
+        var newFolder = CurrentFolderPath;
+
+        bool folderChanged = _lastSearchedFolder != null &&
+            !string.Equals(_lastSearchedFolder, newFolder, SearchPathHelper.GetPathStringComparison(newFolder));
+
+        if (folderChanged && Scope != SearchScope.Everywhere)
+        {
+            if (!string.IsNullOrWhiteSpace(Query))
+            {
+                ScheduleDebouncedSearch(delayMs: 0);
+            }
+            else
+            {
+                CancelAndInvalidateCurrentSearch();
+                Results.Clear();
+                TotalResultCount = 0;
+                FoldersSkippedCount = 0;
+                StatusText = "Enter a query to search";
+                IsSearching = false;
+            }
+        }
+
+        RequestFocusSearchBox?.Invoke();
+    }
+
+    public void OnWorkspaceHidden()
+    {
+        CancelAndInvalidateCurrentSearch();
+        IsSearching = false;
+    }
+
+    private void CancelAndInvalidateCurrentSearch()
+    {
+        _debounceCts?.Cancel();
+        _searchCts?.Cancel();
+        Interlocked.Increment(ref _searchGeneration);
+    }
+
     partial void OnSelectedScopeOptionChanged(SearchScopeOption value)
     {
         OnPropertyChanged(nameof(Scope));
@@ -116,7 +161,7 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
 
         if (string.IsNullOrWhiteSpace(Query))
         {
-            CancelSearch();
+            CancelAndInvalidateCurrentSearch();
             Results.Clear();
             TotalResultCount = 0;
             FoldersSkippedCount = 0;
@@ -164,7 +209,7 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
         string query = Query?.Trim() ?? string.Empty;
         if (string.IsNullOrEmpty(query))
         {
-            CancelSearch();
+            CancelAndInvalidateCurrentSearch();
             Results.Clear();
             TotalResultCount = 0;
             FoldersSkippedCount = 0;
@@ -181,7 +226,8 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
         // 2. Increment request generation to protect against stale results
         long generation = Interlocked.Increment(ref _searchGeneration);
 
-        // 3. Reset UI state for the new search
+        // 3. Track search parameters and reset UI state for the new search
+        _lastSearchedFolder = CurrentFolderPath;
         Results.Clear();
         TotalResultCount = 0;
         FoldersSkippedCount = 0;
@@ -193,14 +239,60 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
         // 4. Execute search on background thread with progressive batch streaming
         Task.Run(async () =>
         {
-            var progress = new Progress<SearchProgressReport>(report =>
+            int workerFoldersSkipped = 0;
+            var progress = new DirectProgress<SearchProgressReport>(report =>
             {
-                if (generation != _searchGeneration || _isDisposed) return;
-                FoldersSkippedCount = report.FoldersSkipped;
+                workerFoldersSkipped = report.FoldersSkipped;
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    if (generation != _searchGeneration || _isDisposed) return;
+                    FoldersSkippedCount = report.FoldersSkipped;
+                });
             });
 
             var buffer = new List<SearchResultItem>();
-            long lastFlush = Stopwatch.GetTimestamp();
+
+            void FlushBufferLocked()
+            {
+                if (buffer.Count == 0) return;
+                var batch = buffer.ToArray();
+                buffer.Clear();
+
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    if (generation != _searchGeneration || token.IsCancellationRequested || _isDisposed) return;
+
+                    foreach (var item in batch)
+                    {
+                        Results.Add(item);
+                    }
+
+                    TotalResultCount = Results.Count;
+                    StatusText = $"Searching... ({TotalResultCount:N0} results)";
+                });
+            }
+
+            using var flushCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var flushToken = flushCts.Token;
+            var flushTask = Task.Run(async () =>
+            {
+                while (!flushToken.IsCancellationRequested && generation == _searchGeneration && !_isDisposed)
+                {
+                    try
+                    {
+                        await Task.Delay(50, flushToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+
+                    lock (_bufferLock)
+                    {
+                        FlushBufferLocked();
+                    }
+                }
+            });
 
             try
             {
@@ -211,58 +303,70 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
                         return;
                     }
 
-                    buffer.Add(item);
-
-                    // Batch dispatch: flush every ~50 items or ~60ms
-                    long now = Stopwatch.GetTimestamp();
-                    double elapsedMs = (now - lastFlush) * 1000.0 / Stopwatch.Frequency;
-
-                    if (buffer.Count >= 50 || elapsedMs >= 60)
+                    lock (_bufferLock)
                     {
-                        FlushBuffer(buffer, generation, token);
-                        lastFlush = now;
+                        buffer.Add(item);
+                        // Flush immediately if buffer reaches high throughput batch size (e.g. Everything provider)
+                        if (buffer.Count >= 100)
+                        {
+                            FlushBufferLocked();
+                        }
                     }
                 }
 
+                // Stop periodic flush task
+                flushCts.Cancel();
+                try { await flushTask.ConfigureAwait(false); } catch { }
+
                 // Flush remaining items
-                if (buffer.Count > 0)
+                lock (_bufferLock)
                 {
-                    FlushBuffer(buffer, generation, token);
+                    FlushBufferLocked();
                 }
 
-                // Final status update on UI thread
+                // Final status update on UI thread with atomic final skipped count
+                int finalSkipped = workerFoldersSkipped;
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
                     if (generation != _searchGeneration || _isDisposed) return;
 
+                    FoldersSkippedCount = finalSkipped;
                     IsSearching = false;
                     if (token.IsCancellationRequested)
                     {
                         StatusText = TotalResultCount > 0
-                            ? $"Search cancelled ({TotalResultCount:N0} results)"
-                            : "Search cancelled";
+                            ? $"Search stopped ({TotalResultCount:N0} results)"
+                            : "Search stopped";
                     }
                     else
                     {
-                        StatusText = FoldersSkippedCount > 0
-                            ? $"{TotalResultCount:N0} results (completed with {FoldersSkippedCount:N0} inaccessible folders skipped)"
+                        StatusText = finalSkipped > 0
+                            ? $"{TotalResultCount:N0} results (completed with {finalSkipped:N0} inaccessible folders skipped)"
                             : (TotalResultCount == 0 ? "No results found" : $"{TotalResultCount:N0} results");
                     }
                 });
             }
             catch (OperationCanceledException)
             {
+                flushCts.Cancel();
+                try { await flushTask.ConfigureAwait(false); } catch { }
+
+                int finalSkipped = workerFoldersSkipped;
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
                     if (generation != _searchGeneration || _isDisposed) return;
+                    FoldersSkippedCount = finalSkipped;
                     IsSearching = false;
                     StatusText = TotalResultCount > 0
-                        ? $"Search cancelled ({TotalResultCount:N0} results)"
-                        : "Search cancelled";
+                        ? $"Search stopped ({TotalResultCount:N0} results)"
+                        : "Search stopped";
                 });
             }
             catch (Exception ex)
             {
+                flushCts.Cancel();
+                try { await flushTask.ConfigureAwait(false); } catch { }
+
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
                     if (generation != _searchGeneration || _isDisposed) return;
@@ -270,26 +374,6 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
                     StatusText = $"Search error: {ex.Message}";
                 });
             }
-        });
-    }
-
-    private void FlushBuffer(List<SearchResultItem> buffer, long generation, CancellationToken token)
-    {
-        if (buffer.Count == 0) return;
-        var batch = buffer.ToArray();
-        buffer.Clear();
-
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            if (generation != _searchGeneration || token.IsCancellationRequested || _isDisposed) return;
-
-            foreach (var item in batch)
-            {
-                Results.Add(item);
-            }
-
-            TotalResultCount = Results.Count;
-            StatusText = $"Searching... ({TotalResultCount:N0} results)";
         });
     }
 
@@ -308,7 +392,8 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void CloseWorkspace()
     {
-        CancelSearch();
+        CancelAndInvalidateCurrentSearch();
+        IsSearching = false;
         RequestClose?.Invoke();
     }
 
@@ -418,7 +503,13 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
     {
         if (_isDisposed) return;
         _isDisposed = true;
-        _debounceCts?.Cancel();
-        _searchCts?.Cancel();
+        CancelAndInvalidateCurrentSearch();
+    }
+
+    private sealed class DirectProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+        public DirectProgress(Action<T> handler) => _handler = handler ?? throw new ArgumentNullException(nameof(handler));
+        public void Report(T value) => _handler(value);
     }
 }
