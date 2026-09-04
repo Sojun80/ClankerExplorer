@@ -78,17 +78,17 @@
 
           <!-- Active status indicators -->
           <Border Background="#10B981" CornerRadius="3" Padding="6,1" VerticalAlignment="Center"
-                  IsVisible="{Binding RunningCount}">
+                  IsVisible="{Binding HasRunningOperations}">
             <TextBlock Text="{Binding RunningCount, StringFormat='{}{0} running'}" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" FontFamily="{DynamicResource AppMonoFont}"/>
           </Border>
 
           <Border Background="#F59E0B" CornerRadius="3" Padding="6,1" VerticalAlignment="Center"
-                  IsVisible="{Binding NeedsAttentionCount}">
+                  IsVisible="{Binding HasAttention}">
             <TextBlock Text="{Binding NeedsAttentionCount, StringFormat='{}⚠ {0} attention'}" FontSize="10" FontWeight="Bold" Foreground="#000000" FontFamily="{DynamicResource AppMonoFont}"/>
           </Border>
 
           <Border Background="#64748B" CornerRadius="3" Padding="6,1" VerticalAlignment="Center"
-                  IsVisible="{Binding QueuedCount}">
+                  IsVisible="{Binding HasQueuedOperations}">
             <TextBlock Text="{Binding QueuedCount, StringFormat='{}{0} queued'}" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" FontFamily="{DynamicResource AppMonoFont}"/>
           </Border>
         </StackPanel>
@@ -117,8 +117,8 @@
                 CornerRadius="8" Padding="32,24" HorizontalAlignment="Center" Margin="0,40,0,0">
           <Border.IsVisible>
             <MultiBinding Converter="{x:Static BoolConverters.And}">
-              <Binding Path="!ActiveJobs.Count"/>
-              <Binding Path="!HistoryJobs.Count"/>
+              <Binding Path="!HasActiveOperations"/>
+              <Binding Path="!HasHistoryOperations"/>
             </MultiBinding>
           </Border.IsVisible>
           <StackPanel Spacing="10" HorizontalAlignment="Center">
@@ -132,14 +132,14 @@
         </Border>
 
         <!-- Section 1: Active Operations -->
-        <StackPanel Spacing="8" IsVisible="{Binding ActiveJobs.Count}">
+        <StackPanel Spacing="8" IsVisible="{Binding HasActiveOperations}">
           <TextBlock Text="ACTIVE OPERATIONS" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}"
                      FontFamily="{DynamicResource AppMonoFont}" Margin="2,0,0,0"/>
 
           <ItemsControl ItemsSource="{Binding ActiveJobs}">
             <ItemsControl.ItemTemplate>
               <DataTemplate DataType="vm:OperationJobViewModel">
-                <Border Classes="job-card" Classes.attention="{Binding Job.CurrentConflict, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <Border Classes="job-card" Classes.attention="{Binding IsNeedsAttention}">
                   <StackPanel Spacing="8">
                     <!-- Row 1: Header / Badges / Actions -->
                     <Grid ColumnDefinitions="Auto,*,Auto">
@@ -183,7 +183,7 @@
 
                         <!-- Details Expand Toggle -->
                         <Button Command="{Binding ToggleExpandedCommand}" Classes="op-btn" ToolTip.Tip="Toggle details">
-                          <TextBlock Text="{Binding Job.IsExpanded, Converter={x:Static ObjectConverters.IsNull}, FallbackValue='Details'}" FontSize="10"/>
+                          <TextBlock Text="{Binding DetailsToggleText}" FontSize="10"/>
                         </Button>
                       </StackPanel>
                     </Grid>
@@ -309,7 +309,7 @@
         </StackPanel>
 
         <!-- Section 2: Session History -->
-        <StackPanel Spacing="8" IsVisible="{Binding HistoryJobs.Count}">
+        <StackPanel Spacing="8" IsVisible="{Binding HasHistoryOperations}">
           <TextBlock Text="SESSION HISTORY" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"
                      FontFamily="{DynamicResource AppMonoFont}" Margin="2,0,0,0"/>
 
@@ -333,7 +333,7 @@
                           <TextBlock Text="{Binding Job.State}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
                         </Border>
                         <Button Command="{Binding ToggleExpandedCommand}" Classes="op-btn" ToolTip.Tip="Toggle details">
-                          <TextBlock Text="Details" FontSize="10"/>
+                          <TextBlock Text="{Binding DetailsToggleText}" FontSize="10"/>
                         </Button>
                       </StackPanel>
                     </Grid>

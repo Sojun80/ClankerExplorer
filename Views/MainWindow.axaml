@@ -81,10 +81,10 @@
 
             <!-- Operations Workspace Toggle -->
             <ToggleButton IsChecked="{Binding ShowOperationsWorkspace, Mode=TwoWay}" Classes="power-btn"
+                          Classes.attention="{Binding Operations.HasAttention}"
                           ToolTip.Tip="Toggle Operations Workspace">
               <StackPanel Orientation="Horizontal" Spacing="4">
-                <TextBlock Text="⚡" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"/>
-                <TextBlock Text="Operations"/>
+                <TextBlock Text="{Binding Operations.SummaryStatusText}"/>
               </StackPanel>
             </ToggleButton>
 

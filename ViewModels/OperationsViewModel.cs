@@ -41,6 +41,15 @@ public partial class OperationsViewModel : ObservableObject, IDisposable
     private bool _hasAttention;
 
     [ObservableProperty]
+    private bool _hasRunningOperations;
+
+    [ObservableProperty]
+    private bool _hasQueuedOperations;
+
+    [ObservableProperty]
+    private bool _hasHistoryOperations;
+
+    [ObservableProperty]
     private string _selectedFilter = "All"; // "All", "Active", "Completed"
 
     public event Action? RequestClose;
@@ -66,6 +75,9 @@ public partial class OperationsViewModel : ObservableObject, IDisposable
             SummaryStatusText = _operationManager.SummaryStatusText;
             HasActiveOperations = _operationManager.HasActiveOperations;
             HasAttention = NeedsAttentionCount > 0;
+            HasRunningOperations = RunningCount > 0;
+            HasQueuedOperations = QueuedCount > 0;
+            HasHistoryOperations = _operationManager.HistoryJobs.Count > 0;
 
             // Synchronize ActiveJobs
             var activeSource = _operationManager.ActiveJobs;
@@ -164,6 +176,7 @@ public partial class OperationsViewModel : ObservableObject, IDisposable
 public partial class OperationJobViewModel : ObservableObject
 {
     public OperationJob Job { get; }
+    private string? _lastConflictPath;
 
     [ObservableProperty]
     private string _inlineNewName = string.Empty;
@@ -171,12 +184,17 @@ public partial class OperationJobViewModel : ObservableObject
     [ObservableProperty]
     private bool _applyToRemaining;
 
+    public string DetailsToggleText => Job.IsExpanded ? "Hide Details" : "Show Details";
+
+    public bool IsNeedsAttention => Job.State == OperationState.NeedsAttention || Job.CurrentConflict != null;
+
     public OperationJobViewModel(OperationJob job)
     {
         Job = job;
         Job.JobChanged += _ => NotifyProperties();
         if (Job.CurrentConflict != null)
         {
+            _lastConflictPath = Job.CurrentConflict.SourcePath;
             InlineNewName = System.IO.Path.GetFileName(Job.CurrentConflict.SuggestedRenamePath);
         }
     }
@@ -186,9 +204,20 @@ public partial class OperationJobViewModel : ObservableObject
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             OnPropertyChanged(nameof(Job));
-            if (Job.CurrentConflict != null && string.IsNullOrEmpty(InlineNewName))
+            OnPropertyChanged(nameof(DetailsToggleText));
+            OnPropertyChanged(nameof(IsNeedsAttention));
+            if (Job.CurrentConflict != null)
             {
-                InlineNewName = System.IO.Path.GetFileName(Job.CurrentConflict.SuggestedRenamePath);
+                var conflictPath = Job.CurrentConflict.SourcePath;
+                if (!string.Equals(_lastConflictPath, conflictPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastConflictPath = conflictPath;
+                    InlineNewName = System.IO.Path.GetFileName(Job.CurrentConflict.SuggestedRenamePath);
+                }
+            }
+            else
+            {
+                _lastConflictPath = null;
             }
         });
     }
@@ -197,6 +226,7 @@ public partial class OperationJobViewModel : ObservableObject
     public void ToggleExpanded()
     {
         Job.IsExpanded = !Job.IsExpanded;
+        OnPropertyChanged(nameof(DetailsToggleText));
     }
 
     [RelayCommand]

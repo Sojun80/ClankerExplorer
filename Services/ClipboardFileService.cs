@@ -264,7 +264,8 @@ public static class ClipboardFileService
 
     public static async Task<OperationJob?> EnqueuePasteFromSystemClipboardAsync(
         IClipboard? clipboard,
-        string destinationDirectory)
+        string destinationDirectory,
+        FileConflictPolicy conflictPolicy = FileConflictPolicy.Prompt)
     {
         if (string.IsNullOrWhiteSpace(destinationDirectory)) return null;
 
@@ -285,7 +286,7 @@ public static class ClipboardFileService
             sources,
             destinationDirectory,
             isCutMode ? FileTransferMode.Move : FileTransferMode.Copy,
-            isCutMode ? FileConflictPolicy.Fail : FileConflictPolicy.AutoRename);
+            conflictPolicy);
 
         var job = _fileOperationService.QueueTransfer(request);
 
@@ -316,9 +317,10 @@ public static class ClipboardFileService
     public static async Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)> PasteFromSystemClipboardAsync(
         IClipboard? clipboard,
         string destinationDirectory,
+        FileConflictPolicy conflictPolicy = FileConflictPolicy.AutoRename,
         CancellationToken cancellationToken = default)
     {
-        var job = await EnqueuePasteFromSystemClipboardAsync(clipboard, destinationDirectory).ConfigureAwait(false);
+        var job = await EnqueuePasteFromSystemClipboardAsync(clipboard, destinationDirectory, conflictPolicy).ConfigureAwait(false);
         if (job == null)
         {
             return (0, new List<string>(), new List<string>());
@@ -329,9 +331,12 @@ public static class ClipboardFileService
         return (result.SuccessfulSourcePaths.Count, result.FailedPaths.ToList(), result.CreatedDestinationPaths.ToList());
     }
 
-    public static async Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)> PasteAsync(string destinationDirectory, CancellationToken cancellationToken = default)
+    public static async Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)> PasteAsync(
+        string destinationDirectory,
+        FileConflictPolicy conflictPolicy = FileConflictPolicy.AutoRename,
+        CancellationToken cancellationToken = default)
     {
-        return await PasteFromSystemClipboardAsync(null, destinationDirectory, cancellationToken).ConfigureAwait(false);
+        return await PasteFromSystemClipboardAsync(null, destinationDirectory, conflictPolicy, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<(List<string> successfulSourcePaths, List<string> failedPaths, List<string> createdDestinationPaths)> TransferFilesAsync(

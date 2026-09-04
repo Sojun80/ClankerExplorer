@@ -167,7 +167,7 @@ public partial class OperationJob : ObservableObject
         {
             if (State != OperationState.Paused) return;
             _pauseTcs.TrySetResult(true);
-            SetState(StartedTime.HasValue ? OperationState.Running : OperationState.Queued);
+            SetState(OperationState.Running);
             AddLog("Operation resumed.");
         }
     }
@@ -197,6 +197,7 @@ public partial class OperationJob : ObservableObject
             _pauseTcs.TrySetResult(false);
             _conflictTcs?.TrySetCanceled();
             SetState(OperationState.Cancelled);
+            CompletionSource.TrySetCanceled(_cts.Token);
             AddLog("Operation cancelled by user.", OperationLogLevel.Warning);
         }
     }

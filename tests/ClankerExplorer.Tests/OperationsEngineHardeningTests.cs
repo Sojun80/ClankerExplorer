@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using ClankerExplorer.AppLayer;
 using ClankerExplorer.AppLayer.Operations;
 using ClankerExplorer.Models;
@@ -28,9 +31,11 @@ public sealed class OperationsEngineHardeningTests : IDisposable
         var start = Environment.TickCount64;
         while (Environment.TickCount64 - start < timeoutMs)
         {
+            Dispatcher.UIThread.RunJobs();
             if (condition()) return true;
             await Task.Delay(pollIntervalMs);
         }
+        Dispatcher.UIThread.RunJobs();
         return condition();
     }
 
@@ -395,25 +400,257 @@ public sealed class OperationsEngineHardeningTests : IDisposable
     public async Task ScenarioP_WatcherStaging_ReconcilesBatchesAfterLoad()
     {
         using var fs = new TemporaryFileSystem();
+        var deletedFile = Path.Combine(fs.FolderA, "staged_delete.txt");
+        File.WriteAllText(deletedFile, "delete me");
+
         var tab = new ExplorerTabViewModel(fs.FolderA);
         await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
 
-        var reconciler = new DirectoryChangeReconciler(tab);
-        reconciler.BeginStaging();
+        Assert.Contains(tab.Items, i => i.Name == "staged_delete.txt");
 
-        var createdFile = Path.Combine(fs.FolderA, "staged_file.txt");
-        File.WriteAllText(createdFile, "staged");
+        // 1. Begin staging with generation token
+        long token = tab.Reconciler.BeginStaging();
+
+        var createdFile = Path.Combine(fs.FolderA, "staged_create.txt");
+        File.WriteAllText(createdFile, "created content");
+        File.Delete(deletedFile);
 
         var batch = new DirectoryChangeBatch(
             fs.FolderA,
-            new[] { new FileChangeEvent(DirectoryChangeKind.Created, createdFile) });
+            new[]
+            {
+                new FileChangeEvent(DirectoryChangeKind.Created, createdFile),
+                new FileChangeEvent(DirectoryChangeKind.Deleted, deletedFile)
+            });
 
-        reconciler.HandleBatch(batch);
+        tab.Reconciler.HandleBatch(batch);
 
-        // Replay
-        reconciler.EndStagingAndReplay();
+        // Before replay, items were not modified by reconciler yet
+        Assert.DoesNotContain(tab.Items, i => i.Name == "staged_create.txt");
 
-        // After staging and replay, reconciler successfully processes without throwing or losing state
-        Assert.NotNull(reconciler);
+        // 2. Replay staging session with token
+        tab.Reconciler.EndStagingAndReplay(token);
+
+        await WaitForConditionAsync(() => tab.Items.Any(i => i.Name == "staged_create.txt") && !tab.Items.Any(i => i.Name == "staged_delete.txt"), timeoutMs: 5000);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Contains(tab.Items, i => i.Name == "staged_create.txt");
+        Assert.DoesNotContain(tab.Items, i => i.Name == "staged_delete.txt");
+
+        // 3. Generation collision: older token cancel does not cancel newer staging
+        long token1 = tab.Reconciler.BeginStaging();
+        long token2 = tab.Reconciler.BeginStaging();
+        Assert.True(token2 > token1);
+
+        tab.Reconciler.CancelStaging(token1);
+
+        var stagedSecond = Path.Combine(fs.FolderA, "staged_second.txt");
+        File.WriteAllText(stagedSecond, "second");
+        tab.Reconciler.HandleBatch(new DirectoryChangeBatch(fs.FolderA, new[] { new FileChangeEvent(DirectoryChangeKind.Created, stagedSecond) }));
+
+        tab.Reconciler.EndStagingAndReplay(token2);
+        await WaitForConditionAsync(() => tab.Items.Any(i => i.Name == "staged_second.txt"), timeoutMs: 5000);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains(tab.Items, i => i.Name == "staged_second.txt");
+
+        // 4. Overflow coalesce: overflow batch during staging coalesces into post-load refresh
+        long tokenOverflow = tab.Reconciler.BeginStaging();
+        var stagedOverflowFile = Path.Combine(fs.FolderA, "overflow_file.txt");
+        File.WriteAllText(stagedOverflowFile, "overflow content");
+
+        tab.Reconciler.HandleBatch(new DirectoryChangeBatch(fs.FolderA, Array.Empty<FileChangeEvent>(), IsOverflow: true));
+
+        tab.Reconciler.EndStagingAndReplay(tokenOverflow);
+        await WaitForConditionAsync(() => tab.Items.Any(i => i.Name == "overflow_file.txt"), timeoutMs: 5000);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains(tab.Items, i => i.Name == "overflow_file.txt");
+    }
+
+    [Fact]
+    public async Task ScenarioQ_QueuedJobCancellation_CompletesCompletionTaskPromptly()
+    {
+        using var fs = new TemporaryFileSystem();
+        var src1 = Path.Combine(fs.FolderA, "file1.txt");
+        var src2 = Path.Combine(fs.FolderA, "file2.txt");
+        File.WriteAllText(src1, "content 1");
+        File.WriteAllText(src2, "content 2");
+
+        var job1 = _manager.EnqueueTransfer(new FileTransferRequest(new[] { src1 }, fs.FolderB, FileTransferMode.Copy));
+        // Pause job1 so worker remains on job1 while job2 is queued
+        _manager.PauseJob(job1.Id);
+
+        var job2 = _manager.EnqueueTransfer(new FileTransferRequest(new[] { src2 }, fs.FolderB, FileTransferMode.Copy));
+
+        Assert.Equal(OperationState.Queued, job2.State);
+
+        // Cancel job2 while queued
+        job2.RequestCancel();
+
+        // Verify CompletionTask completes with cancellation and does NOT hang indefinitely
+        var completedTask = await Task.WhenAny(job2.CompletionTask, Task.Delay(3000));
+        Assert.Same(job2.CompletionTask, completedTask);
+        Assert.True(job2.CompletionTask.IsCanceled);
+        Assert.Equal(OperationState.Cancelled, job2.State);
+
+        // Resume job1 so worker finishes
+        _manager.ResumeJob(job1.Id);
+        await job1.CompletionTask;
+        Assert.Equal(OperationState.Completed, job1.State);
+    }
+
+    [Fact]
+    public async Task ScenarioR_CrossVolumeDirectoryMove_PartialSourceDeleteFailed_TopLevelReportsPartialSuccess()
+    {
+        using var fs = new TemporaryFileSystem();
+        var srcDir = Path.Combine(fs.FolderA, "MoveDir");
+        Directory.CreateDirectory(srcDir);
+        var file1 = Path.Combine(srcDir, "file1.txt");
+        var file2 = Path.Combine(srcDir, "file2.txt");
+        File.WriteAllText(file1, "file 1 content");
+        File.WriteAllText(file2, "file 2 content");
+
+        // Lock file1 with FileShare.Read so copy succeeds, but source delete fails
+        using var readStream = new FileStream(file1, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        var req = new FileTransferRequest(new[] { srcDir }, fs.FolderB, FileTransferMode.Move, FileConflictPolicy.AutoRename);
+        var job = _manager.EnqueueTransfer(req);
+
+        var result = await job.CompletionTask;
+
+        // Destination was created with the files
+        var dstDir = Path.Combine(fs.FolderB, "MoveDir");
+        Assert.True(Directory.Exists(dstDir));
+        Assert.True(File.Exists(Path.Combine(dstDir, "file1.txt")));
+        Assert.True(File.Exists(Path.Combine(dstDir, "file2.txt")));
+
+        // Top-level directory result must report PartialSuccessSourceDeleteFailed
+        var rootDirResult = result.Items.FirstOrDefault(i => i.SourcePath.Equals(srcDir, StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(rootDirResult);
+        Assert.Equal(FileTransferStatus.PartialSuccessSourceDeleteFailed, rootDirResult.Status);
+    }
+
+    [Fact]
+    public async Task ScenarioS_FailedOverwrite_RestoresOriginalDestinationAttributes()
+    {
+        using var fs = new TemporaryFileSystem();
+        var src = Path.Combine(fs.FolderA, "src_locked.txt");
+        var dst = Path.Combine(fs.FolderB, "dst_readonly.txt");
+        File.WriteAllText(src, "NEW DATA");
+        File.WriteAllText(dst, "ORIGINAL DATA");
+
+        File.SetAttributes(dst, FileAttributes.ReadOnly);
+        Assert.True((File.GetAttributes(dst) & FileAttributes.ReadOnly) != 0);
+
+        // Lock source file so copy stream fails
+        using var lockStream = new FileStream(src, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+        var req = new FileTransferRequest(new[] { src }, fs.FolderB, FileTransferMode.Copy, FileConflictPolicy.Overwrite);
+        var job = _manager.EnqueueTransfer(req);
+
+        await WaitForConditionAsync(() => job.State == OperationState.Failed, timeoutMs: 5000);
+
+        // ReadOnly attribute must be restored on the destination file
+        Assert.True(File.Exists(dst));
+        Assert.True((File.GetAttributes(dst) & FileAttributes.ReadOnly) != 0);
+
+        // Clean up readonly attribute so Dispose can delete temp folder
+        File.SetAttributes(dst, FileAttributes.Normal);
+    }
+
+    [Fact]
+    public void ScenarioT_ActiveTransferTempFiles_HiddenAndFiltered()
+    {
+        var tempPath = @"C:\FakePath\.clanker-transfer-abc12345.tmp";
+        Assert.True(TransferEngine.IsInternalTransferTempFile(tempPath));
+
+        Assert.False(TransferEngine.IsActiveTempFile(tempPath));
+
+        TransferEngine.RegisterActiveTempFile(tempPath);
+        Assert.True(TransferEngine.IsActiveTempFile(tempPath));
+
+        TransferEngine.UnregisterActiveTempFile(tempPath);
+        Assert.False(TransferEngine.IsActiveTempFile(tempPath));
+    }
+
+    [Fact]
+    public async Task ScenarioU_OperationsViewModel_StatusTextAndAttentionPriority()
+    {
+        Assert.Equal("⚡ Operations", _manager.SummaryStatusText);
+
+        using var fs = new TemporaryFileSystem();
+        var fileA = Path.Combine(fs.FolderA, "conflict_a.txt");
+        var fileB = Path.Combine(fs.FolderB, "conflict_a.txt");
+        File.WriteAllText(fileA, "A");
+        File.WriteAllText(fileB, "B");
+
+        // Job that prompts conflict
+        var job = _manager.EnqueueTransfer(new FileTransferRequest(new[] { fileA }, fs.FolderB, FileTransferMode.Copy, FileConflictPolicy.Prompt));
+
+        await WaitForConditionAsync(() => job.State == OperationState.NeedsAttention, timeoutMs: 5000);
+        Assert.StartsWith("⚠", _manager.SummaryStatusText);
+
+        job.ResolveConflict(new ConflictResolution(ConflictAction.Replace));
+        await job.CompletionTask;
+
+        Assert.Equal("⚡ Operations", _manager.SummaryStatusText);
+    }
+
+    [Fact]
+    public void ScenarioV_OperationJobViewModel_ResetsInlineNewName_OnNewConflict()
+    {
+        var job = new OperationJob(OperationType.Copy, new[] { "file1.txt", "file2.txt" }, "dst");
+        var vm = new OperationJobViewModel(job);
+
+        // First conflict arrives
+        var conflict1 = new OperationConflict(@"C:\file1.txt", @"C:\dst\file1.txt", @"C:\dst\file1 (Copy).txt", false);
+        _ = job.PromptConflictAsync(conflict1, CancellationToken.None);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("file1 (Copy).txt", vm.InlineNewName);
+
+        // User typed custom name
+        vm.InlineNewName = "my_custom_name.txt";
+
+        // Second conflict arrives for different file
+        var conflict2 = new OperationConflict(@"C:\file2.txt", @"C:\dst\file2.txt", @"C:\dst\file2 (Copy).txt", false);
+        _ = job.PromptConflictAsync(conflict2, CancellationToken.None);
+        Dispatcher.UIThread.RunJobs();
+
+        // Must reset to new file's suggested rename
+        Assert.Equal("file2 (Copy).txt", vm.InlineNewName);
+    }
+
+    [Fact]
+    public async Task ScenarioW_FinalSummaryFailures_DerivedFromAllItemResults()
+    {
+        using var fs = new TemporaryFileSystem();
+        var badFile = Path.Combine(fs.FolderA, "does_not_exist_file.txt");
+        var goodFile = Path.Combine(fs.FolderA, "good_file.txt");
+        File.WriteAllText(goodFile, "good");
+
+        var req = new FileTransferRequest(new[] { badFile, goodFile }, fs.FolderB, FileTransferMode.Copy);
+        var job = _manager.EnqueueTransfer(req);
+
+        await job.CompletionTask;
+
+        Assert.NotNull(job.Summary);
+        Assert.True(job.Summary.FailedCount >= 1);
+        Assert.True(job.Summary.SucceededCount >= 1);
+    }
+
+    [Fact]
+    public async Task ScenarioX_InteractiveTransfers_DefaultToPromptConflictPolicy()
+    {
+        using var fs = new TemporaryFileSystem();
+        var src = Path.Combine(fs.FolderA, "prompt_test.txt");
+        File.WriteAllText(src, "content");
+        ClipboardFileService.Copy(new[] { src });
+
+        var job = await ClipboardFileService.EnqueuePasteFromSystemClipboardAsync(null, fs.FolderB);
+        Assert.NotNull(job);
+        Assert.Equal(FileConflictPolicy.Prompt, job.ConflictPolicy);
+
+        await job.CompletionTask;
     }
 }

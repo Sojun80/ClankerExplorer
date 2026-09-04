@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
+using ClankerExplorer.AppLayer.Operations;
 using ClankerExplorer.Models;
 using ClankerExplorer.ViewModels;
 
@@ -24,8 +26,10 @@ public sealed class DirectoryChangeReconciler
     private readonly object _syncLock = new();
     private Task _processingChain = Task.CompletedTask;
     private long _currentGeneration = 0;
+    private long _stagingToken = 0;
     private readonly List<DirectoryChangeBatch> _stagedBatches = new();
     private bool _isStaging;
+    private bool _stagedHasOverflow;
 
     public DirectoryChangeReconciler(ExplorerTabViewModel tab)
     {
@@ -37,24 +41,39 @@ public sealed class DirectoryChangeReconciler
         Interlocked.Increment(ref _currentGeneration);
     }
 
-    public void BeginStaging()
+    public long BeginStaging()
     {
         lock (_syncLock)
         {
             _isStaging = true;
+            _stagedHasOverflow = false;
             _stagedBatches.Clear();
+            return ++_stagingToken;
         }
     }
 
-    public void EndStagingAndReplay()
+    public void EndStagingAndReplay(long stagingToken)
     {
         List<DirectoryChangeBatch> toReplay;
+        bool hadOverflow;
         lock (_syncLock)
         {
+            if (!_isStaging || _stagingToken != stagingToken) return;
             _isStaging = false;
-            if (_stagedBatches.Count == 0) return;
+            hadOverflow = _stagedHasOverflow;
+            _stagedHasOverflow = false;
+            if (_stagedBatches.Count == 0 && !hadOverflow) return;
             toReplay = new List<DirectoryChangeBatch>(_stagedBatches);
             _stagedBatches.Clear();
+        }
+
+        if (hadOverflow)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                _ = _tab.RefreshAsync();
+            }, DispatcherPriority.Background);
+            return;
         }
 
         foreach (var batch in toReplay)
@@ -63,13 +82,31 @@ public sealed class DirectoryChangeReconciler
         }
     }
 
-    public void CancelStaging()
+    public void EndStagingAndReplay()
+    {
+        long token;
+        lock (_syncLock) { token = _stagingToken; }
+        EndStagingAndReplay(token);
+    }
+
+    public void CancelStaging(long stagingToken)
     {
         lock (_syncLock)
         {
-            _isStaging = false;
-            _stagedBatches.Clear();
+            if (_stagingToken == stagingToken)
+            {
+                _isStaging = false;
+                _stagedHasOverflow = false;
+                _stagedBatches.Clear();
+            }
         }
+    }
+
+    public void CancelStaging()
+    {
+        long token;
+        lock (_syncLock) { token = _stagingToken; }
+        CancelStaging(token);
     }
 
     public void HandleBatch(DirectoryChangeBatch batch)
@@ -79,10 +116,45 @@ public sealed class DirectoryChangeReconciler
         // Ignore events from other directories (e.g. previous directory before navigation)
         if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
 
+        // Filter active transfer temp files so they never flicker into UI
+        if (batch.Changes != null && batch.Changes.Count > 0)
+        {
+            var filteredChanges = batch.Changes
+                .Where(c => !TransferEngine.IsActiveTempFile(c.FullPath) &&
+                            (string.IsNullOrEmpty(c.OldFullPath) || !TransferEngine.IsActiveTempFile(c.OldFullPath)))
+                .ToList();
+
+            if (filteredChanges.Count == 0 && !batch.IsOverflow)
+            {
+                return;
+            }
+
+            if (filteredChanges.Count != batch.Changes.Count)
+            {
+                batch = new DirectoryChangeBatch(batch.DirectoryPath, filteredChanges, batch.IsOverflow);
+            }
+        }
+
         long gen = Volatile.Read(ref _currentGeneration);
 
+        lock (_syncLock)
+        {
+            if (_isStaging)
+            {
+                if (batch.IsOverflow || (batch.Changes?.Count ?? 0) >= FallbackThreshold)
+                {
+                    _stagedHasOverflow = true;
+                }
+                else
+                {
+                    _stagedBatches.Add(batch);
+                }
+                return;
+            }
+        }
+
         // Fallback to state-preserving full refresh if overflow or large burst
-        if (batch.IsOverflow || batch.Changes.Count >= FallbackThreshold)
+        if (batch.IsOverflow || (batch.Changes?.Count ?? 0) >= FallbackThreshold)
         {
             Dispatcher.UIThread.Post(() =>
             {
@@ -95,11 +167,6 @@ public sealed class DirectoryChangeReconciler
 
         lock (_syncLock)
         {
-            if (_isStaging)
-            {
-                _stagedBatches.Add(batch);
-                return;
-            }
             _processingChain = ProcessBatchSequentialAsync(_processingChain, batch, gen);
         }
     }
@@ -141,7 +208,7 @@ public sealed class DirectoryChangeReconciler
 
     public void ReconcileCreatedOrChangedSync(string fullPath)
     {
-        if (string.IsNullOrWhiteSpace(fullPath)) return;
+        if (string.IsNullOrWhiteSpace(fullPath) || TransferEngine.IsActiveTempFile(fullPath)) return;
         var change = new FileChangeEvent(DirectoryChangeKind.Created, fullPath);
         var resolved = ResolveMetadata(new[] { change });
         ApplyResolvedBatch(_tab.CurrentPath, resolved);

@@ -149,6 +149,10 @@
       <Setter Property="Background" Value="{DynamicResource AppAccentBrush}"/>
       <Setter Property="Foreground" Value="#FFFFFF"/>
     </Style>
+    <Style Selector="ToggleButton.power-btn.attention">
+      <Setter Property="BorderBrush" Value="#F59E0B"/>
+      <Setter Property="BorderThickness" Value="2"/>
+    </Style>
 
     <!-- Extension Tag Badges (Clear, Legible, Comfortable Tag Layout) -->
     <Style Selector="Border.badge-ext">

@@ -1287,7 +1287,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             sourcePaths?.ToList() ?? new List<string>(),
             destinationDirectory,
             isMove ? FileTransferMode.Move : FileTransferMode.Copy,
-            isMove ? FileConflictPolicy.Fail : FileConflictPolicy.AutoRename);
+            FileConflictPolicy.Prompt);
 
         var job = _fileOperationService.QueueTransfer(request);
         var currentTab = SelectedTab;

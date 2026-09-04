@@ -80,25 +80,24 @@ public sealed class OperationManager : IOperationManager
                 var attention = NeedsAttentionCount;
                 if (attention > 0)
                 {
-                    return $"⚠ {attention} Needs Attention";
+                    return $"⚠ {attention}";
                 }
 
                 var running = RunningCount;
-                if (running > 0)
+                if (running == 1)
                 {
                     var percent = (int)OverallProgressPercentage;
-                    return $"⚡ {percent}% ({running} running)";
+                    return $"⚡ {percent}%";
+                }
+                else if (running > 1)
+                {
+                    return $"⚡ {running} running";
                 }
 
                 var queued = QueuedCount;
                 if (queued > 0)
                 {
                     return $"⚡ {queued} queued";
-                }
-
-                if (_historyJobs.Count > 0)
-                {
-                    return "⚡ Operations (Done)";
                 }
 
                 return "⚡ Operations";
@@ -111,6 +110,7 @@ public sealed class OperationManager : IOperationManager
     public OperationManager(TransferEngine? transferEngine = null)
     {
         _transferEngine = transferEngine ?? new TransferEngine();
+
         _queueChannel = Channel.CreateUnbounded<OperationJob>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -162,13 +162,37 @@ public sealed class OperationManager : IOperationManager
 
             if (job == null) continue;
 
-            if (job.State == OperationState.Cancelled)
+            if (job.State == OperationState.Cancelled || job.CancellationToken.IsCancellationRequested)
             {
+                job.SetState(OperationState.Cancelled);
+                job.CompletionSource.TrySetCanceled(job.CancellationToken);
                 MoveToHistory(job);
                 continue;
             }
 
-            await job.WaitIfPausedAsync(_managerCts.Token).ConfigureAwait(false);
+            try
+            {
+                await job.WaitIfPausedAsync(_managerCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                if (job.CancellationToken.IsCancellationRequested || job.State == OperationState.Cancelled)
+                {
+                    job.SetState(OperationState.Cancelled);
+                    job.CompletionSource.TrySetCanceled(job.CancellationToken);
+                    MoveToHistory(job);
+                    continue;
+                }
+                break;
+            }
+
+            if (job.State == OperationState.Cancelled || job.CancellationToken.IsCancellationRequested)
+            {
+                job.SetState(OperationState.Cancelled);
+                job.CompletionSource.TrySetCanceled(job.CancellationToken);
+                MoveToHistory(job);
+                continue;
+            }
 
             job.SetState(OperationState.Running);
             NotifyChanged();
@@ -186,7 +210,7 @@ public sealed class OperationManager : IOperationManager
             catch (OperationCanceledException)
             {
                 job.SetState(OperationState.Cancelled);
-                job.CompletionSource.TrySetCanceled();
+                job.CompletionSource.TrySetCanceled(job.CancellationToken);
             }
             catch (Exception ex)
             {

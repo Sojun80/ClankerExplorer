@@ -10,6 +10,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
 using ClankerExplorer.Services.Watcher;
+using ClankerExplorer.AppLayer.Operations;
 
 namespace ClankerExplorer.ViewModels;
 
@@ -240,7 +241,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         if (_isDisposed) return;
 
         _reconciler.Reset();
-        _reconciler.BeginStaging();
+        long stagingToken = _reconciler.BeginStaging();
         _loadCts?.Cancel();
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
@@ -273,7 +274,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             var (list, error) = await FileSystemService.Instance.ReadDirectoryAsync(CurrentPath, token, _directoryReadOptions);
             if (token.IsCancellationRequested || generation != _loadGeneration || _isDisposed)
             {
-                _reconciler.CancelStaging();
+                _reconciler.CancelStaging(stagingToken);
                 return;
             }
 
@@ -292,6 +293,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             var deduplicatedList = list
                 .GroupBy(i => i.FullPath, comparer)
                 .Select(g => g.First())
+                .Where(i => !TransferEngine.IsActiveTempFile(i.FullPath))
                 .ToList();
 
             foreach (var item in deduplicatedList)
@@ -302,7 +304,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             Items = new ObservableCollection<FileItem>(deduplicatedList);
             await ApplyFilterAsync(token);
 
-            _reconciler.EndStagingAndReplay();
+            _reconciler.EndStagingAndReplay(stagingToken);
 
             // Determine selection targets: explicit navigation/paste vs ordinary refresh continuity
             var pendingPaths = PendingSelectPaths;
@@ -367,7 +369,12 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException)
         {
-            _reconciler.CancelStaging();
+            _reconciler.CancelStaging(stagingToken);
+        }
+        catch (Exception)
+        {
+            _reconciler.CancelStaging(stagingToken);
+            throw;
         }
         finally
         {
