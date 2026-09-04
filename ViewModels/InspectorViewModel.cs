@@ -11,6 +11,7 @@ using CommunityToolkit.Mvvm.Input;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
 using ClankerExplorer.Services.Preview;
+using ClankerExplorer.Services.Metadata;
 
 namespace ClankerExplorer.ViewModels;
 
@@ -79,12 +80,18 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsImagePreview))]
     [NotifyPropertyChangedFor(nameof(IsVideoPreview))]
+    [NotifyPropertyChangedFor(nameof(IsAudioPreview))]
     [NotifyPropertyChangedFor(nameof(IsPdfPreview))]
     [NotifyPropertyChangedFor(nameof(IsZipPreview))]
     [NotifyPropertyChangedFor(nameof(IsStlPreview))]
     [NotifyPropertyChangedFor(nameof(IsTextPreview))]
     [NotifyPropertyChangedFor(nameof(IsBinaryPreview))]
+    [NotifyPropertyChangedFor(nameof(IsMetadataFallback))]
     private string _activePreviewType = "none";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsMetadataFallback))]
+    private FileMetadata? _itemMetadata;
 
     [ObservableProperty]
     private bool _isLoadingPreview;
@@ -238,6 +245,18 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     public bool IsTextPreview => ActivePreviewType == "text";
     public bool IsBinaryPreview => ActivePreviewType == "binary";
     public bool IsHexPreview => ActivePreviewType == "hex";
+    public bool IsAudioPreview => ActivePreviewType == "audio";
+    public bool IsMetadataFallback => ActivePreviewType == "metadata" ||
+        (ItemMetadata != null && ActivePreviewType != "image" && ActivePreviewType != "video" &&
+         ActivePreviewType != "audio" && ActivePreviewType != "pdf" && ActivePreviewType != "zip" &&
+         ActivePreviewType != "stl" && ActivePreviewType != "text" && ActivePreviewType != "none");
+
+    private static readonly HashSet<string> InspectorAudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".wma", ".aac", ".opus", ".aiff", ".aif", ".ape", ".alac"
+    };
+
+    private static bool IsInspectorAudioFile(string ext) => InspectorAudioExtensions.Contains(ext);
 
     [ObservableProperty]
     private ObservableCollection<HexRow> _hexRows = new();
@@ -292,6 +311,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
         StlTrianglesDisplay = string.Empty;
 
         PreviewData = null;
+        ItemMetadata = null;
         HexRows.Clear();
         Sha256Hash = string.Empty;
         Md5Hash = string.Empty;
@@ -331,6 +351,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
         StlWireframe = false;
         PreviewErrorMessage = null;
         ActivePreviewType = "none";
+        ItemMetadata = null;
         IsFitMode = true;
         ZoomLevel = 1.0;
 
@@ -360,6 +381,21 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
             PreviewData = data;
             string ext = Path.GetExtension(filePath);
 
+            // Asynchronously query reusable metadata service (LRU cached)
+            _ = FileMetadataService.Instance.GetMetadataAsync(filePath, token).ContinueWith(t =>
+            {
+                if (t.IsCompletedSuccessfully && t.Result != null && generation == _previewGeneration && _currentFilePath == filePath)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        if (generation == _previewGeneration && _currentFilePath == filePath)
+                        {
+                            ItemMetadata = t.Result;
+                        }
+                    });
+                }
+            }, token);
+
             if (data.HexRows != null)
             {
                 HexRows = new ObservableCollection<HexRow>(data.HexRows);
@@ -386,6 +422,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
                 {
                     ImagePreview = null;
                     PreviewErrorMessage = imgResult.ErrorMessage ?? "Failed to load image preview";
+                    ActivePreviewType = "metadata";
                 }
             }
             // 2. Video Preview
@@ -449,6 +486,29 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
                     }, token);
                 }
             }
+            // 2b. Audio Preview
+            else if (IsInspectorAudioFile(ext))
+            {
+                ActivePreviewType = "audio";
+                IsVideoPlaybackAvailable = true;
+                IsVideoPlaying = false;
+                VideoPosition = TimeSpan.Zero;
+
+                var durationTask = VideoThumbnailService.Instance.GetVideoDurationAsync(filePath, token);
+                _ = durationTask.ContinueWith(t =>
+                {
+                    if (t.IsCompletedSuccessfully && t.Result > TimeSpan.Zero && generation == _previewGeneration && _currentFilePath == filePath)
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            if (generation == _previewGeneration && _currentFilePath == filePath)
+                            {
+                                VideoDuration = t.Result;
+                            }
+                        });
+                    }
+                }, token);
+            }
             // 3. PDF Preview
             else if (PdfPreviewService.Instance.IsPdfFile(filePath))
             {
@@ -468,6 +528,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
                 else
                 {
                     PreviewErrorMessage = pdfInfo.ErrorMessage ?? "Failed to load PDF document.";
+                    ActivePreviewType = "metadata";
                 }
             }
             // 4. ZIP / RAR / Archive Preview
@@ -485,6 +546,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
                 else
                 {
                     PreviewErrorMessage = zipResult.ErrorMessage ?? "Unable to inspect archive.";
+                    ActivePreviewType = "metadata";
                 }
             }
             // 5. 3D Model (STL) Preview
@@ -510,12 +572,17 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
                 else
                 {
                     PreviewErrorMessage = stlResult.ErrorMessage ?? "Unable to preview this STL file.";
+                    ActivePreviewType = "metadata";
                 }
             }
             // 6. Text / Binary / Directory Fallback
+            else if (data.PreviewType == "text")
+            {
+                ActivePreviewType = "text";
+            }
             else
             {
-                ActivePreviewType = data.PreviewType;
+                ActivePreviewType = "metadata";
             }
 
             StatusMessage = data.PreviewType == "directory" ? "Directory selected" : "";
