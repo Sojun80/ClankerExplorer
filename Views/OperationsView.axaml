@@ -345,6 +345,8 @@
                       <TextBlock Text="{Binding Job.Summary.SkippedCount, StringFormat='{}{0} skipped'}" FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
                       <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}"/>
                       <TextBlock Text="{Binding Job.Summary.RenamedCount, StringFormat='{}{0} renamed'}" FontSize="10.5" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                      <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}" IsVisible="{Binding HasWarnings}"/>
+                      <TextBlock Text="{Binding Job.Summary.WarningCount, StringFormat='{}{0} warning'}" FontSize="10.5" Foreground="#F59E0B" FontFamily="{DynamicResource AppMonoFont}" IsVisible="{Binding HasWarnings}"/>
                       <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}"/>
                       <TextBlock Text="{Binding Job.Summary.FailedCount, StringFormat='{}{0} failed'}" FontSize="10.5" Foreground="#EF4444" FontFamily="{DynamicResource AppMonoFont}"/>
                     </StackPanel>

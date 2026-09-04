@@ -119,20 +119,40 @@ public sealed class DirectoryChangeReconciler
         // Filter active transfer temp files so they never flicker into UI
         if (batch.Changes != null && batch.Changes.Count > 0)
         {
-            var filteredChanges = batch.Changes
-                .Where(c => !TransferEngine.IsActiveTempFile(c.FullPath) &&
-                            (string.IsNullOrEmpty(c.OldFullPath) || !TransferEngine.IsActiveTempFile(c.OldFullPath)))
-                .ToList();
+            var filteredChanges = new List<FileChangeEvent>(batch.Changes.Count);
+            foreach (var c in batch.Changes)
+            {
+                bool fullIsTemp = TransferEngine.IsActiveTempFile(c.FullPath);
+                bool oldIsTemp = !string.IsNullOrEmpty(c.OldFullPath) && TransferEngine.IsActiveTempFile(c.OldFullPath);
+
+                // Any event whose target is a temp file stays hidden
+                if (fullIsTemp)
+                {
+                    continue;
+                }
+
+                // If this is a rename from a temp file to a real destination file,
+                // transform it into Created(finalUserFile) so it appears immediately!
+                if (c.Kind == DirectoryChangeKind.Renamed && oldIsTemp)
+                {
+                    filteredChanges.Add(new FileChangeEvent(DirectoryChangeKind.Created, c.FullPath));
+                    continue;
+                }
+
+                if (oldIsTemp)
+                {
+                    continue;
+                }
+
+                filteredChanges.Add(c);
+            }
 
             if (filteredChanges.Count == 0 && !batch.IsOverflow)
             {
                 return;
             }
 
-            if (filteredChanges.Count != batch.Changes.Count)
-            {
-                batch = new DirectoryChangeBatch(batch.DirectoryPath, filteredChanges, batch.IsOverflow);
-            }
+            batch = new DirectoryChangeBatch(batch.DirectoryPath, filteredChanges, batch.IsOverflow);
         }
 
         long gen = Volatile.Read(ref _currentGeneration);
@@ -216,7 +236,7 @@ public sealed class DirectoryChangeReconciler
 
     public void ReconcileDeletedSync(string fullPath)
     {
-        if (string.IsNullOrWhiteSpace(fullPath)) return;
+        if (string.IsNullOrWhiteSpace(fullPath) || TransferEngine.IsActiveTempFile(fullPath)) return;
         if (ApplyDeleted(fullPath))
         {
             _tab.NotifyFilteredItemsChanged();
@@ -225,7 +245,12 @@ public sealed class DirectoryChangeReconciler
 
     public void ReconcileRenamedSync(string oldFullPath, string newFullPath)
     {
-        if (string.IsNullOrWhiteSpace(newFullPath)) return;
+        if (string.IsNullOrWhiteSpace(newFullPath) || TransferEngine.IsActiveTempFile(newFullPath)) return;
+        if (TransferEngine.IsActiveTempFile(oldFullPath))
+        {
+            ReconcileCreatedOrChangedSync(newFullPath);
+            return;
+        }
         var change = new FileChangeEvent(DirectoryChangeKind.Renamed, newFullPath, oldFullPath);
         var resolved = ResolveMetadata(new[] { change });
         ApplyResolvedBatch(_tab.CurrentPath, resolved);

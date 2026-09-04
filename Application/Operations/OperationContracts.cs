@@ -66,7 +66,8 @@ public sealed record OperationSummary(
     int SucceededCount,
     int SkippedCount,
     int RenamedCount,
-    int FailedCount);
+    int FailedCount,
+    int WarningCount = 0);
 
 public sealed record OperationProgress(
     string OperationType,

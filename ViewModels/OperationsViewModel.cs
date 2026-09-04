@@ -98,7 +98,9 @@ public partial class OperationsViewModel : ObservableObject, IDisposable
         {
             if (!sourceIds.Contains(target[i].Job.Id))
             {
+                var removed = target[i];
                 target.RemoveAt(i);
+                removed.Dispose();
             }
         }
 
@@ -170,13 +172,25 @@ public partial class OperationsViewModel : ObservableObject, IDisposable
         if (_isDisposed) return;
         _isDisposed = true;
         _operationManager.OperationsChanged -= _operationsChangedHandler;
+        foreach (var jobVm in ActiveJobs)
+        {
+            jobVm.Dispose();
+        }
+        ActiveJobs.Clear();
+        foreach (var jobVm in HistoryJobs)
+        {
+            jobVm.Dispose();
+        }
+        HistoryJobs.Clear();
     }
 }
 
-public partial class OperationJobViewModel : ObservableObject
+public partial class OperationJobViewModel : ObservableObject, IDisposable
 {
     public OperationJob Job { get; }
     private string? _lastConflictPath;
+    private readonly Action<OperationJob> _jobChangedHandler;
+    private bool _isDisposed;
 
     [ObservableProperty]
     private string _inlineNewName = string.Empty;
@@ -188,10 +202,13 @@ public partial class OperationJobViewModel : ObservableObject
 
     public bool IsNeedsAttention => Job.State == OperationState.NeedsAttention || Job.CurrentConflict != null;
 
+    public bool HasWarnings => Job.Summary?.WarningCount > 0;
+
     public OperationJobViewModel(OperationJob job)
     {
         Job = job;
-        Job.JobChanged += _ => NotifyProperties();
+        _jobChangedHandler = _ => NotifyProperties();
+        Job.JobChanged += _jobChangedHandler;
         if (Job.CurrentConflict != null)
         {
             _lastConflictPath = Job.CurrentConflict.SourcePath;
@@ -199,13 +216,22 @@ public partial class OperationJobViewModel : ObservableObject
         }
     }
 
+    public void Dispose()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+        Job.JobChanged -= _jobChangedHandler;
+    }
+
     private void NotifyProperties()
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
+            if (_isDisposed) return;
             OnPropertyChanged(nameof(Job));
             OnPropertyChanged(nameof(DetailsToggleText));
             OnPropertyChanged(nameof(IsNeedsAttention));
+            OnPropertyChanged(nameof(HasWarnings));
             if (Job.CurrentConflict != null)
             {
                 var conflictPath = Job.CurrentConflict.SourcePath;

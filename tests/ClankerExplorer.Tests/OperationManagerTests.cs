@@ -106,6 +106,9 @@ public sealed class OperationManagerTests : IDisposable
 
         var job = _manager.EnqueueTransfer(request);
 
+        // Wait until it starts running
+        await WaitForConditionAsync(() => job.State == OperationState.Running, timeoutMs: 3000);
+
         // Pause job
         job.RequestPause();
         Assert.Equal(OperationState.Paused, job.State);

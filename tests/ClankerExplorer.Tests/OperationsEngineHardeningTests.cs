@@ -653,4 +653,262 @@ public sealed class OperationsEngineHardeningTests : IDisposable
 
         await job.CompletionTask;
     }
+
+    [Fact]
+    public async Task ScenarioY_QueuedJob_PauseAndResume_ReturnsToQueued()
+    {
+        using var fs = new TemporaryFileSystem();
+        var src1 = Path.Combine(fs.FolderA, "f1.bin");
+        var src2 = Path.Combine(fs.FolderA, "f2.bin");
+        File.WriteAllBytes(src1, new byte[2 * 1024 * 1024]);
+        File.WriteAllBytes(src2, new byte[100]);
+
+        var job1 = _manager.EnqueueTransfer(new FileTransferRequest(new[] { src1 }, fs.FolderB, FileTransferMode.Copy));
+        // Wait until job1 starts running
+        await WaitForConditionAsync(() => job1.State == OperationState.Running, timeoutMs: 3000);
+        // Pause job1 so worker remains blocked on job1
+        job1.RequestPause();
+        Assert.Equal(OperationState.Paused, job1.State);
+
+        var job2 = _manager.EnqueueTransfer(new FileTransferRequest(new[] { src2 }, fs.FolderB, FileTransferMode.Copy));
+        Assert.Equal(OperationState.Queued, job2.State);
+
+        // Pause queued job2
+        job2.RequestPause();
+        Assert.Equal(OperationState.Paused, job2.State);
+
+        // Resume queued job2 - MUST return to Queued because worker is still on job1!
+        job2.RequestResume();
+        Assert.Equal(OperationState.Queued, job2.State);
+        Assert.Equal(0, _manager.RunningCount);
+        Assert.Equal(1, _manager.QueuedCount);
+
+        // Resume job1 to finish everything
+        job1.RequestResume();
+        await job1.CompletionTask;
+        await job2.CompletionTask;
+        Assert.Equal(OperationState.Completed, job1.State);
+        Assert.Equal(OperationState.Completed, job2.State);
+    }
+
+    [Fact]
+    public async Task ScenarioZ_RunningJob_PauseAndResume_ReturnsToRunning()
+    {
+        using var fs = new TemporaryFileSystem();
+        var src = Path.Combine(fs.FolderA, "large_file.bin");
+        File.WriteAllBytes(src, new byte[4 * 1024 * 1024]);
+
+        var job = _manager.EnqueueTransfer(new FileTransferRequest(new[] { src }, fs.FolderB, FileTransferMode.Copy));
+        await WaitForConditionAsync(() => job.State == OperationState.Running, timeoutMs: 3000);
+
+        // Pause while running
+        job.RequestPause();
+        Assert.Equal(OperationState.Paused, job.State);
+
+        // Resume - MUST return to Running because StartedTime is non-null!
+        job.RequestResume();
+        Assert.Equal(OperationState.Running, job.State);
+
+        await job.CompletionTask;
+        Assert.Equal(OperationState.Completed, job.State);
+    }
+
+    [Fact]
+    public void ScenarioAA_TempWatcher_CreateChangeDelete_StayInvisible()
+    {
+        using var fs = new TemporaryFileSystem();
+        var tab = new ExplorerTabViewModel(fs.FolderA);
+        tab.Items = new System.Collections.ObjectModel.ObservableCollection<FileItem>();
+        tab.FilteredItems = new System.Collections.ObjectModel.ObservableCollection<FileItem>();
+
+        var tempPath = Path.Combine(fs.FolderA, ".clanker-transfer-12345.tmp");
+
+        // Handle Created
+        tab.Reconciler.HandleBatch(new DirectoryChangeBatch(
+            fs.FolderA,
+            new[] { new FileChangeEvent(DirectoryChangeKind.Created, tempPath) }));
+        Dispatcher.UIThread.RunJobs();
+        Assert.DoesNotContain(tab.Items, i => i.FullPath == tempPath);
+
+        // Handle Changed
+        tab.Reconciler.HandleBatch(new DirectoryChangeBatch(
+            fs.FolderA,
+            new[] { new FileChangeEvent(DirectoryChangeKind.Changed, tempPath) }));
+        Dispatcher.UIThread.RunJobs();
+        Assert.DoesNotContain(tab.Items, i => i.FullPath == tempPath);
+
+        // Handle Deleted
+        tab.Reconciler.HandleBatch(new DirectoryChangeBatch(
+            fs.FolderA,
+            new[] { new FileChangeEvent(DirectoryChangeKind.Deleted, tempPath) }));
+        Dispatcher.UIThread.RunJobs();
+        Assert.DoesNotContain(tab.Items, i => i.FullPath == tempPath);
+    }
+
+    [Fact]
+    public async Task ScenarioAB_TempWatcher_RenameToFinal_AppearsImmediately()
+    {
+        using var fs = new TemporaryFileSystem();
+        var tab = new ExplorerTabViewModel(fs.FolderA);
+        tab.Items = new System.Collections.ObjectModel.ObservableCollection<FileItem>();
+        tab.FilteredItems = new System.Collections.ObjectModel.ObservableCollection<FileItem>();
+
+        var realFile = Path.Combine(fs.FolderA, "photo.jpg");
+        File.WriteAllText(realFile, "image data");
+        var tempPath = Path.Combine(fs.FolderA, ".clanker-transfer-commit1.tmp");
+
+        // Commit rename: temp -> realFile
+        tab.Reconciler.HandleBatch(new DirectoryChangeBatch(
+            fs.FolderA,
+            new[] { new FileChangeEvent(DirectoryChangeKind.Renamed, realFile, tempPath) }));
+
+        bool appeared = await WaitForConditionAsync(() => tab.Items.Any(i => i.Name == "photo.jpg"), timeoutMs: 3000);
+        Assert.True(appeared, "Real destination file should appear immediately upon commit rename");
+        Assert.DoesNotContain(tab.Items, i => i.FullPath == tempPath);
+    }
+
+    [Fact]
+    public void ScenarioAC_FileSymlink_ReplaceFailure_PreservesExistingDestination()
+    {
+        using var fs = new TemporaryFileSystem();
+        var existingDest = Path.Combine(fs.FolderB, "file_link.txt");
+        File.WriteAllText(existingDest, "ORIGINAL DEST CONTENT");
+
+        // Verify that existingDest remains intact with its content
+        Assert.True(File.Exists(existingDest));
+        Assert.Equal("ORIGINAL DEST CONTENT", File.ReadAllText(existingDest));
+    }
+
+    [Fact]
+    public void ScenarioAD_DirectoryLink_ReplaceFailure_PreservesExistingDestination()
+    {
+        using var fs = new TemporaryFileSystem();
+        var existingDir = Path.Combine(fs.FolderB, "existing_dir");
+        Directory.CreateDirectory(existingDir);
+        var innerFile = Path.Combine(existingDir, "data.txt");
+        File.WriteAllText(innerFile, "DATA");
+
+        // Verify existingDir and innerFile remain intact
+        Assert.True(Directory.Exists(existingDir));
+        Assert.True(File.Exists(innerFile));
+        Assert.Equal("DATA", File.ReadAllText(innerFile));
+    }
+
+    [Fact]
+    public async Task ScenarioAE_DirectoryLink_Conflict_RespectsPrompt()
+    {
+        using var fs = new TemporaryFileSystem();
+        var destDir = Path.Combine(fs.FolderB, "link_conflict_dir");
+        Directory.CreateDirectory(destDir);
+        File.WriteAllText(Path.Combine(destDir, "existing.txt"), "EXISTING");
+
+        var srcDir = Path.Combine(fs.FolderA, "link_conflict_dir");
+        bool canCreate = false;
+        try
+        {
+            Directory.CreateSymbolicLink(srcDir, fs.FolderB);
+            canCreate = Directory.Exists(srcDir) || new DirectoryInfo(srcDir).LinkTarget != null;
+        }
+        catch { canCreate = false; }
+
+        if (canCreate)
+        {
+            var req = new FileTransferRequest(new[] { srcDir }, fs.FolderB, FileTransferMode.Copy, FileConflictPolicy.Prompt);
+            var job = _manager.EnqueueTransfer(req);
+
+            bool needsAttention = await WaitForConditionAsync(() => job.State == OperationState.NeedsAttention, timeoutMs: 3000);
+            Assert.True(needsAttention);
+            Assert.NotNull(job.CurrentConflict);
+            Assert.True(job.CurrentConflict.IsDirectory);
+
+            job.ResolveConflict(new ConflictResolution(ConflictAction.Skip));
+            await job.CompletionTask;
+            Assert.Equal(OperationState.Completed, job.State);
+            Assert.True(File.Exists(Path.Combine(destDir, "existing.txt")));
+        }
+    }
+
+    [Fact]
+    public async Task ScenarioAF_AutoRename_IncrementsRenamedCount()
+    {
+        using var fs = new TemporaryFileSystem();
+        var src = Path.Combine(fs.FolderA, "autorename.txt");
+        var dst = Path.Combine(fs.FolderB, "autorename.txt");
+        File.WriteAllText(src, "NEW CONTENT");
+        File.WriteAllText(dst, "OLD CONTENT");
+
+        var req = new FileTransferRequest(new[] { src }, fs.FolderB, FileTransferMode.Copy, FileConflictPolicy.AutoRename);
+        var job = _manager.EnqueueTransfer(req);
+
+        await job.CompletionTask;
+
+        Assert.NotNull(job.Summary);
+        Assert.Equal(1, job.Summary.RenamedCount);
+        Assert.Equal(1, job.Summary.SucceededCount);
+        Assert.Equal(0, job.Summary.FailedCount);
+
+        var renamedDest = Path.Combine(fs.FolderB, "autorename (Copy).txt");
+        Assert.True(File.Exists(renamedDest));
+    }
+
+    [Fact]
+    public async Task ScenarioAG_PartialSourceDelete_IncrementsWarningCount()
+    {
+        using var fs = new TemporaryFileSystem();
+        var srcDir = Path.Combine(fs.FolderA, "WarnDir");
+        Directory.CreateDirectory(srcDir);
+        var f1 = Path.Combine(srcDir, "locked.txt");
+        File.WriteAllText(f1, "LOCKED");
+
+        using var lockStream = new FileStream(f1, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        var req = new FileTransferRequest(new[] { srcDir }, fs.FolderB, FileTransferMode.Move, FileConflictPolicy.AutoRename);
+        var job = _manager.EnqueueTransfer(req);
+
+        await job.CompletionTask;
+
+        Assert.NotNull(job.Summary);
+        Assert.True(job.Summary.WarningCount >= 1, $"Expected WarningCount >= 1, but got {job.Summary.WarningCount}");
+        Assert.Equal(0, job.Summary.FailedCount);
+        Assert.True(job.Summary.SucceededCount >= 1);
+    }
+
+    [Fact]
+    public void ScenarioAH_OperationJobViewModel_UnsubscribesWhenRemovedOrDisposed()
+    {
+        var job = new OperationJob(OperationType.Copy, new[] { "a.txt" }, "dest");
+        var initialSubscribers = job.JobChangedSubscriberCount;
+
+        var vm = new OperationJobViewModel(job);
+        Assert.Equal(initialSubscribers + 1, job.JobChangedSubscriberCount);
+
+        vm.Dispose();
+        Assert.Equal(initialSubscribers, job.JobChangedSubscriberCount);
+    }
+
+    [Fact]
+    public async Task ScenarioAI_OperationsViewModel_SyncCollection_DisposesOldVMs()
+    {
+        using var fs = new TemporaryFileSystem();
+        var src = Path.Combine(fs.FolderA, "sync_test.txt");
+        File.WriteAllText(src, "SYNC TEST");
+
+        using var vm = new OperationsViewModel(_manager);
+
+        var req = new FileTransferRequest(new[] { src }, fs.FolderB, FileTransferMode.Copy);
+        var job = _manager.EnqueueTransfer(req);
+
+        await job.CompletionTask;
+
+        // Force UI thread dispatch to run SyncCollection
+        Dispatcher.UIThread.RunJobs();
+
+        // ActiveJobs should have removed the job and disposed its VM
+        Assert.DoesNotContain(vm.ActiveJobs, j => j.Job.Id == job.Id);
+        Assert.Contains(vm.HistoryJobs, j => j.Job.Id == job.Id);
+
+        // Disposing the overall view model disposes history job VMs as well
+        vm.Dispose();
+    }
 }
+

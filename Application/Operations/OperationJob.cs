@@ -66,6 +66,7 @@ public partial class OperationJob : ObservableObject
     }
 
     public event Action<OperationJob>? JobChanged;
+    public int JobChangedSubscriberCount => JobChanged?.GetInvocationList().Length ?? 0;
 
     public OperationJob(
         OperationType type,
@@ -167,7 +168,7 @@ public partial class OperationJob : ObservableObject
         {
             if (State != OperationState.Paused) return;
             _pauseTcs.TrySetResult(true);
-            SetState(OperationState.Running);
+            SetState(StartedTime.HasValue ? OperationState.Running : OperationState.Queued);
             AddLog("Operation resumed.");
         }
     }

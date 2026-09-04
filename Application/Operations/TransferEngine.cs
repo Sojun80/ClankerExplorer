@@ -69,6 +69,7 @@ public sealed class TransferEngine
         int skippedFiles = 0;
         int renamedFiles = 0;
         int failedFiles = 0;
+        int warningFiles = 0;
 
         ConflictResolution? appliedRule = null;
         if (request.ConflictPolicy == FileConflictPolicy.Overwrite)
@@ -103,7 +104,8 @@ public sealed class TransferEngine
                 0,
                 0,
                 0,
-                failedResults.Count);
+                failedResults.Count,
+                0);
             var res = new FileTransferResult(failedResults);
             job.Complete(res, failSummary);
             return res;
@@ -254,7 +256,6 @@ public sealed class TransferEngine
                             {
                                 finalTarget = GetUniqueAutoRenamePath(target);
                                 wasRenamed = true;
-                                renamedFiles++;
                                 break;
                             }
                             else if (resolution.Action == ConflictAction.Rename)
@@ -269,7 +270,6 @@ public sealed class TransferEngine
                                 }
                                 finalTarget = Path.Combine(destDir, validName);
                                 wasRenamed = true;
-                                renamedFiles++;
                                 break;
                             }
                             else // Replace
@@ -313,8 +313,13 @@ public sealed class TransferEngine
                     {
                         status = FileTransferStatus.Renamed;
                     }
+                    if (status == FileTransferStatus.Renamed)
+                    {
+                        renamedFiles++;
+                    }
                     if (status == FileTransferStatus.PartialSuccessSourceDeleteFailed)
                     {
+                        warningFiles++;
                         job.AddError(source, error ?? "File copied, but source could not be deleted.", isFatal: false);
                         job.AddLog($"Warning: {error}", OperationLogLevel.Warning);
                     }
@@ -347,6 +352,156 @@ public sealed class TransferEngine
                     continue;
                 }
 
+                // Check if directory source is a symbolic link / reparse point
+                var srcDirInfo = new DirectoryInfo(source);
+                if ((srcDirInfo.Attributes & FileAttributes.ReparsePoint) != 0 || srcDirInfo.LinkTarget != null)
+                {
+                    if (srcDirInfo.LinkTarget == null)
+                    {
+                        results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Failed, $"Directory reparse point {source} cannot be preserved: link target is unavailable."));
+                        job.AddError(source, "Directory reparse point cannot be preserved: link target is unavailable.");
+                        failedFiles++;
+                        processedFiles++;
+                        continue;
+                    }
+
+                    string? finalTargetDir = targetDir;
+                    bool linkWasRenamed = false;
+
+                    if (Directory.Exists(targetDir) || File.Exists(targetDir))
+                    {
+                        if (request.ConflictPolicy == FileConflictPolicy.Fail)
+                        {
+                            failedFiles++;
+                            processedFiles++;
+                            job.AddError(source, $"Destination already exists: {targetDir}");
+                            results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Failed, "Destination already exists."));
+                            continue;
+                        }
+                        else if (request.ConflictPolicy == FileConflictPolicy.Skip)
+                        {
+                            skippedFiles++;
+                            processedFiles++;
+                            results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Skipped, "Skipped by conflict policy."));
+                            continue;
+                        }
+                        else if (request.ConflictPolicy == FileConflictPolicy.AutoRename)
+                        {
+                            finalTargetDir = GetUniqueAutoRenamePath(targetDir);
+                            linkWasRenamed = true;
+                        }
+                        else if (request.ConflictPolicy == FileConflictPolicy.Overwrite)
+                        {
+                            finalTargetDir = targetDir;
+                        }
+                        else // Prompt
+                        {
+                            ConflictResolution? currentResolution = appliedRule;
+                            while (true)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                await job.WaitIfPausedAsync(ct).ConfigureAwait(false);
+
+                                var resolution = currentResolution ?? await PromptConflictResolutionAsync(job, source, targetDir, true, ct).ConfigureAwait(false);
+                                if (resolution.ApplyToAllRemaining && appliedRule == null)
+                                {
+                                    appliedRule = resolution;
+                                }
+
+                                if (resolution.Action == ConflictAction.Skip)
+                                {
+                                    skippedFiles++;
+                                    processedFiles++;
+                                    results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Skipped, "Skipped by conflict resolution."));
+                                    finalTargetDir = null;
+                                    break;
+                                }
+                                else if (resolution.Action == ConflictAction.KeepBoth)
+                                {
+                                    finalTargetDir = GetUniqueAutoRenamePath(targetDir);
+                                    linkWasRenamed = true;
+                                    break;
+                                }
+                                else if (resolution.Action == ConflictAction.Rename)
+                                {
+                                    var parent = Path.GetDirectoryName(targetDir) ?? request.DestinationDirectory;
+                                    if (!TryValidateCustomFileName(resolution.CustomNewName, parent, out var validName, out var renameError))
+                                    {
+                                        job.AddLog($"Invalid rename '{resolution.CustomNewName}': {renameError}", OperationLogLevel.Warning);
+                                        currentResolution = null;
+                                        appliedRule = null;
+                                        continue;
+                                    }
+                                    finalTargetDir = Path.Combine(parent, validName);
+                                    linkWasRenamed = true;
+                                    break;
+                                }
+                                else // Replace
+                                {
+                                    finalTargetDir = targetDir;
+                                    break;
+                                }
+                            }
+
+                            if (finalTargetDir == null)
+                            {
+                                continue;
+                            }
+                        }
+                    }
+
+                    if (!SafeCreateOrReplaceDirectoryLink(finalTargetDir, srcDirInfo.LinkTarget, out var linkErr))
+                    {
+                        results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Failed, $"Failed to preserve directory link {source}: {linkErr}"));
+                        job.AddError(source, linkErr ?? "Failed to create directory link.");
+                        failedFiles++;
+                        processedFiles++;
+                        continue;
+                    }
+
+                    var linkStatus = linkWasRenamed ? FileTransferStatus.Renamed : FileTransferStatus.Succeeded;
+                    if (request.Mode == FileTransferMode.Move)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (job.CancellationToken.IsCancellationRequested)
+                        {
+                            linkStatus = FileTransferStatus.PartialSuccessSourceDeleteFailed;
+                            results.Add(new FileTransferItemResult(source, finalTargetDir, linkStatus, "Operation was cancelled before source cleanup could complete."));
+                        }
+                        else
+                        {
+                            try
+                            {
+                                Directory.Delete(source, false);
+                                results.Add(new FileTransferItemResult(source, finalTargetDir, linkStatus));
+                            }
+                            catch (Exception delEx)
+                            {
+                                linkStatus = FileTransferStatus.PartialSuccessSourceDeleteFailed;
+                                results.Add(new FileTransferItemResult(source, finalTargetDir, linkStatus, $"Directory link copied, but source could not be deleted: {delEx.Message}"));
+                            }
+                        }
+                    }
+                    else
+                    {
+                        results.Add(new FileTransferItemResult(source, finalTargetDir, linkStatus));
+                    }
+
+                    if (linkStatus == FileTransferStatus.Renamed)
+                    {
+                        renamedFiles++;
+                    }
+                    if (linkStatus == FileTransferStatus.PartialSuccessSourceDeleteFailed)
+                    {
+                        warningFiles++;
+                        job.AddError(source, "Directory link copied, but source could not be deleted.", isFatal: false);
+                        job.AddLog($"Warning: Directory link copied, but source could not be deleted", OperationLogLevel.Warning);
+                    }
+                    succeededFiles++;
+                    processedFiles++;
+                    continue;
+                }
+
                 bool sameVolume = AreSameVolume(source, targetDir);
                 if (request.Mode == FileTransferMode.Move && sameVolume)
                 {
@@ -372,58 +527,6 @@ public sealed class TransferEngine
                     catch (Exception)
                     {
                         // Direct same-volume move failed (e.g. locked files inside) - fall back to recursive transfer
-                    }
-                }
-
-                // Check if directory source is a symbolic link / reparse point
-                var srcDirInfo = new DirectoryInfo(source);
-                if ((srcDirInfo.Attributes & FileAttributes.ReparsePoint) != 0 || srcDirInfo.LinkTarget != null)
-                {
-                    if (srcDirInfo.LinkTarget != null)
-                    {
-                        try
-                        {
-                            if (Directory.Exists(targetDir))
-                            {
-                                Directory.Delete(targetDir, false);
-                            }
-                            Directory.CreateSymbolicLink(targetDir, srcDirInfo.LinkTarget);
-                            if (request.Mode == FileTransferMode.Move)
-                            {
-                                try
-                                {
-                                    Directory.Delete(source, false);
-                                    results.Add(new FileTransferItemResult(source, targetDir, FileTransferStatus.Succeeded));
-                                }
-                                catch (Exception delEx)
-                                {
-                                    results.Add(new FileTransferItemResult(source, targetDir, FileTransferStatus.PartialSuccessSourceDeleteFailed, $"Directory link copied, but source could not be deleted: {delEx.Message}"));
-                                }
-                            }
-                            else
-                            {
-                                results.Add(new FileTransferItemResult(source, targetDir, FileTransferStatus.Succeeded));
-                            }
-                            succeededFiles++;
-                            processedFiles++;
-                            continue;
-                        }
-                        catch (Exception ex)
-                        {
-                            results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Failed, $"Failed to preserve directory link {source}: {ex.Message}"));
-                            job.AddError(source, ex.Message);
-                            failedFiles++;
-                            processedFiles++;
-                            continue;
-                        }
-                    }
-                    else
-                    {
-                        results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Failed, $"Directory reparse point {source} cannot be preserved: link target is unavailable."));
-                        job.AddError(source, "Directory reparse point cannot be preserved: link target is unavailable.");
-                        failedFiles++;
-                        processedFiles++;
-                        continue;
                     }
                 }
 
@@ -461,6 +564,7 @@ public sealed class TransferEngine
                                 break;
                             case FileTransferStatus.PartialSuccessSourceDeleteFailed:
                                 succeededFiles++;
+                                warningFiles++;
                                 break;
                         }
                     },
@@ -470,6 +574,7 @@ public sealed class TransferEngine
                 {
                     if (hadPartialDelete)
                     {
+                        warningFiles++;
                         results.Add(new FileTransferItemResult(source, dirDest, FileTransferStatus.PartialSuccessSourceDeleteFailed, "Directory copied, but one or more source items could not be deleted."));
                     }
                     else
@@ -493,6 +598,16 @@ public sealed class TransferEngine
         {
             failedFiles = failedResultsCount;
         }
+        int renamedResultsCount = results.Count(r => r.Status == FileTransferStatus.Renamed);
+        if (renamedResultsCount > renamedFiles)
+        {
+            renamedFiles = renamedResultsCount;
+        }
+        int warningResultsCount = results.Count(r => r.Status == FileTransferStatus.PartialSuccessSourceDeleteFailed);
+        if (warningResultsCount > warningFiles)
+        {
+            warningFiles = warningResultsCount;
+        }
         var summary = new OperationSummary(
             totalFiles,
             totalBytes,
@@ -500,7 +615,8 @@ public sealed class TransferEngine
             succeededFiles,
             skippedFiles,
             renamedFiles,
-            failedFiles);
+            failedFiles,
+            warningFiles);
 
         var finalResult = new FileTransferResult(results);
         job.Complete(finalResult, summary);
@@ -701,38 +817,134 @@ public sealed class TransferEngine
                     {
                         if (sub.LinkTarget != null)
                         {
-                            try
+                            string targetDirForSub = targetSub;
+                            bool subWasRenamed = false;
+
+                            if (Directory.Exists(targetSub) || File.Exists(targetSub))
                             {
-                                if (Directory.Exists(targetSub))
+                                if (conflictPolicy == FileConflictPolicy.Fail)
                                 {
-                                    Directory.Delete(targetSub, false);
+                                    errors.Add($"Destination already exists: {targetSub}");
+                                    job.AddError(targetSub, $"Destination already exists: {targetSub}");
+                                    onItemCompleted(new FileTransferItemResult(sub.FullName, null, FileTransferStatus.Failed, "Destination already exists."));
+                                    continue;
                                 }
-                                Directory.CreateSymbolicLink(targetSub, sub.LinkTarget);
-                                if (mode == FileTransferMode.Move)
+                                else if (conflictPolicy == FileConflictPolicy.Skip)
+                                {
+                                    onItemCompleted(new FileTransferItemResult(sub.FullName, null, FileTransferStatus.Skipped, "Skipped by conflict policy."));
+                                    continue;
+                                }
+                                else if (conflictPolicy == FileConflictPolicy.AutoRename)
+                                {
+                                    targetDirForSub = GetUniqueAutoRenamePath(targetSub);
+                                    subWasRenamed = true;
+                                }
+                                else if (conflictPolicy == FileConflictPolicy.Overwrite)
+                                {
+                                    targetDirForSub = targetSub;
+                                }
+                                else // Prompt
+                                {
+                                    ConflictResolution? currentRes = currentAppliedRule;
+                                    bool skipSub = false;
+                                    while (true)
+                                    {
+                                        ct.ThrowIfCancellationRequested();
+                                        await job.WaitIfPausedAsync(ct).ConfigureAwait(false);
+
+                                        var resolution = currentRes ?? await PromptConflictResolutionAsync(job, sub.FullName, targetSub, true, ct).ConfigureAwait(false);
+                                        if (resolution.ApplyToAllRemaining && currentAppliedRule == null)
+                                        {
+                                            currentAppliedRule = resolution;
+                                            onRuleApplied(resolution);
+                                        }
+
+                                        if (resolution.Action == ConflictAction.Skip)
+                                        {
+                                            skipSub = true;
+                                            onItemCompleted(new FileTransferItemResult(sub.FullName, null, FileTransferStatus.Skipped, "Skipped by conflict resolution."));
+                                            break;
+                                        }
+                                        else if (resolution.Action == ConflictAction.KeepBoth)
+                                        {
+                                            targetDirForSub = GetUniqueAutoRenamePath(targetSub);
+                                            subWasRenamed = true;
+                                            break;
+                                        }
+                                        else if (resolution.Action == ConflictAction.Rename)
+                                        {
+                                            if (!TryValidateCustomFileName(resolution.CustomNewName, currentDst, out var validName, out var renameError))
+                                            {
+                                                job.AddLog($"Invalid rename '{resolution.CustomNewName}': {renameError}", OperationLogLevel.Warning);
+                                                currentRes = null;
+                                                currentAppliedRule = null;
+                                                continue;
+                                            }
+                                            targetDirForSub = Path.Combine(currentDst, validName);
+                                            subWasRenamed = true;
+                                            break;
+                                        }
+                                        else // Replace
+                                        {
+                                            targetDirForSub = targetSub;
+                                            break;
+                                        }
+                                    }
+
+                                    if (skipSub)
+                                    {
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            if (!SafeCreateOrReplaceDirectoryLink(targetDirForSub, sub.LinkTarget, out var linkErr))
+                            {
+                                errors.Add($"Failed to preserve directory link {sub.FullName} -> {targetDirForSub}: {linkErr}");
+                                job.AddError(sub.FullName, $"Failed to preserve directory link: {linkErr}");
+                                onItemCompleted(new FileTransferItemResult(sub.FullName, null, FileTransferStatus.Failed, linkErr));
+                                continue;
+                            }
+
+                            var subStatus = subWasRenamed ? FileTransferStatus.Renamed : FileTransferStatus.Succeeded;
+                            if (mode == FileTransferMode.Move)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                if (job.CancellationToken.IsCancellationRequested)
+                                {
+                                    hadPartialSourceDelete = true;
+                                    subStatus = FileTransferStatus.PartialSuccessSourceDeleteFailed;
+                                    onItemCompleted(new FileTransferItemResult(sub.FullName, targetDirForSub, subStatus, "Operation was cancelled before source cleanup could complete."));
+                                }
+                                else
                                 {
                                     try
                                     {
                                         Directory.Delete(sub.FullName, false);
+                                        onItemCompleted(new FileTransferItemResult(sub.FullName, targetDirForSub, subStatus));
                                     }
                                     catch (Exception delEx)
                                     {
                                         hadPartialSourceDelete = true;
+                                        subStatus = FileTransferStatus.PartialSuccessSourceDeleteFailed;
                                         job.AddError(sub.FullName, $"Failed to delete source directory link: {delEx.Message}", isFatal: false);
+                                        onItemCompleted(new FileTransferItemResult(sub.FullName, targetDirForSub, subStatus, $"Directory link copied, but source could not be deleted: {delEx.Message}"));
                                     }
                                 }
                             }
-                            catch (Exception ex)
+                            else
                             {
-                                errors.Add($"Failed to preserve directory link {sub.FullName} -> {targetSub}: {ex.Message}");
-                                job.AddError(sub.FullName, $"Failed to preserve directory link: {ex.Message}");
+                                onItemCompleted(new FileTransferItemResult(sub.FullName, targetDirForSub, subStatus));
                             }
+                            continue;
                         }
                         else
                         {
                             errors.Add($"Directory reparse point {sub.FullName} cannot be preserved: link target is unavailable.");
                             job.AddError(sub.FullName, "Directory reparse point cannot be preserved: link target is unavailable.");
+                            onItemCompleted(new FileTransferItemResult(sub.FullName, null, FileTransferStatus.Failed, "Directory reparse point cannot be preserved: link target is unavailable."));
+                            continue;
                         }
-                        continue;
                     }
 
                     if (!IsDescendantOf(targetSub, sub.FullName))
@@ -794,6 +1006,110 @@ public sealed class TransferEngine
         return await job.PromptConflictAsync(conflict, ct).ConfigureAwait(false);
     }
 
+    private static bool SafeCreateOrReplaceDirectoryLink(string targetDir, string linkTarget, out string? error)
+    {
+        error = null;
+        var parentDir = Path.GetDirectoryName(targetDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                        ?? Directory.GetCurrentDirectory();
+        var tempDir = Path.Combine(parentDir, $".clanker-transfer-{Guid.NewGuid():N}.tmp");
+        RegisterActiveTempFile(tempDir);
+
+        try
+        {
+            // 1. Create temporary sibling link first
+            Directory.CreateSymbolicLink(tempDir, linkTarget);
+
+            // 2. Verify link creation succeeded
+            var tempInfo = new DirectoryInfo(tempDir);
+            if (!tempInfo.Exists && tempInfo.LinkTarget == null)
+            {
+                error = "Created temporary directory link could not be verified.";
+                return false;
+            }
+
+            // 3. If target does not exist, move tempDir to targetDir
+            if (!Directory.Exists(targetDir) && !File.Exists(targetDir))
+            {
+                Directory.Move(tempDir, targetDir);
+                UnregisterActiveTempFile(tempDir);
+                tempDir = null;
+                return true;
+            }
+
+            // 4. Target exists - safe backup/replace
+            var backupDir = Path.Combine(parentDir, $".clanker-transfer-{Guid.NewGuid():N}.bak");
+            RegisterActiveTempFile(backupDir);
+            try
+            {
+                if (Directory.Exists(targetDir))
+                {
+                    Directory.Move(targetDir, backupDir);
+                }
+                else
+                {
+                    File.Move(targetDir, backupDir);
+                }
+            }
+            catch (Exception ex)
+            {
+                error = $"Cannot safely replace existing destination without destroying it first: {ex.Message}";
+                return false;
+            }
+
+            // Move temp link to targetDir
+            try
+            {
+                Directory.Move(tempDir, targetDir);
+                UnregisterActiveTempFile(tempDir);
+                tempDir = null;
+            }
+            catch (Exception ex)
+            {
+                // Rollback: restore backup
+                try
+                {
+                    if (Directory.Exists(backupDir)) Directory.Move(backupDir, targetDir);
+                    else if (File.Exists(backupDir)) File.Move(backupDir, targetDir);
+                }
+                catch { }
+                error = $"Failed to move new directory link into destination: {ex.Message}";
+                return false;
+            }
+
+            // Delete backup now that new link is in place
+            try
+            {
+                if (Directory.Exists(backupDir)) Directory.Delete(backupDir, recursive: true);
+                else if (File.Exists(backupDir)) File.Delete(backupDir);
+            }
+            catch { }
+            finally
+            {
+                UnregisterActiveTempFile(backupDir);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+        finally
+        {
+            if (tempDir != null)
+            {
+                UnregisterActiveTempFile(tempDir);
+                try
+                {
+                    if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: false);
+                    else if (File.Exists(tempDir)) File.Delete(tempDir);
+                }
+                catch { }
+            }
+        }
+    }
+
     private static async Task<(bool success, string? destinationPath, FileTransferStatus status, string? error)> TransferSingleFileAsync(
         OperationJob job,
         string sourceFile,
@@ -817,16 +1133,63 @@ public sealed class TransferEngine
             {
                 if (srcInfo.LinkTarget != null)
                 {
+                    string? tempLink = null;
+                    FileAttributes? symlinkTargetAttrs = null;
                     try
                     {
+                        var destDirectory = targetDir ?? Directory.GetCurrentDirectory();
+                        tempLink = Path.Combine(destDirectory, $".clanker-transfer-{Guid.NewGuid():N}.tmp");
+                        RegisterActiveTempFile(tempLink);
+
+                        File.CreateSymbolicLink(tempLink, srcInfo.LinkTarget);
+
+                        var tempInfo = new FileInfo(tempLink);
+                        if (!tempInfo.Exists && tempInfo.LinkTarget == null)
+                        {
+                            throw new IOException("Created temporary symbolic link could not be verified.");
+                        }
+
+                        ct.ThrowIfCancellationRequested();
+                        if (job.CancellationToken.IsCancellationRequested)
+                        {
+                            throw new OperationCanceledException(job.CancellationToken);
+                        }
+
                         if (File.Exists(targetFile))
                         {
-                            File.Delete(targetFile);
+                            try
+                            {
+                                symlinkTargetAttrs = File.GetAttributes(targetFile);
+                                if ((symlinkTargetAttrs.Value & FileAttributes.ReadOnly) != 0)
+                                {
+                                    File.SetAttributes(targetFile, symlinkTargetAttrs.Value & ~FileAttributes.ReadOnly);
+                                }
+                            }
+                            catch { }
                         }
-                        File.CreateSymbolicLink(targetFile, srcInfo.LinkTarget);
+
+                        try
+                        {
+                            File.Move(tempLink, targetFile, overwrite: true);
+                            UnregisterActiveTempFile(tempLink);
+                            tempLink = null;
+                        }
+                        catch
+                        {
+                            if (symlinkTargetAttrs.HasValue && File.Exists(targetFile))
+                            {
+                                try { File.SetAttributes(targetFile, symlinkTargetAttrs.Value); } catch { }
+                            }
+                            throw;
+                        }
 
                         if (mode == FileTransferMode.Move)
                         {
+                            if (ct.IsCancellationRequested || job.CancellationToken.IsCancellationRequested)
+                            {
+                                return (true, targetFile, FileTransferStatus.PartialSuccessSourceDeleteFailed, "Operation was cancelled before source cleanup could complete.");
+                            }
+
                             try
                             {
                                 File.Delete(sourceFile);
@@ -840,9 +1203,21 @@ public sealed class TransferEngine
                         onChunkTransferred(0);
                         return (true, targetFile, FileTransferStatus.Succeeded, null);
                     }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
                     catch (Exception ex)
                     {
                         return (false, null, FileTransferStatus.Failed, $"Failed to preserve file symbolic link '{sourceFile}': {ex.Message}");
+                    }
+                    finally
+                    {
+                        if (tempLink != null)
+                        {
+                            UnregisterActiveTempFile(tempLink);
+                            try { if (File.Exists(tempLink)) File.Delete(tempLink); } catch { }
+                        }
                     }
                 }
                 else
