@@ -1034,6 +1034,10 @@ public sealed class UiSmokeTests
         {
             videoPath = @"C:\Users\5900x\Videos\Captures\297.mp4";
         }
+        if (!File.Exists(videoPath))
+        {
+            return;
+        }
 
         var storageFile = await Windows.Storage.StorageFile.GetFileFromPathAsync(videoPath);
         var clip = await Windows.Media.Editing.MediaClip.CreateFromFileAsync(storageFile);

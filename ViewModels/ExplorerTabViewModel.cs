@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
+using ClankerExplorer.Services.Watcher;
 
 namespace ClankerExplorer.ViewModels;
 
@@ -16,7 +17,8 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 {
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _filterDebounceCts;
-    private FileSystemWatcher? _watcher;
+    private readonly IDirectoryWatcher _watcher;
+    private readonly DirectoryChangeReconciler _reconciler;
     private long _loadGeneration = 0;
     private long _filterGeneration = 0;
     private int _selectionAnchorIndex = -1;
@@ -114,11 +116,23 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     public bool CanGoBack => HistoryIndex > 0;
     public bool CanGoForward => HistoryIndex < History.Count - 1;
 
-    public ExplorerTabViewModel(string? initialPath = null)
+    public IDirectoryWatcher Watcher => _watcher;
+
+    public ExplorerTabViewModel(string? initialPath = null, IDirectoryWatcher? watcher = null)
     {
+        _watcher = watcher ?? new DirectoryWatcher();
+        _reconciler = new DirectoryChangeReconciler(this);
+        _watcher.BatchReady += OnWatcherBatchReady;
+        _watcher.ErrorOccurred += OnWatcherError;
+
         initialPath ??= FileSystemService.DefaultRootPath;
         ClipboardFileService.ClipboardChanged += UpdateCutStatus;
         NavigateTo(initialPath);
+    }
+
+    public void NotifyFilteredItemsChanged()
+    {
+        OnPropertyChanged(nameof(FilteredItems));
     }
 
     public void UpdateCutStatus()
@@ -153,6 +167,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
         CurrentPath = path;
         UpdateTitle(path);
+        _watcher.Start(path);
         _ = RefreshAsync();
 
         OnPropertyChanged(nameof(CanGoBack));
@@ -252,7 +267,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 HistoryService.Instance.RecordFolderVisit(CurrentPath);
             }
 
-            SetupWatcher(CurrentPath);
+            _watcher.Start(CurrentPath);
 
             var deduplicatedList = list
                 .GroupBy(i => i.FullPath, comparer)
@@ -714,248 +729,33 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         return cloned;
     }
 
-    private void SetupWatcher(string path)
-    {
-        try
-        {
-            _watcher?.Dispose();
-            _watcher = null;
-
-            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
-
-            _watcher = new FileSystemWatcher(path)
-            {
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.Size | NotifyFilters.LastWrite,
-                EnableRaisingEvents = true,
-                IncludeSubdirectories = false
-            };
-
-            _watcher.Created += OnWatcherCreated;
-            _watcher.Deleted += OnWatcherDeleted;
-            _watcher.Renamed += OnWatcherRenamed;
-            _watcher.Changed += OnWatcherChanged;
-        }
-        catch
-        {
-            // Restricted directories, unformatted drives, or unsupported schemes
-        }
-    }
-
-    private void OnWatcherCreated(object sender, FileSystemEventArgs e)
+    private void OnWatcherBatchReady(object? sender, DirectoryChangeBatch batch)
     {
         if (_isDisposed) return;
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            if (_isDisposed) return;
-            ReconcileItemCreatedOrChanged(e.FullPath);
-        }, Avalonia.Threading.DispatcherPriority.Background);
+        _reconciler.HandleBatch(batch);
     }
 
-    private void OnWatcherDeleted(object sender, FileSystemEventArgs e)
+    private void OnWatcherError(object? sender, Exception ex)
     {
-        if (_isDisposed) return;
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            if (_isDisposed) return;
-            ReconcileItemDeleted(e.FullPath);
-        }, Avalonia.Threading.DispatcherPriority.Background);
-    }
-
-    private void OnWatcherRenamed(object sender, RenamedEventArgs e)
-    {
-        if (_isDisposed) return;
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            if (_isDisposed) return;
-            ReconcileItemRenamed(e.OldFullPath, e.FullPath);
-        }, Avalonia.Threading.DispatcherPriority.Background);
-    }
-
-    private void OnWatcherChanged(object sender, FileSystemEventArgs e)
-    {
-        if (_isDisposed) return;
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            if (_isDisposed) return;
-            ReconcileItemCreatedOrChanged(e.FullPath);
-        }, Avalonia.Threading.DispatcherPriority.Background);
+        // DirectoryWatcher handles recovery via overflow batch
     }
 
     public void ReconcileItemCreatedOrChanged(string fullPath)
     {
-        if (_isDisposed || string.IsNullOrWhiteSpace(fullPath) || Items == null) return;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-
-        bool isDir = Directory.Exists(fullPath);
-        bool isFile = File.Exists(fullPath);
-        if (!isDir && !isFile) return;
-
-        var existing = Items.FirstOrDefault(i => string.Equals(i.FullPath, fullPath, comparison));
-        if (existing != null)
-        {
-            try
-            {
-                if (isDir)
-                {
-                    var di = new DirectoryInfo(fullPath);
-                    existing.ModifiedTime = di.LastWriteTime;
-                }
-                else
-                {
-                    var fi = new FileInfo(fullPath);
-                    existing.SizeBytes = fi.Length;
-                    existing.ModifiedTime = fi.LastWriteTime;
-                }
-            }
-            catch { }
-            return;
-        }
-
-        try
-        {
-            FileItem newItem;
-            if (isDir)
-            {
-                var di = new DirectoryInfo(fullPath);
-                newItem = new FileItem
-                {
-                    Name = di.Name,
-                    FullPath = di.FullName,
-                    IsDirectory = true,
-                    Extension = string.Empty,
-                    ModifiedTime = di.LastWriteTime,
-                    CreatedTime = di.CreationTime,
-                    AccessedTime = di.LastAccessTime,
-                    AttributesString = di.Attributes.ToString(),
-                    SizeBytes = 0
-                };
-            }
-            else
-            {
-                var fi = new FileInfo(fullPath);
-                newItem = new FileItem
-                {
-                    Name = fi.Name,
-                    FullPath = fi.FullName,
-                    IsDirectory = false,
-                    Extension = fi.Extension,
-                    ModifiedTime = fi.LastWriteTime,
-                    CreatedTime = fi.CreationTime,
-                    AccessedTime = fi.LastAccessTime,
-                    AttributesString = fi.Attributes.ToString(),
-                    SizeBytes = fi.Length
-                };
-            }
-
-            newItem.IsCut = ClipboardFileService.IsPathCut(newItem.FullPath);
-            Items.Add(newItem);
-            ApplyFilter();
-        }
-        catch { }
+        if (_isDisposed) return;
+        _reconciler.ReconcileCreatedOrChangedSync(fullPath);
     }
 
     public void ReconcileItemDeleted(string fullPath)
     {
-        if (_isDisposed || string.IsNullOrWhiteSpace(fullPath) || Items == null) return;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-
-        var existing = Items.FirstOrDefault(i => string.Equals(i.FullPath, fullPath, comparison));
-        if (existing != null)
-        {
-            Items.Remove(existing);
-            SelectedItems.Remove(existing);
-            if (SelectedItem == existing)
-            {
-                SelectedItem = SelectedItems.LastOrDefault();
-            }
-            ApplyFilter();
-        }
+        if (_isDisposed) return;
+        _reconciler.ReconcileDeletedSync(fullPath);
     }
 
     public void ReconcileItemRenamed(string oldFullPath, string newFullPath)
     {
-        if (_isDisposed || string.IsNullOrWhiteSpace(newFullPath) || Items == null) return;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-
-        bool wasSelected = false;
-        bool wasFocused = false;
-
-        var oldItem = Items.FirstOrDefault(i => string.Equals(i.FullPath, oldFullPath, comparison));
-        if (oldItem != null)
-        {
-            wasSelected = SelectedItems.Contains(oldItem) || oldItem.IsThumbnailSelected;
-            wasFocused = SelectedItem == oldItem;
-            Items.Remove(oldItem);
-            SelectedItems.Remove(oldItem);
-        }
-
-        var existingNew = Items.FirstOrDefault(i => string.Equals(i.FullPath, newFullPath, comparison));
-        if (existingNew != null)
-        {
-            Items.Remove(existingNew);
-            SelectedItems.Remove(existingNew);
-        }
-
-        bool isDir = Directory.Exists(newFullPath);
-        bool isFile = File.Exists(newFullPath);
-        if (!isDir && !isFile)
-        {
-            ApplyFilter();
-            return;
-        }
-
-        try
-        {
-            FileItem newItem;
-            if (isDir)
-            {
-                var di = new DirectoryInfo(newFullPath);
-                newItem = new FileItem
-                {
-                    Name = di.Name,
-                    FullPath = di.FullName,
-                    IsDirectory = true,
-                    Extension = string.Empty,
-                    ModifiedTime = di.LastWriteTime,
-                    CreatedTime = di.CreationTime,
-                    AccessedTime = di.LastAccessTime,
-                    AttributesString = di.Attributes.ToString(),
-                    SizeBytes = 0
-                };
-            }
-            else
-            {
-                var fi = new FileInfo(newFullPath);
-                newItem = new FileItem
-                {
-                    Name = fi.Name,
-                    FullPath = fi.FullName,
-                    IsDirectory = false,
-                    Extension = fi.Extension,
-                    ModifiedTime = fi.LastWriteTime,
-                    CreatedTime = fi.CreationTime,
-                    AccessedTime = fi.LastAccessTime,
-                    AttributesString = fi.Attributes.ToString(),
-                    SizeBytes = fi.Length
-                };
-            }
-
-            newItem.IsCut = ClipboardFileService.IsPathCut(newItem.FullPath);
-            Items.Add(newItem);
-            ApplyFilter();
-
-            if (wasSelected)
-            {
-                var matched = FilteredItems.FirstOrDefault(i => string.Equals(i.FullPath, newFullPath, comparison));
-                if (matched != null)
-                {
-                    matched.IsThumbnailSelected = true;
-                    if (!SelectedItems.Contains(matched)) SelectedItems.Add(matched);
-                    if (wasFocused) SelectedItem = matched;
-                }
-            }
-        }
-        catch { }
+        if (_isDisposed) return;
+        _reconciler.ReconcileRenamedSync(oldFullPath, newFullPath);
     }
 
     public void Dispose()
@@ -967,8 +767,9 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
         try
         {
-            _watcher?.Dispose();
-            _watcher = null;
+            _watcher.BatchReady -= OnWatcherBatchReady;
+            _watcher.ErrorOccurred -= OnWatcherError;
+            _watcher.Dispose();
         }
         catch { }
 
