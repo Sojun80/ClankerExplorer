@@ -88,6 +88,15 @@
               </StackPanel>
             </ToggleButton>
 
+            <!-- Search Workspace Toggle -->
+            <ToggleButton IsChecked="{Binding ShowSearchWorkspace, Mode=TwoWay}" Classes="power-btn"
+                          ToolTip.Tip="Toggle Dedicated Search Workspace [Ctrl+Shift+F]">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="🔍" FontSize="11"/>
+                <TextBlock Text="Search"/>
+              </StackPanel>
+            </ToggleButton>
+
             <!-- PowerShell Launcher (Left click normal, Right click Admin) -->
             <Button Command="{Binding OpenTerminalCommand}" Classes="power-btn"
                     ToolTip.Tip="Open PowerShell (Right-click for Admin)">
@@ -521,10 +530,10 @@
           </ScrollViewer>
         </Border>
 
-        <!-- Column 1: Center Panes (Single 100% or Dual Split 50%/50%) or Operations Workspace -->
+        <!-- Column 1: Center Panes (Single 100% or Dual Split 50%/50%), Operations Workspace, or Search Workspace -->
         <Grid Grid.Column="1" MinWidth="250">
           <!-- Center Panes -->
-          <Grid ColumnDefinitions="*,Auto,*" IsVisible="{Binding !ShowOperationsWorkspace}">
+          <Grid ColumnDefinitions="*,Auto,*" IsVisible="{Binding IsExplorerVisible}">
             <!-- Left / Primary Pane -->
             <views:ExplorerPaneView Grid.Column="0"
                                     Grid.ColumnSpan="{Binding $parent[Window].((vm:MainViewModel)DataContext).LeftPaneColumnSpan}"
@@ -544,6 +553,11 @@
           <!-- Operations Workspace -->
           <Panel IsVisible="{Binding ShowOperationsWorkspace}">
             <views:OperationsView DataContext="{Binding Operations}"/>
+          </Panel>
+
+          <!-- Search Workspace -->
+          <Panel IsVisible="{Binding ShowSearchWorkspace}">
+            <views:SearchWorkspaceView DataContext="{Binding Search}"/>
           </Panel>
         </Grid>
 

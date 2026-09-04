@@ -186,6 +186,14 @@ public static class KeyboardShortcutHandler
             return true;
         }
 
+        // 12b. Ctrl + Shift + F: Toggle Dedicated Search Workspace
+        if (ctrl && shift && !alt && key == Key.F)
+        {
+            pane.ToggleSearch();
+            e.Handled = true;
+            return true;
+        }
+
         // 13. Ctrl + Shift + N: New Folder
         if (ctrl && shift && !alt && key == Key.N)
         {

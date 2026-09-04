@@ -294,6 +294,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Action? RequestSyncSelection;
     public event Action? RequestThumbnailViewportUpdate;
     public event Action? RequestToggleOperations;
+    public event Action? RequestToggleSearch;
 
     public ClankerExplorer.AppLayer.Operations.IOperationManager Operations => _fileOperationService.Operations;
 
@@ -301,6 +302,12 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public void ToggleOperations()
     {
         RequestToggleOperations?.Invoke();
+    }
+
+    [RelayCommand]
+    public void ToggleSearch()
+    {
+        RequestToggleSearch?.Invoke();
     }
 
     public Avalonia.Controls.DataGridLength NameColumnWidthDisplay =>

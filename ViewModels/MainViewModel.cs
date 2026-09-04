@@ -19,7 +19,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _isDisposed;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsExplorerVisible))]
     private bool _showOperationsWorkspace;
+
+    partial void OnShowOperationsWorkspaceChanged(bool value)
+    {
+        if (value)
+        {
+            ShowSearchWorkspace = false;
+        }
+    }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsExplorerVisible))]
+    private bool _showSearchWorkspace;
+
+    partial void OnShowSearchWorkspaceChanged(bool value)
+    {
+        if (value)
+        {
+            ShowOperationsWorkspace = false;
+            Search.RefreshCurrentFolderContext();
+        }
+    }
+
+    public bool IsExplorerVisible => !ShowOperationsWorkspace && !ShowSearchWorkspace;
+
+    public SearchWorkspaceViewModel Search { get; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(LeftPaneColumnSpan))]
@@ -124,6 +150,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
         FileOperations = fileOperationService ?? new FileOperationService();
         Operations = new OperationsViewModel(FileOperations.Operations);
         Operations.RequestClose += () => ShowOperationsWorkspace = false;
+
+        Search = new SearchWorkspaceViewModel(
+            getCurrentFolder: () => ActivePane?.SelectedTab?.CurrentPath ?? FileSystemService.DefaultRootPath);
+        Search.RequestClose += () => ShowSearchWorkspace = false;
+        Search.RequestNavigate += (folderPath, selectPath) =>
+        {
+            ShowSearchWorkspace = false;
+            var targetPane = ActivePane ?? LeftPane;
+            var tab = targetPane?.SelectedTab;
+            if (tab != null)
+            {
+                var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                if (string.Equals(tab.CurrentPath, folderPath, comparison))
+                {
+                    if (!string.IsNullOrEmpty(selectPath))
+                    {
+                        tab.SelectPaths(new[] { selectPath }, scrollIntoView: true);
+                    }
+                }
+                else
+                {
+                    if (!string.IsNullOrEmpty(selectPath))
+                    {
+                        tab.PendingSelectPath = selectPath;
+                    }
+                    tab.NavigateTo(folderPath);
+                }
+            }
+        };
+        Search.RequestOpenFile += (filePath) =>
+        {
+            if (ArchiveService.Instance.IsArchive(filePath))
+            {
+                ArchiveService.Instance.OpenArchive(filePath);
+            }
+            else
+            {
+                FileSystemService.Instance.OpenItem(filePath);
+            }
+        };
 
         var settings = SettingsService.Instance.CurrentSettings;
         var startPath = string.IsNullOrWhiteSpace(settings.DefaultPath) ? FileSystemService.DefaultRootPath : settings.DefaultPath;
@@ -292,6 +358,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         pane.RequestDeleteWithConfirmation += (item, perm) => RequestDeleteWithConfirmation?.Invoke(item, perm);
         pane.RequestDeleteMultipleWithConfirmation += (items, perm) => RequestDeleteMultipleWithConfirmation?.Invoke(items, perm);
         pane.RequestToggleOperations += ToggleOperations;
+        pane.RequestToggleSearch += ToggleSearch;
     }
 
     public void SetActivePane(string paneId)
@@ -434,6 +501,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void ToggleOperations()
     {
         ShowOperationsWorkspace = !ShowOperationsWorkspace;
+        if (ShowOperationsWorkspace)
+        {
+            ShowSearchWorkspace = false;
+        }
+    }
+
+    [RelayCommand]
+    public void ToggleSearch()
+    {
+        ShowSearchWorkspace = !ShowSearchWorkspace;
+        if (ShowSearchWorkspace)
+        {
+            ShowOperationsWorkspace = false;
+            Search.RefreshCurrentFolderContext();
+        }
     }
 
     [RelayCommand]
@@ -580,6 +662,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _isDisposed = true;
         QuickAccessService.Instance.QuickAccessChanged -= _quickAccessChangedHandler;
         Operations.Dispose();
+        Search.Dispose();
         LeftPane.Dispose();
         RightPane.Dispose();
     }
