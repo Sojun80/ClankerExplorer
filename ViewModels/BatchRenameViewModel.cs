@@ -2,16 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ClankerExplorer.AppLayer;
 using ClankerExplorer.Models;
-using ClankerExplorer.Services;
 
 namespace ClankerExplorer.ViewModels;
 
 public partial class BatchRenameViewModel : ObservableObject
 {
     private readonly List<string> _targetPaths;
+    private readonly IFileOperationService _fileOperationService;
 
     [ObservableProperty]
     private string _mode = "replace"; // replace, prefix_suffix, numbering, change_case
@@ -57,9 +59,12 @@ public partial class BatchRenameViewModel : ObservableObject
 
     public event Action? RequestClose;
 
-    public BatchRenameViewModel(IEnumerable<string> targetPaths)
+    public BatchRenameViewModel(
+        IEnumerable<string> targetPaths,
+        IFileOperationService? fileOperationService = null)
     {
         _targetPaths = targetPaths.ToList();
+        _fileOperationService = fileOperationService ?? new FileOperationService();
         UpdatePreview();
     }
 
@@ -90,26 +95,26 @@ public partial class BatchRenameViewModel : ObservableObject
             CaseMode = CaseMode
         };
 
-        var items = FileSystemService.Instance.PreviewBatchRename(_targetPaths, rule);
+        var items = _fileOperationService.PreviewBatchRename(new BatchRenamePreviewRequest(_targetPaths, rule));
         PreviewItems = new ObservableCollection<BatchRenameItem>(items);
         ChangedCount = items.Count(i => i.WillChange);
         ConflictCount = items.Count(i => i.HasConflict);
     }
 
     [RelayCommand]
-    public void Execute()
+    public async Task Execute()
     {
         ErrorMessage = null;
         try
         {
-            var (success, message, renamedCount) = FileSystemService.Instance.ExecuteBatchRenameSafe(PreviewItems);
-            if (success)
+            var result = await _fileOperationService.BatchRenameAsync(new BatchRenameRequest(PreviewItems.ToList()));
+            if (result.Succeeded)
             {
                 RequestClose?.Invoke();
             }
             else
             {
-                ErrorMessage = message;
+                ErrorMessage = result.Message;
             }
         }
         catch (Exception ex)

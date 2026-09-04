@@ -283,6 +283,37 @@ public sealed class UiSmokeTests
     }
 
     [AvaloniaFact]
+    public async Task DetailsView_LeavesPaneBackgroundAfterLastColumn()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderB);
+        fs.CreateFile("FolderB/example.txt", "details view");
+
+        using var pane = new ExplorerPaneViewModel("left", fs.FolderB, "PANE 1");
+        await pane.SelectedTab!.RefreshAsync();
+
+        var view = new ExplorerPaneView { DataContext = pane };
+        var window = new Window { Content = view, Width = 1600, Height = 500 };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var container = Assert.IsType<Grid>(view.FindControl<Grid>("FileGridContainer"));
+            var grid = Assert.IsType<DataGrid>(view.FindControl<DataGrid>("FileDataGrid"));
+
+            Assert.True(grid.IsVisible);
+            Assert.True(
+                grid.Bounds.Right < container.Bounds.Width - 1,
+                $"The details grid should end before the pane background: grid right={grid.Bounds.Right}, pane width={container.Bounds.Width}.");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void MainWindow_RendersBuildNumberAndTimestampInBottomRight()
     {
         using var fs = new TemporaryFileSystem();

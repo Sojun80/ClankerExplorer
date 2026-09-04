@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
+using ClankerExplorer.AppLayer;
 
 namespace ClankerExplorer.Services;
 
@@ -19,6 +20,7 @@ public static class ClipboardFileService
     private static readonly List<string> _storedPaths = new();
     private static bool _isCut = false;
     private static readonly object _lock = new();
+    private static readonly IFileOperationService _fileOperationService = new FileOperationService();
 
     public static event Action? ClipboardChanged;
 
@@ -311,249 +313,16 @@ public static class ClipboardFileService
         CancellationToken cancellationToken = default)
     {
         var sources = sourcePaths?.ToList() ?? new List<string>();
-        if (!Directory.Exists(destinationDirectory) || sources.Count == 0)
-        {
-            return (new List<string>(), sources, new List<string>());
-        }
+        var request = new FileTransferRequest(
+            sources,
+            destinationDirectory,
+            isMove ? FileTransferMode.Move : FileTransferMode.Copy,
+            isMove ? FileConflictPolicy.Fail : FileConflictPolicy.AutoRename);
+        var result = await _fileOperationService.TransferAsync(request, cancellationToken).ConfigureAwait(false);
 
-        var successfulPaths = new List<string>();
-        var failedPaths = new List<string>();
-        var createdDestinationPaths = new List<string>();
-
-        await Task.Run(() =>
-        {
-            foreach (var source in sources)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    if (File.Exists(source))
-                    {
-                        var fileName = Path.GetFileName(source);
-                        var dest = GetNonConflictingPath(destinationDirectory, fileName, isMove);
-
-                        if (isMove)
-                        {
-                            File.Move(source, dest);
-                        }
-                        else
-                        {
-                            File.Copy(source, dest, false);
-                        }
-                        successfulPaths.Add(source);
-                        createdDestinationPaths.Add(dest);
-                    }
-                    else if (Directory.Exists(source))
-                    {
-                        var dirName = Path.GetFileName(source.TrimEnd('\\', '/'));
-                        var dest = GetNonConflictingPath(destinationDirectory, dirName, isMove);
-
-                        if (IsDescendantOf(dest, source))
-                        {
-                            Debug.WriteLine($"Cannot transfer directory {source} into its own subdirectory {dest}");
-                            failedPaths.Add(source);
-                            continue;
-                        }
-
-                        if (isMove)
-                        {
-                            Directory.Move(source, dest);
-                            successfulPaths.Add(source);
-                            createdDestinationPaths.Add(dest);
-                        }
-                        else
-                        {
-                            var (success, count, errors) = CopyDirectorySafe(source, dest, cancellationToken);
-                            if (success)
-                            {
-                                successfulPaths.Add(source);
-                                createdDestinationPaths.Add(dest);
-                            }
-                            else
-                            {
-                                failedPaths.Add(source);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        failedPaths.Add(source);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Failed to transfer {source}: {ex.Message}");
-                    failedPaths.Add(source);
-                }
-            }
-        }, cancellationToken).ConfigureAwait(false);
-
-        return (successfulPaths, failedPaths, createdDestinationPaths);
-    }
-
-    private static string GetNonConflictingPath(string dir, string name, bool isMove)
-    {
-        var target = Path.Combine(dir, name);
-        if (isMove || (!File.Exists(target) && !Directory.Exists(target)))
-        {
-            return target;
-        }
-
-        // For copy operations, generate non-conflicting unique name e.g. "file (Copy).ext"
-        var ext = Path.GetExtension(name);
-        var baseName = Path.GetFileNameWithoutExtension(name);
-        int counter = 1;
-
-        while (File.Exists(target) || Directory.Exists(target))
-        {
-            string newName = counter == 1 ? $"{baseName} (Copy){ext}" : $"{baseName} (Copy {counter}){ext}";
-            target = Path.Combine(dir, newName);
-            counter++;
-        }
-
-        return target;
-    }
-
-    private static bool IsDescendantOf(string targetPath, string basePath)
-    {
-        try
-        {
-            var fullTarget = Path.GetFullPath(targetPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var fullBase = Path.GetFullPath(basePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            return fullTarget.StartsWith(fullBase, PathComparison);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static (bool success, int filesCopied, List<string> errors) CopyDirectorySafe(string sourceDir, string destDir, CancellationToken cancellationToken = default)
-    {
-        var errors = new List<string>();
-        int filesCopied = 0;
-
-        if (IsDescendantOf(destDir, sourceDir))
-        {
-            errors.Add($"Cannot copy directory {sourceDir} into its own descendant {destDir}");
-            return (false, 0, errors);
-        }
-
-        // Handle symlink at root source
-        var rootInfo = new DirectoryInfo(sourceDir);
-        if ((rootInfo.Attributes & FileAttributes.ReparsePoint) != 0 || rootInfo.LinkTarget != null)
-        {
-            try
-            {
-                if (rootInfo.LinkTarget != null)
-                {
-                    Directory.CreateSymbolicLink(destDir, rootInfo.LinkTarget);
-                    return (true, 1, errors);
-                }
-            }
-            catch (Exception ex)
-            {
-                errors.Add($"Failed to copy symlink {sourceDir}: {ex.Message}");
-                return (false, 0, errors);
-            }
-        }
-
-        var visitedDirs = new HashSet<string>(PathComparer);
-        var workQueue = new Queue<(string src, string dst)>();
-        workQueue.Enqueue((Path.GetFullPath(sourceDir), Path.GetFullPath(destDir)));
-
-        while (workQueue.Count > 0)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var (currentSrc, currentDst) = workQueue.Dequeue();
-
-            if (!visitedDirs.Add(currentSrc))
-            {
-                continue;
-            }
-
-            try
-            {
-                Directory.CreateDirectory(currentDst);
-            }
-            catch (Exception ex)
-            {
-                errors.Add($"Failed to create directory {currentDst}: {ex.Message}");
-                continue;
-            }
-
-            var dirInfo = new DirectoryInfo(currentSrc);
-
-            // Copy files
-            try
-            {
-                foreach (var file in dirInfo.GetFiles())
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    try
-                    {
-                        var targetFilePath = Path.Combine(currentDst, file.Name);
-                        file.CopyTo(targetFilePath, true);
-                        filesCopied++;
-                    }
-                    catch (Exception ex)
-                    {
-                        errors.Add($"Failed to copy file {file.FullName}: {ex.Message}");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                errors.Add($"Failed to enumerate files from {currentSrc}: {ex.Message}");
-            }
-
-            // Enqueue subdirectories
-            try
-            {
-                foreach (var subDir in dirInfo.GetDirectories())
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    try
-                    {
-                        bool isReparsePoint = (subDir.Attributes & FileAttributes.ReparsePoint) != 0 || subDir.LinkTarget != null;
-                        if (isReparsePoint)
-                        {
-                            try
-                            {
-                                if (subDir.LinkTarget != null)
-                                {
-                                    var targetSubDir = Path.Combine(currentDst, subDir.Name);
-                                    Directory.CreateSymbolicLink(targetSubDir, subDir.LinkTarget);
-                                    filesCopied++;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                errors.Add($"Failed to link subfolder {subDir.FullName}: {ex.Message}");
-                            }
-                            continue;
-                        }
-
-                        var targetDir = Path.Combine(currentDst, subDir.Name);
-                        if (!IsDescendantOf(targetDir, subDir.FullName))
-                        {
-                            workQueue.Enqueue((subDir.FullName, targetDir));
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        errors.Add($"Failed to process directory {subDir.FullName}: {ex.Message}");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                errors.Add($"Failed to enumerate subdirectories from {currentSrc}: {ex.Message}");
-            }
-        }
-
-        bool success = errors.Count == 0;
-        return (success, filesCopied, errors);
+        return (
+            result.SuccessfulSourcePaths.ToList(),
+            result.FailedPaths.ToList(),
+            result.CreatedDestinationPaths.ToList());
     }
 }

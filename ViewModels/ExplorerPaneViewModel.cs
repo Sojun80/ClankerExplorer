@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ClankerExplorer.AppLayer;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
 
@@ -20,6 +21,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     private readonly Action _quickAccessChangedHandler;
     private readonly Action<AppSettings> _settingsChangedHandler;
     private readonly FolderViewStateService _folderViewStateService;
+    private readonly IFileOperationService _fileOperationService;
     private AppSettings _lastObservedSettings;
     private bool _isDisposed;
     private bool _applyingFolderViewState;
@@ -52,6 +54,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
     public bool IsDetailsView => ViewMode == "Details";
     public bool IsThumbnailView => ViewMode == "Thumbnails";
+    public IFileOperationService FileOperations => _fileOperationService;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ThumbnailCellWidth))]
@@ -431,11 +434,13 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         string paneId,
         string? initialPath = null,
         string label = "",
-        FolderViewStateService? folderViewStateService = null)
+        FolderViewStateService? folderViewStateService = null,
+        IFileOperationService? fileOperationService = null)
     {
         PaneId = paneId;
         PaneLabel = label;
         _folderViewStateService = folderViewStateService ?? FolderViewStateService.Instance;
+        _fileOperationService = fileOperationService ?? new FileOperationService();
         _lastObservedSettings = SettingsService.Instance.CurrentSettings.Clone();
         var startPath = initialPath ?? FileSystemService.DefaultRootPath;
 
@@ -1215,7 +1220,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
             if (createdPaths != null && createdPaths.Count > 0)
             {
-                SelectedTab.PendingSelectPaths = createdPaths;
+                SelectedTab.PendingSelectPaths = createdPaths.ToList();
             }
             await SelectedTab.RefreshAsync();
             NotifyContextMenuProperties();
@@ -1239,17 +1244,19 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
         if (string.IsNullOrWhiteSpace(destinationDirectory) || !Directory.Exists(destinationDirectory)) return;
 
-        var (successful, failed, createdPaths) = await ClipboardFileService.TransferFilesAsync(
-            sourcePaths,
+        var request = new FileTransferRequest(
+            sourcePaths?.ToList() ?? new List<string>(),
             destinationDirectory,
-            isMove,
-            CancellationToken.None);
+            isMove ? FileTransferMode.Move : FileTransferMode.Copy,
+            isMove ? FileConflictPolicy.Fail : FileConflictPolicy.AutoRename);
+        var result = await _fileOperationService.TransferAsync(request, CancellationToken.None);
+        var createdPaths = result.CreatedDestinationPaths;
 
         if (SelectedTab != null && string.Equals(SelectedTab.CurrentPath.TrimEnd('\\', '/'), destinationDirectory.TrimEnd('\\', '/'), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         {
             if (createdPaths != null && createdPaths.Count > 0)
             {
-                SelectedTab.PendingSelectPaths = createdPaths;
+                SelectedTab.PendingSelectPaths = createdPaths.ToList();
             }
             await SelectedTab.RefreshAsync();
         }
@@ -1291,8 +1298,13 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         var target = SelectedTab?.SelectedItem;
         if (target != null && SelectedTab != null)
         {
-            await ArchiveService.Instance.ExtractHereAsync(target.FullPath);
-            await SelectedTab.RefreshAsync();
+            var destination = Path.GetDirectoryName(target.FullPath);
+            if (string.IsNullOrWhiteSpace(destination)) return;
+
+            var result = await _fileOperationService.ExtractAsync(new ArchiveExtractRequest(
+                target.FullPath,
+                destination));
+            if (result.Succeeded) await SelectedTab.RefreshAsync();
         }
     }
 
@@ -1302,8 +1314,20 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         var target = SelectedTab?.SelectedItem;
         if (target != null && SelectedTab != null)
         {
-            await ArchiveService.Instance.ExtractToSubfolderAsync(target.FullPath);
-            await SelectedTab.RefreshAsync();
+            var parent = Path.GetDirectoryName(target.FullPath);
+            if (string.IsNullOrWhiteSpace(parent)) return;
+
+            var nameWithoutExt = Path.GetFileNameWithoutExtension(target.FullPath);
+            if (nameWithoutExt.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
+            {
+                nameWithoutExt = Path.GetFileNameWithoutExtension(nameWithoutExt);
+            }
+
+            var destination = Path.Combine(parent, nameWithoutExt);
+            var result = await _fileOperationService.ExtractAsync(new ArchiveExtractRequest(
+                target.FullPath,
+                destination));
+            if (result.Succeeded) await SelectedTab.RefreshAsync();
         }
     }
 
@@ -1319,13 +1343,13 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    public void AddToZip()
+    public async Task AddToZip()
     {
         var target = SelectedTab?.SelectedItem;
         if (target != null)
         {
-            ArchiveService.Instance.CreateZip(target.FullPath);
-            Refresh();
+            var result = await _fileOperationService.CreateZipAsync(new ArchiveCreateRequest(target.FullPath));
+            if (result.Succeeded) Refresh();
         }
     }
 
@@ -1386,6 +1410,19 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         {
             StartInlineRename(target);
         }
+    }
+
+    public async Task<bool> RenameItemAsync(FileItem item, string newName)
+    {
+        var result = await _fileOperationService.RenameAsync(new RenameItemRequest(item.FullPath, newName));
+        var operation = result.Items.FirstOrDefault();
+        if (operation?.Status != FileOperationStatus.Succeeded || string.IsNullOrWhiteSpace(operation.ResultPath))
+        {
+            return false;
+        }
+
+        SelectedTab?.ReconcileItemRenamed(item.FullPath, operation.ResultPath);
+        return true;
     }
 
     public void StartInlineRename(FileItem item)

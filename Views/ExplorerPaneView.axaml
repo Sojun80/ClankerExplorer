@@ -373,6 +373,7 @@
 
       <!-- Main File DataGrid (Details View) -->
       <DataGrid x:Name="FileDataGrid" Grid.Column="1"
+                HorizontalAlignment="Left"
                 DragDrop.AllowDrop="True"
                 ItemsSource="{Binding SelectedTab.FilteredItems}"
                 SelectedItem="{Binding SelectedTab.SelectedItem, Mode=TwoWay}"

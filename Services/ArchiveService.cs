@@ -130,6 +130,24 @@ public class ArchiveService
     public async Task<(bool success, string message)> ExtractToAsync(string archivePath, string destinationDirectory, bool overwrite = false, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(archivePath)) return (false, "Archive file does not exist.");
+
+        if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ValidateZipArchiveEntries(archivePath, destinationDirectory);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return (false, $"ZIP extraction rejected: {ex.Message}");
+            }
+        }
+
         Directory.CreateDirectory(destinationDirectory);
 
         return await Task.Run(() =>
@@ -177,7 +195,7 @@ public class ArchiveService
                         foreach (var entry in archive.Entries)
                         {
                             cancellationToken.ThrowIfCancellationRequested();
-                            var destPath = Path.Combine(destinationDirectory, entry.FullName);
+                            var destPath = GetSafeExtractionPath(destinationDirectory, entry.FullName);
 
                             if (string.IsNullOrEmpty(entry.Name))
                             {
@@ -208,6 +226,47 @@ public class ArchiveService
         }, cancellationToken);
     }
 
+    private static void ValidateZipArchiveEntries(string archivePath, string destinationDirectory)
+    {
+        using var archive = ZipFile.OpenRead(archivePath);
+        foreach (var entry in archive.Entries)
+        {
+            _ = GetSafeExtractionPath(destinationDirectory, entry.FullName);
+        }
+    }
+
+    private static string GetSafeExtractionPath(string destinationDirectory, string entryName)
+    {
+        if (string.IsNullOrWhiteSpace(entryName))
+        {
+            throw new InvalidDataException("The archive contains an entry with an empty path.");
+        }
+
+        var normalizedEntry = entryName.Replace('\\', '/');
+        if (normalizedEntry.StartsWith("/", StringComparison.Ordinal) ||
+            Path.IsPathRooted(entryName) ||
+            (normalizedEntry.Length >= 2 && char.IsLetter(normalizedEntry[0]) && normalizedEntry[1] == ':'))
+        {
+            throw new InvalidDataException($"The archive entry '{entryName}' uses an absolute path.");
+        }
+
+        var root = Path.GetFullPath(destinationDirectory);
+        var candidate = Path.GetFullPath(Path.Combine(
+            root,
+            normalizedEntry.Replace('/', Path.DirectorySeparatorChar)));
+        var rootWithSeparator = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (!candidate.Equals(root, comparison) && !candidate.StartsWith(rootWithSeparator, comparison))
+        {
+            throw new InvalidDataException($"The archive entry '{entryName}' escapes the extraction directory.");
+        }
+
+        return candidate;
+    }
+
     public void OpenExtractDialog(string archivePath)
     {
         if (!File.Exists(archivePath)) return;
@@ -229,52 +288,89 @@ public class ArchiveService
 
     public void CreateZip(string sourcePath, string? targetZipPath = null)
     {
-        if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath)) return;
+        _ = CreateZipAsync(sourcePath, targetZipPath);
+    }
+
+    public async Task<(bool success, string message, string? targetPath)> CreateZipAsync(
+        string sourcePath,
+        string? targetZipPath = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
+        {
+            return (false, "The source item does not exist.", null);
+        }
 
         var dir = Directory.Exists(sourcePath) ? Path.GetDirectoryName(sourcePath.TrimEnd('\\', '/')) ?? "" : Path.GetDirectoryName(sourcePath) ?? "";
         var name = Path.GetFileName(sourcePath.TrimEnd('\\', '/'));
         targetZipPath ??= Path.Combine(dir, $"{name}.zip");
 
-        if (_sevenZipGuiExe != null && File.Exists(_sevenZipGuiExe))
+        if (string.IsNullOrWhiteSpace(targetZipPath))
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = _sevenZipGuiExe,
-                Arguments = $"a -tzip \"{targetZipPath}\" \"{sourcePath}\"",
-                UseShellExecute = true
-            });
+            return (false, "A destination ZIP path is required.", null);
         }
-        else if (_sevenZipCliExe != null && File.Exists(_sevenZipCliExe))
+
+        targetZipPath = Path.GetFullPath(targetZipPath);
+        var targetParent = Path.GetDirectoryName(targetZipPath);
+        if (!string.IsNullOrEmpty(targetParent)) Directory.CreateDirectory(targetParent);
+
+        if (_sevenZipCliExe != null && File.Exists(_sevenZipCliExe))
         {
-            Process.Start(new ProcessStartInfo
+            try
             {
-                FileName = _sevenZipCliExe,
-                Arguments = $"a -tzip \"{targetZipPath}\" \"{sourcePath}\"",
-                UseShellExecute = true
-            });
+                var psi = new ProcessStartInfo
+                {
+                    FileName = _sevenZipCliExe,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                psi.ArgumentList.Add("a");
+                psi.ArgumentList.Add("-tzip");
+                psi.ArgumentList.Add(targetZipPath);
+                psi.ArgumentList.Add(sourcePath);
+
+                using var process = Process.Start(psi);
+                if (process == null) return (false, "Failed to start ZIP creation.", targetZipPath);
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                return process.ExitCode == 0
+                    ? (true, "ZIP created successfully.", targetZipPath)
+                    : (false, $"ZIP creation exited with code {process.ExitCode}.", targetZipPath);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return (false, $"ZIP creation error: {ex.Message}", targetZipPath);
+            }
         }
-        else
+
+        try
         {
-            // Background fallback using System.IO.Compression
-            Task.Run(() =>
+            await Task.Run(() =>
             {
-                try
+                cancellationToken.ThrowIfCancellationRequested();
+                if (File.Exists(sourcePath))
                 {
-                    if (File.Exists(sourcePath))
-                    {
-                        using var zip = ZipFile.Open(targetZipPath, ZipArchiveMode.Create);
-                        zip.CreateEntryFromFile(sourcePath, Path.GetFileName(sourcePath));
-                    }
-                    else if (Directory.Exists(sourcePath))
-                    {
-                        ZipFile.CreateFromDirectory(sourcePath, targetZipPath);
-                    }
+                    using var zip = ZipFile.Open(targetZipPath, ZipArchiveMode.Create);
+                    zip.CreateEntryFromFile(sourcePath, Path.GetFileName(sourcePath));
                 }
-                catch (Exception ex)
+                else
                 {
-                    Debug.WriteLine($"Failed ZIP creation: {ex.Message}");
+                    ZipFile.CreateFromDirectory(sourcePath, targetZipPath);
                 }
-            });
+            }, cancellationToken).ConfigureAwait(false);
+            return (true, "ZIP created successfully.", targetZipPath);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Failed ZIP creation: {ex.Message}");
+            return (false, $"ZIP creation error: {ex.Message}", targetZipPath);
         }
     }
 

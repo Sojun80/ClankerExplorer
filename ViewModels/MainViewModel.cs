@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ClankerExplorer.AppLayer;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
 
@@ -13,6 +14,7 @@ namespace ClankerExplorer.ViewModels;
 public partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly Action _quickAccessChangedHandler;
+    public IFileOperationService FileOperations { get; }
     private bool _isDisposed;
 
     [ObservableProperty]
@@ -113,8 +115,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public event Action<FileItem, bool>? RequestDeleteWithConfirmation;
     public event Action<List<FileItem>, bool>? RequestDeleteMultipleWithConfirmation;
 
-    public MainViewModel(bool loadSidebarData = true)
+    public MainViewModel(bool loadSidebarData = true, IFileOperationService? fileOperationService = null)
     {
+        FileOperations = fileOperationService ?? new FileOperationService();
         var settings = SettingsService.Instance.CurrentSettings;
         var startPath = string.IsNullOrWhiteSpace(settings.DefaultPath) ? FileSystemService.DefaultRootPath : settings.DefaultPath;
         if (!Directory.Exists(startPath)) startPath = FileSystemService.DefaultRootPath;
@@ -177,8 +180,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         else
         {
             // Open a single default location
-            var paneLeft = new ExplorerPaneViewModel("left", defaultPath, "PANE 1") { IsActive = true };
-            var paneRight = new ExplorerPaneViewModel("right", defaultPath, "PANE 2") { IsActive = false };
+            var paneLeft = new ExplorerPaneViewModel("left", defaultPath, "PANE 1", fileOperationService: FileOperations) { IsActive = true };
+            var paneRight = new ExplorerPaneViewModel("right", defaultPath, "PANE 2", fileOperationService: FileOperations) { IsActive = false };
             LeftPane = paneLeft;
             RightPane = paneRight;
             ActivePane = paneLeft;
@@ -188,10 +191,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         WirePaneEvents(RightPane);
     }
 
-    private static ExplorerPaneViewModel RestorePaneFromSession(string paneId, PaneSessionState? paneSession, string defaultPath, string label)
+    private ExplorerPaneViewModel RestorePaneFromSession(string paneId, PaneSessionState? paneSession, string defaultPath, string label)
     {
         var settings = SettingsService.Instance.CurrentSettings;
-        var pane = new ExplorerPaneViewModel(paneId, defaultPath, label);
+        var pane = new ExplorerPaneViewModel(paneId, defaultPath, label, fileOperationService: FileOperations);
 
         if (paneSession != null && paneSession.Tabs.Count > 0)
         {
@@ -230,9 +233,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return pane;
     }
 
-    private static ExplorerPaneViewModel RestorePinnedPane(string paneId, PaneSessionState? paneSession, string defaultPath, string label)
+    private ExplorerPaneViewModel RestorePinnedPane(string paneId, PaneSessionState? paneSession, string defaultPath, string label)
     {
-        var pane = new ExplorerPaneViewModel(paneId, defaultPath, label);
+        var pane = new ExplorerPaneViewModel(paneId, defaultPath, label, fileOperationService: FileOperations);
 
         if (paneSession != null)
         {

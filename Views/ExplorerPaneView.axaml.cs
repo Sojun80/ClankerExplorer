@@ -1719,7 +1719,7 @@ public partial class ExplorerPaneView : UserControl
         }
     }
 
-    private void CommitInlineRename(FileItem item, string? newName, ExplorerPaneViewModel vm)
+    private async void CommitInlineRename(FileItem item, string? newName, ExplorerPaneViewModel vm)
     {
         if (!item.IsRenaming) return;
         item.IsRenaming = false;
@@ -1741,29 +1741,9 @@ public partial class ExplorerPaneView : UserControl
 
         try
         {
-            string oldPath = item.FullPath;
-            string parentDir = Path.GetDirectoryName(oldPath) ?? vm.SelectedTab?.CurrentPath ?? string.Empty;
-            string newPath = Path.Combine(parentDir, newName);
-
-            if (string.Equals(oldPath, newPath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            if (!await vm.RenameItemAsync(item, newName))
             {
-                // Case-only rename or identical
-                FileSystemService.Instance.Rename(oldPath, newName);
-            }
-            else if (File.Exists(newPath) || Directory.Exists(newPath))
-            {
-                // Destination already exists - revert
                 item.EditingName = item.Name;
-                return;
-            }
-            else
-            {
-                FileSystemService.Instance.Rename(oldPath, newName);
-            }
-
-            if (vm.SelectedTab != null)
-            {
-                vm.SelectedTab.ReconcileItemRenamed(oldPath, newPath);
             }
         }
         catch

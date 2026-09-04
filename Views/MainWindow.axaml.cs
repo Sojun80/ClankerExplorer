@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree;
+using ClankerExplorer.AppLayer;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
 using ClankerExplorer.ViewModels;
@@ -38,13 +39,13 @@ public partial class MainWindow : Window
                         var res = await dlg.ShowDialog<bool>(this);
                         if (res)
                         {
-                            if (type == "folder")
+                            var operation = await vm.FileOperations.CreateAsync(new CreateItemRequest(
+                                parent,
+                                dlg.ItemName,
+                                type == "folder"));
+                            if (!operation.Succeeded)
                             {
-                                FileSystemService.Instance.CreateFolder(parent, dlg.ItemName);
-                            }
-                            else
-                            {
-                                FileSystemService.Instance.CreateFile(parent, dlg.ItemName);
+                                throw new IOException(operation.Items.FirstOrDefault()?.ErrorMessage ?? "The item could not be created.");
                             }
                             await vm.ActivePane.RefreshAsync();
                         }
@@ -130,8 +131,12 @@ public partial class MainWindow : Window
                             if (!res) return;
                         }
 
-                        await FileSystemService.Instance.DeleteAsync(new[] { item.FullPath }, perm);
+                        var operation = await vm.FileOperations.DeleteAsync(new DeleteItemsRequest(new[] { item.FullPath }, perm));
                         await vm.ActivePane.RefreshAsync();
+                        if (!operation.Succeeded)
+                        {
+                            throw new IOException(operation.Items.FirstOrDefault()?.ErrorMessage ?? "The item could not be deleted.");
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -152,8 +157,14 @@ public partial class MainWindow : Window
                             if (!res) return;
                         }
 
-                        await FileSystemService.Instance.DeleteAsync(items.Select(i => i.FullPath).ToArray(), perm);
+                        var operation = await vm.FileOperations.DeleteAsync(new DeleteItemsRequest(
+                            items.Select(i => i.FullPath).ToArray(),
+                            perm));
                         await vm.ActivePane.RefreshAsync();
+                        if (!operation.Succeeded)
+                        {
+                            throw new IOException(operation.Items.FirstOrDefault(item => item.Status == FileOperationStatus.Failed)?.ErrorMessage ?? "One or more items could not be deleted.");
+                        }
                     }
                     catch (Exception ex)
                     {
