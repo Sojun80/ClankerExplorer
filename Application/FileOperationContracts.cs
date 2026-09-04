@@ -22,7 +22,9 @@ public enum FileTransferStatus
 {
     Succeeded,
     Failed,
-    Skipped
+    Skipped,
+    Renamed,
+    PartialSuccessSourceDeleteFailed
 }
 
 public enum FileOperationStatus
@@ -45,20 +47,20 @@ public sealed record FileTransferItemResult(
 
 public sealed record FileTransferResult(IReadOnlyList<FileTransferItemResult> Items)
 {
-    public bool Succeeded => Items.Count > 0 && Items.All(item => item.Status == FileTransferStatus.Succeeded);
+    public bool Succeeded => Items.Count > 0 && Items.All(item => item.Status is FileTransferStatus.Succeeded or FileTransferStatus.Renamed);
 
     public IReadOnlyList<string> SuccessfulSourcePaths =>
-        Items.Where(item => item.Status == FileTransferStatus.Succeeded)
+        Items.Where(item => item.Status is FileTransferStatus.Succeeded or FileTransferStatus.Renamed or FileTransferStatus.PartialSuccessSourceDeleteFailed)
             .Select(item => item.SourcePath)
             .ToArray();
 
     public IReadOnlyList<string> FailedPaths =>
-        Items.Where(item => item.Status == FileTransferStatus.Failed)
+        Items.Where(item => item.Status is FileTransferStatus.Failed or FileTransferStatus.PartialSuccessSourceDeleteFailed)
             .Select(item => item.SourcePath)
             .ToArray();
 
     public IReadOnlyList<string> CreatedDestinationPaths =>
-        Items.Where(item => item.Status == FileTransferStatus.Succeeded && item.DestinationPath != null)
+        Items.Where(item => (item.Status is FileTransferStatus.Succeeded or FileTransferStatus.Renamed or FileTransferStatus.PartialSuccessSourceDeleteFailed) && item.DestinationPath != null)
             .Select(item => item.DestinationPath!)
             .ToArray();
 }

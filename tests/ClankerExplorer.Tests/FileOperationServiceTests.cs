@@ -159,6 +159,12 @@ public sealed class FileOperationServiceTests
     {
         public FileTransferRequest? Request { get; private set; }
 
+        public ClankerExplorer.AppLayer.Operations.OperationJob QueueTransfer(FileTransferRequest request)
+        {
+            Request = request;
+            return ClankerExplorer.AppLayer.Operations.OperationManager.Instance.EnqueueTransfer(request);
+        }
+
         public Task<FileTransferResult> TransferAsync(
             FileTransferRequest request,
             CancellationToken cancellationToken = default)

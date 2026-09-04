@@ -43,7 +43,9 @@ public sealed class FileCommandDispatcher : IFileCommandDispatcher
         TransferFilesCommand command,
         CancellationToken cancellationToken)
     {
-        var result = await _fileOperations.TransferAsync(command.Request, cancellationToken).ConfigureAwait(false);
+        var job = _fileOperations.QueueTransfer(command.Request);
+        using var reg = cancellationToken.Register(() => job.RequestCancel());
+        var result = await job.CompletionTask.ConfigureAwait(false);
         return new FileCommandResult(result.Succeeded, Transfer: result);
     }
 

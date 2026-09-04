@@ -9,6 +9,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using ClankerExplorer.AppLayer;
+using ClankerExplorer.AppLayer.Operations;
 
 namespace ClankerExplorer.Services;
 
@@ -261,11 +262,12 @@ public static class ClipboardFileService
         return paths.ToList();
     }
 
-    public static async Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)> PasteFromSystemClipboardAsync(
+    public static async Task<OperationJob?> EnqueuePasteFromSystemClipboardAsync(
         IClipboard? clipboard,
-        string destinationDirectory,
-        CancellationToken cancellationToken = default)
+        string destinationDirectory)
     {
+        if (string.IsNullOrWhiteSpace(destinationDirectory)) return null;
+
         List<string> sources = await ExtractPathsFromClipboardAsync(clipboard);
         bool isCutMode = IsCutMode;
 
@@ -277,33 +279,59 @@ public static class ClipboardFileService
             }
         }
 
-        var result = await TransferFilesAsync(sources, destinationDirectory, isCutMode, cancellationToken);
+        if (sources.Count == 0) return null;
 
-        lock (_lock)
+        var request = new FileTransferRequest(
+            sources,
+            destinationDirectory,
+            isCutMode ? FileTransferMode.Move : FileTransferMode.Copy,
+            isCutMode ? FileConflictPolicy.Fail : FileConflictPolicy.AutoRename);
+
+        var job = _fileOperationService.QueueTransfer(request);
+
+        _ = job.CompletionTask.ContinueWith(t =>
         {
-            if (isCutMode)
+            if (t.IsCompletedSuccessfully && t.Result != null && isCutMode)
             {
-                // Only remove successfully moved items from cut list; keep failed ones
-                foreach (var succ in result.successfulSourcePaths)
+                lock (_lock)
                 {
-                    var normalizedSucc = succ.TrimEnd('\\', '/');
-                    _storedPaths.RemoveAll(p => string.Equals(p.TrimEnd('\\', '/'), normalizedSucc, PathComparison));
-                }
+                    foreach (var succ in t.Result.SuccessfulSourcePaths)
+                    {
+                        var normalizedSucc = succ.TrimEnd('\\', '/');
+                        _storedPaths.RemoveAll(p => string.Equals(p.TrimEnd('\\', '/'), normalizedSucc, PathComparison));
+                    }
 
-                if (_storedPaths.Count == 0)
-                {
-                    _isCut = false;
+                    if (_storedPaths.Count == 0)
+                    {
+                        _isCut = false;
+                    }
                 }
+                ClipboardChanged?.Invoke();
             }
+        });
+
+        return job;
+    }
+
+    public static async Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)> PasteFromSystemClipboardAsync(
+        IClipboard? clipboard,
+        string destinationDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var job = await EnqueuePasteFromSystemClipboardAsync(clipboard, destinationDirectory).ConfigureAwait(false);
+        if (job == null)
+        {
+            return (0, new List<string>(), new List<string>());
         }
 
-        ClipboardChanged?.Invoke();
-        return (result.successfulSourcePaths.Count, result.failedPaths, result.createdDestinationPaths);
+        using var reg = cancellationToken.Register(() => job.RequestCancel());
+        var result = await job.CompletionTask.ConfigureAwait(false);
+        return (result.SuccessfulSourcePaths.Count, result.FailedPaths.ToList(), result.CreatedDestinationPaths.ToList());
     }
 
     public static async Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)> PasteAsync(string destinationDirectory, CancellationToken cancellationToken = default)
     {
-        return await PasteFromSystemClipboardAsync(null, destinationDirectory, cancellationToken);
+        return await PasteFromSystemClipboardAsync(null, destinationDirectory, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<(List<string> successfulSourcePaths, List<string> failedPaths, List<string> createdDestinationPaths)> TransferFilesAsync(
@@ -318,7 +346,9 @@ public static class ClipboardFileService
             destinationDirectory,
             isMove ? FileTransferMode.Move : FileTransferMode.Copy,
             isMove ? FileConflictPolicy.Fail : FileConflictPolicy.AutoRename);
-        var result = await _fileOperationService.TransferAsync(request, cancellationToken).ConfigureAwait(false);
+        var job = _fileOperationService.QueueTransfer(request);
+        using var reg = cancellationToken.Register(() => job.RequestCancel());
+        var result = await job.CompletionTask.ConfigureAwait(false);
 
         return (
             result.SuccessfulSourcePaths.ToList(),

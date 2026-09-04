@@ -97,10 +97,10 @@ public partial class ExplorerPaneView : UserControl
                     await ClipboardFileService.CutToSystemClipboardAsync(topLevel?.Clipboard, topLevel?.StorageProvider, paths);
                 };
 
-                vm.RequestPasteFiles += async () =>
+                vm.RequestEnqueuePaste += async destDir =>
                 {
                     var topLevel = TopLevel.GetTopLevel(this);
-                    return await ClipboardFileService.PasteFromSystemClipboardAsync(topLevel?.Clipboard, vm.SelectedTab?.CurrentPath ?? string.Empty);
+                    return await ClipboardFileService.EnqueuePasteFromSystemClipboardAsync(topLevel?.Clipboard, destDir);
                 };
 
                 vm.Tabs.CollectionChanged += (s2, e2) =>

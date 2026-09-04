@@ -168,6 +168,8 @@ public sealed class OperationManager : IOperationManager
                 continue;
             }
 
+            await job.WaitIfPausedAsync(_managerCts.Token).ConfigureAwait(false);
+
             job.SetState(OperationState.Running);
             NotifyChanged();
 

@@ -240,6 +240,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         if (_isDisposed) return;
 
         _reconciler.Reset();
+        _reconciler.BeginStaging();
         _loadCts?.Cancel();
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
@@ -270,7 +271,11 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         try
         {
             var (list, error) = await FileSystemService.Instance.ReadDirectoryAsync(CurrentPath, token, _directoryReadOptions);
-            if (token.IsCancellationRequested || generation != _loadGeneration || _isDisposed) return;
+            if (token.IsCancellationRequested || generation != _loadGeneration || _isDisposed)
+            {
+                _reconciler.CancelStaging();
+                return;
+            }
 
             if (error != null)
             {
@@ -296,6 +301,8 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
             Items = new ObservableCollection<FileItem>(deduplicatedList);
             await ApplyFilterAsync(token);
+
+            _reconciler.EndStagingAndReplay();
 
             // Determine selection targets: explicit navigation/paste vs ordinary refresh continuity
             var pendingPaths = PendingSelectPaths;
@@ -358,13 +365,62 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 SelectionRestored?.Invoke();
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            _reconciler.CancelStaging();
+        }
         finally
         {
             if (generation == _loadGeneration && !_isDisposed)
             {
                 IsLoading = false;
             }
+        }
+    }
+
+    public void SelectPaths(IEnumerable<string> paths, bool scrollIntoView = false)
+    {
+        if (paths == null || _isDisposed) return;
+        var pathList = paths.Where(p => !string.IsNullOrEmpty(p)).ToList();
+        if (pathList.Count == 0) return;
+
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var matches = new List<FileItem>();
+        foreach (var p in pathList)
+        {
+            var match = FilteredItems.FirstOrDefault(f => string.Equals(f.FullPath, p, comparison));
+            if (match != null && !matches.Contains(match))
+            {
+                matches.Add(match);
+            }
+        }
+
+        if (matches.Count > 0)
+        {
+            ClearThumbnailSelection();
+            SelectedItems.Clear();
+            foreach (var m in matches)
+            {
+                m.IsThumbnailSelected = true;
+                SelectedItems.Add(m);
+            }
+
+            SelectedItem = matches.Last();
+            var firstMatchIndex = FilteredItems.IndexOf(matches[0]);
+            _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
+
+            if (scrollIntoView)
+            {
+                ScrollIntoViewRequested?.Invoke(matches[0]);
+            }
+            else
+            {
+                SelectionRestored?.Invoke();
+            }
+        }
+        else
+        {
+            PendingSelectPaths = pathList;
         }
     }
 

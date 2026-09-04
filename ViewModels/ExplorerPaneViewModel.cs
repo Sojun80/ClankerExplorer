@@ -289,7 +289,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Action<string>? RequestSetClipboardText;
     public event Func<IEnumerable<string>, Task>? RequestCopyFiles;
     public event Func<IEnumerable<string>, Task>? RequestCutFiles;
-    public event Func<Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)>>? RequestPasteFiles;
+    public event Func<string, Task<ClankerExplorer.AppLayer.Operations.OperationJob?>>? RequestEnqueuePaste;
     public event Action<FileItem>? RequestScrollItemIntoView;
     public event Action? RequestSyncSelection;
     public event Action? RequestThumbnailViewportUpdate;
@@ -1223,29 +1223,45 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(AllowConcurrentExecutions = true)]
     public async Task PasteFilesAsync()
     {
         if (SelectedTab != null)
         {
-            int successCount;
-            List<string> failedPaths;
-            List<string> createdPaths;
+            var destDir = SelectedTab.CurrentPath;
+            var currentTab = SelectedTab;
+            ClankerExplorer.AppLayer.Operations.OperationJob? job = null;
 
-            if (RequestPasteFiles != null)
+            if (RequestEnqueuePaste != null)
             {
-                (successCount, failedPaths, createdPaths) = await RequestPasteFiles.Invoke();
+                job = await RequestEnqueuePaste.Invoke(destDir);
             }
             else
             {
-                (successCount, failedPaths, createdPaths) = await ClipboardFileService.PasteAsync(SelectedTab.CurrentPath);
+                job = await ClipboardFileService.EnqueuePasteFromSystemClipboardAsync(null, destDir);
             }
 
-            if (createdPaths != null && createdPaths.Count > 0)
+            if (job != null)
             {
-                SelectedTab.PendingSelectPaths = createdPaths.ToList();
+                var result = await job.CompletionTask.ConfigureAwait(true);
+                if (result != null)
+                {
+                    var created = result.CreatedDestinationPaths;
+                    if (SelectedTab == currentTab &&
+                        string.Equals(SelectedTab?.CurrentPath?.TrimEnd('\\', '/'), destDir?.TrimEnd('\\', '/'),
+                            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                        if (created != null && created.Count > 0 && currentTab != null)
+                        {
+                            currentTab.PendingSelectPaths = created.ToList();
+                            currentTab.SelectPaths(created, scrollIntoView: false);
+                            if (currentTab.SelectedItems.Count == 0)
+                            {
+                                await currentTab.RefreshAsync();
+                            }
+                        }
+                }
             }
-            await SelectedTab.RefreshAsync();
+
             NotifyContextMenuProperties();
         }
     }
@@ -1272,17 +1288,30 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             destinationDirectory,
             isMove ? FileTransferMode.Move : FileTransferMode.Copy,
             isMove ? FileConflictPolicy.Fail : FileConflictPolicy.AutoRename);
-        var result = await _fileOperationService.TransferAsync(request, CancellationToken.None);
-        var createdPaths = result.CreatedDestinationPaths;
 
-        if (SelectedTab != null && string.Equals(SelectedTab.CurrentPath.TrimEnd('\\', '/'), destinationDirectory.TrimEnd('\\', '/'), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        var job = _fileOperationService.QueueTransfer(request);
+        var currentTab = SelectedTab;
+
+        var result = await job.CompletionTask.ConfigureAwait(true);
+        if (result != null)
         {
-            if (createdPaths != null && createdPaths.Count > 0)
+            var created = result.CreatedDestinationPaths;
+            if (SelectedTab == currentTab &&
+                string.Equals(SelectedTab?.CurrentPath?.TrimEnd('\\', '/'), destinationDirectory.TrimEnd('\\', '/'),
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
             {
-                SelectedTab.PendingSelectPaths = createdPaths.ToList();
+                if (created != null && created.Count > 0 && currentTab != null)
+                {
+                    currentTab.PendingSelectPaths = created.ToList();
+                    currentTab.SelectPaths(created, scrollIntoView: false);
+                    if (currentTab.SelectedItems.Count == 0)
+                    {
+                        await currentTab.RefreshAsync();
+                    }
+                }
             }
-            await SelectedTab.RefreshAsync();
         }
+
         NotifyContextMenuProperties();
     }
 

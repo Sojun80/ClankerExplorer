@@ -14,6 +14,7 @@ public partial class OperationJob : ObservableObject
     private readonly List<OperationError> _errors = new();
     private readonly List<OperationLogEntry> _events = new();
     private readonly CancellationTokenSource _cts = new();
+    private int _conflictCount;
     private TaskCompletionSource<bool> _pauseTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource<ConflictResolution>? _conflictTcs;
 
@@ -27,6 +28,11 @@ public partial class OperationJob : ObservableObject
     public CancellationToken CancellationToken => _cts.Token;
     public TaskCompletionSource<FileTransferResult> CompletionSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Task<FileTransferResult> CompletionTask => CompletionSource.Task;
+
+    public int ConflictCount
+    {
+        get { lock (_syncRoot) return _conflictCount; }
+    }
 
     [ObservableProperty]
     private DateTimeOffset? _startedTime;
@@ -148,7 +154,7 @@ public partial class OperationJob : ObservableObject
     {
         lock (_syncRoot)
         {
-            if (State != OperationState.Running) return;
+            if (State != OperationState.Running && State != OperationState.Queued) return;
             _pauseTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             SetState(OperationState.Paused);
             AddLog("Operation paused by user.");
@@ -161,7 +167,7 @@ public partial class OperationJob : ObservableObject
         {
             if (State != OperationState.Paused) return;
             _pauseTcs.TrySetResult(true);
-            SetState(OperationState.Running);
+            SetState(StartedTime.HasValue ? OperationState.Running : OperationState.Queued);
             AddLog("Operation resumed.");
         }
     }
@@ -199,6 +205,7 @@ public partial class OperationJob : ObservableObject
     {
         lock (_syncRoot)
         {
+            _conflictCount++;
             CurrentConflict = conflict;
             SetState(OperationState.NeedsAttention);
             AddLog($"Conflict detected: destination already contains '{System.IO.Path.GetFileName(conflict.DestinationPath)}'", OperationLogLevel.Warning);

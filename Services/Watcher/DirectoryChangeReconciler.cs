@@ -24,6 +24,8 @@ public sealed class DirectoryChangeReconciler
     private readonly object _syncLock = new();
     private Task _processingChain = Task.CompletedTask;
     private long _currentGeneration = 0;
+    private readonly List<DirectoryChangeBatch> _stagedBatches = new();
+    private bool _isStaging;
 
     public DirectoryChangeReconciler(ExplorerTabViewModel tab)
     {
@@ -33,6 +35,41 @@ public sealed class DirectoryChangeReconciler
     public void Reset()
     {
         Interlocked.Increment(ref _currentGeneration);
+    }
+
+    public void BeginStaging()
+    {
+        lock (_syncLock)
+        {
+            _isStaging = true;
+            _stagedBatches.Clear();
+        }
+    }
+
+    public void EndStagingAndReplay()
+    {
+        List<DirectoryChangeBatch> toReplay;
+        lock (_syncLock)
+        {
+            _isStaging = false;
+            if (_stagedBatches.Count == 0) return;
+            toReplay = new List<DirectoryChangeBatch>(_stagedBatches);
+            _stagedBatches.Clear();
+        }
+
+        foreach (var batch in toReplay)
+        {
+            HandleBatch(batch);
+        }
+    }
+
+    public void CancelStaging()
+    {
+        lock (_syncLock)
+        {
+            _isStaging = false;
+            _stagedBatches.Clear();
+        }
     }
 
     public void HandleBatch(DirectoryChangeBatch batch)
@@ -58,6 +95,11 @@ public sealed class DirectoryChangeReconciler
 
         lock (_syncLock)
         {
+            if (_isStaging)
+            {
+                _stagedBatches.Add(batch);
+                return;
+            }
             _processingChain = ProcessBatchSequentialAsync(_processingChain, batch, gen);
         }
     }
@@ -290,6 +332,11 @@ public sealed class DirectoryChangeReconciler
         if (filteredChanged)
         {
             _tab.NotifyFilteredItemsChanged();
+        }
+
+        if (_tab.PendingSelectPaths != null && _tab.PendingSelectPaths.Count > 0)
+        {
+            _tab.SelectPaths(_tab.PendingSelectPaths, scrollIntoView: false);
         }
     }
 

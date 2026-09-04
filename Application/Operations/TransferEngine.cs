@@ -53,6 +53,31 @@ public sealed class TransferEngine
             appliedRule = new ConflictResolution(ConflictAction.KeepBoth, ApplyToAllRemaining: true);
         }
 
+        if (string.IsNullOrWhiteSpace(request.DestinationDirectory) || !Directory.Exists(request.DestinationDirectory))
+        {
+            var failedResults = request.SourcePaths.Select(s => new FileTransferItemResult(
+                s,
+                null,
+                FileTransferStatus.Failed,
+                "The destination directory does not exist.")).ToList();
+            foreach (var r in failedResults)
+            {
+                job.AddError(r.SourcePath, r.ErrorMessage ?? "The destination directory does not exist.");
+            }
+            startTime.Stop();
+            var failSummary = new OperationSummary(
+                failedResults.Count,
+                0,
+                startTime.Elapsed,
+                0,
+                0,
+                0,
+                failedResults.Count);
+            var res = new FileTransferResult(failedResults);
+            job.Complete(res, failSummary);
+            return res;
+        }
+
         // Calculate totals across all sources
         var (totalFiles, totalBytes) = await Task.Run(() => CalculateTotals(request.SourcePaths, ct), ct).ConfigureAwait(false);
         long transferredBytes = 0;
@@ -82,7 +107,7 @@ public sealed class TransferEngine
 
             double percentage = totalBytes > 0
                 ? Math.Clamp((double)nowBytes / totalBytes * 100.0, 0.0, 100.0)
-                : (totalFiles > 0 ? Math.Clamp((double)processedFiles / totalFiles * 100.0, 0.0, 100.0) : 0.0);
+                : (totalFiles > 0 ? Math.Clamp((double)processedFiles / totalFiles * 100.0, 0.0, 100.0) : 100.0);
 
             TimeSpan? remaining = null;
             if (currentSpeed > 0 && totalBytes > nowBytes)
@@ -107,7 +132,7 @@ public sealed class TransferEngine
                 remaining,
                 job.State,
                 job.Errors.Count,
-                0));
+                job.ConflictCount));
         }
 
         ReportProgress("Starting transfer...", force: true);
@@ -128,6 +153,7 @@ public sealed class TransferEngine
                 results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Failed, "The source path does not exist."));
                 job.AddError(source, "The source path does not exist.");
                 failedFiles++;
+                processedFiles++;
                 continue;
             }
 
@@ -143,7 +169,8 @@ public sealed class TransferEngine
                 }
 
                 // Check conflict
-                string finalTarget = target;
+                string? finalTarget = target;
+                bool wasRenamed = false;
                 if (File.Exists(target))
                 {
                     if (request.ConflictPolicy == FileConflictPolicy.Fail)
@@ -155,41 +182,63 @@ public sealed class TransferEngine
                         continue;
                     }
 
-                    ConflictResolution resolution = appliedRule ?? await PromptConflictResolutionAsync(job, source, target, false, ct).ConfigureAwait(false);
-                    if (resolution.ApplyToAllRemaining && appliedRule == null)
+                    ConflictResolution? currentResolution = appliedRule;
+                    while (true)
                     {
-                        appliedRule = resolution;
-                    }
+                        ct.ThrowIfCancellationRequested();
+                        await job.WaitIfPausedAsync(ct).ConfigureAwait(false);
 
-                    switch (resolution.Action)
-                    {
-                        case ConflictAction.Skip:
+                        var resolution = currentResolution ?? await PromptConflictResolutionAsync(job, source, target, false, ct).ConfigureAwait(false);
+                        if (resolution.ApplyToAllRemaining && appliedRule == null)
+                        {
+                            appliedRule = resolution;
+                        }
+
+                        if (resolution.Action == ConflictAction.Skip)
+                        {
                             skippedFiles++;
                             processedFiles++;
                             results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Skipped, "Skipped by conflict resolution."));
-                            continue;
-
-                        case ConflictAction.KeepBoth:
+                            finalTarget = null;
+                            break;
+                        }
+                        else if (resolution.Action == ConflictAction.KeepBoth)
+                        {
                             finalTarget = GetUniqueAutoRenamePath(target);
+                            wasRenamed = true;
                             renamedFiles++;
                             break;
-
-                        case ConflictAction.Rename:
+                        }
+                        else if (resolution.Action == ConflictAction.Rename)
+                        {
                             var destDir = Path.GetDirectoryName(target) ?? request.DestinationDirectory;
-                            finalTarget = !string.IsNullOrWhiteSpace(resolution.CustomNewName)
-                                ? Path.Combine(destDir, resolution.CustomNewName)
-                                : GetUniqueAutoRenamePath(target);
+                            if (!TryValidateCustomFileName(resolution.CustomNewName, destDir, out var validName, out var renameError))
+                            {
+                                job.AddLog($"Invalid rename '{resolution.CustomNewName}': {renameError}", OperationLogLevel.Warning);
+                                currentResolution = null; // Re-prompt!
+                                appliedRule = null;
+                                continue;
+                            }
+                            finalTarget = Path.Combine(destDir, validName);
+                            wasRenamed = true;
                             renamedFiles++;
                             break;
-
-                        case ConflictAction.Replace:
-                            // Overwrite
+                        }
+                        else // Replace
+                        {
+                            finalTarget = target;
                             break;
+                        }
                     }
                 }
 
+                if (finalTarget == null)
+                {
+                    continue;
+                }
+
                 bool sameVolume = AreSameVolume(source, finalTarget);
-                var (success, destFinal, error) = await TransferSingleFileAsync(
+                var (success, destFinal, status, error) = await TransferSingleFileAsync(
                     job,
                     source,
                     finalTarget,
@@ -206,7 +255,16 @@ public sealed class TransferEngine
                 if (success)
                 {
                     succeededFiles++;
-                    results.Add(new FileTransferItemResult(source, destFinal, FileTransferStatus.Succeeded));
+                    if (wasRenamed && status == FileTransferStatus.Succeeded)
+                    {
+                        status = FileTransferStatus.Renamed;
+                    }
+                    if (status == FileTransferStatus.PartialSuccessSourceDeleteFailed)
+                    {
+                        job.AddError(source, error ?? "File copied, but source could not be deleted.", isFatal: false);
+                        job.AddLog($"Warning: {error}", OperationLogLevel.Warning);
+                    }
+                    results.Add(new FileTransferItemResult(source, destFinal, status, error));
                 }
                 else
                 {
@@ -248,9 +306,13 @@ public sealed class TransferEngine
                             continue;
                         }
 
+                        var (dirFiles, dirBytes) = CalculateTotals(new[] { source }, ct);
                         Directory.Move(source, targetDir);
                         results.Add(new FileTransferItemResult(source, targetDir, FileTransferStatus.Succeeded));
-                        succeededFiles++;
+                        succeededFiles += (int)Math.Min(dirFiles, int.MaxValue);
+                        processedFiles += dirFiles;
+                        Interlocked.Add(ref transferredBytes, dirBytes);
+                        ReportProgress(Path.GetFileName(source));
                         continue;
                     }
                     catch (Exception ex)
@@ -275,10 +337,28 @@ public sealed class TransferEngine
                         Interlocked.Add(ref transferredBytes, bytes);
                         ReportProgress(Path.GetFileName(source));
                     },
-                    () =>
+                    item =>
                     {
-                        Interlocked.Increment(ref processedFiles);
-                        Interlocked.Increment(ref succeededFiles);
+                        processedFiles++;
+                        switch (item.Status)
+                        {
+                            case FileTransferStatus.Succeeded:
+                                succeededFiles++;
+                                break;
+                            case FileTransferStatus.Renamed:
+                                succeededFiles++;
+                                renamedFiles++;
+                                break;
+                            case FileTransferStatus.Skipped:
+                                skippedFiles++;
+                                break;
+                            case FileTransferStatus.Failed:
+                                failedFiles++;
+                                break;
+                            case FileTransferStatus.PartialSuccessSourceDeleteFailed:
+                                succeededFiles++;
+                                break;
+                        }
                     },
                     ct).ConfigureAwait(false);
 
@@ -320,7 +400,7 @@ public sealed class TransferEngine
         ConflictResolution? currentAppliedRule,
         Action<ConflictResolution> onRuleApplied,
         Action<long> onBytesTransferred,
-        Action onFileSucceeded,
+        Action<FileTransferItemResult> onItemCompleted,
         CancellationToken ct)
     {
         var errors = new List<string>();
@@ -374,31 +454,63 @@ public sealed class TransferEngine
                     await job.WaitIfPausedAsync(ct).ConfigureAwait(false);
 
                     var destFile = Path.Combine(currentDst, file.Name);
+                    bool wasRenamed = false;
 
                     if (File.Exists(destFile))
                     {
-                        ConflictResolution resolution = currentAppliedRule ?? await PromptConflictResolutionAsync(job, file.FullName, destFile, false, ct).ConfigureAwait(false);
-                        if (resolution.ApplyToAllRemaining && currentAppliedRule == null)
+                        ConflictResolution? currentRes = currentAppliedRule;
+                        bool skipFile = false;
+
+                        while (true)
                         {
-                            currentAppliedRule = resolution;
-                            onRuleApplied(resolution);
+                            ct.ThrowIfCancellationRequested();
+                            await job.WaitIfPausedAsync(ct).ConfigureAwait(false);
+
+                            var resolution = currentRes ?? await PromptConflictResolutionAsync(job, file.FullName, destFile, false, ct).ConfigureAwait(false);
+                            if (resolution.ApplyToAllRemaining && currentAppliedRule == null)
+                            {
+                                currentAppliedRule = resolution;
+                                onRuleApplied(resolution);
+                            }
+
+                            if (resolution.Action == ConflictAction.Skip)
+                            {
+                                skipFile = true;
+                                onItemCompleted(new FileTransferItemResult(file.FullName, null, FileTransferStatus.Skipped, "Skipped by conflict resolution."));
+                                break;
+                            }
+                            else if (resolution.Action == ConflictAction.KeepBoth)
+                            {
+                                destFile = GetUniqueAutoRenamePath(destFile);
+                                wasRenamed = true;
+                                break;
+                            }
+                            else if (resolution.Action == ConflictAction.Rename)
+                            {
+                                if (!TryValidateCustomFileName(resolution.CustomNewName, currentDst, out var validName, out var renameError))
+                                {
+                                    job.AddLog($"Invalid rename '{resolution.CustomNewName}': {renameError}", OperationLogLevel.Warning);
+                                    currentRes = null;
+                                    currentAppliedRule = null;
+                                    continue;
+                                }
+                                destFile = Path.Combine(currentDst, validName);
+                                wasRenamed = true;
+                                break;
+                            }
+                            else // Replace
+                            {
+                                break;
+                            }
                         }
 
-                        if (resolution.Action == ConflictAction.Skip)
+                        if (skipFile)
                         {
                             continue;
                         }
-                        else if (resolution.Action == ConflictAction.KeepBoth)
-                        {
-                            destFile = GetUniqueAutoRenamePath(destFile);
-                        }
-                        else if (resolution.Action == ConflictAction.Rename && !string.IsNullOrWhiteSpace(resolution.CustomNewName))
-                        {
-                            destFile = Path.Combine(currentDst, resolution.CustomNewName);
-                        }
                     }
 
-                    var (fileSuccess, _, fileError) = await TransferSingleFileAsync(
+                    var (fileSuccess, finalDest, status, fileError) = await TransferSingleFileAsync(
                         job,
                         file.FullName,
                         destFile,
@@ -409,12 +521,22 @@ public sealed class TransferEngine
 
                     if (fileSuccess)
                     {
-                        onFileSucceeded();
+                        if (wasRenamed && status == FileTransferStatus.Succeeded)
+                        {
+                            status = FileTransferStatus.Renamed;
+                        }
+                        if (status == FileTransferStatus.PartialSuccessSourceDeleteFailed)
+                        {
+                            job.AddError(file.FullName, fileError ?? "File copied, but source could not be deleted.", isFatal: false);
+                            job.AddLog($"Warning: {fileError}", OperationLogLevel.Warning);
+                        }
+                        onItemCompleted(new FileTransferItemResult(file.FullName, finalDest, status, fileError));
                     }
                     else
                     {
                         errors.Add(fileError ?? $"Failed to transfer file {file.FullName}");
                         job.AddError(file.FullName, fileError ?? "File transfer failed");
+                        onItemCompleted(new FileTransferItemResult(file.FullName, null, FileTransferStatus.Failed, fileError));
                     }
                 }
             }
@@ -423,13 +545,27 @@ public sealed class TransferEngine
                 errors.Add($"Failed to enumerate files in {currentSrc}: {ex.Message}");
             }
 
-            // Enqueue subdirectories
+            // Enqueue subdirectories, guarding against reparse points and recursive loops
             try
             {
                 foreach (var sub in dirInfo.GetDirectories())
                 {
                     ct.ThrowIfCancellationRequested();
                     var targetSub = Path.Combine(currentDst, sub.Name);
+                    var isReparse = (sub.Attributes & FileAttributes.ReparsePoint) != 0 || sub.LinkTarget != null;
+                    if (isReparse)
+                    {
+                        try
+                        {
+                            if (sub.LinkTarget != null)
+                            {
+                                Directory.CreateSymbolicLink(targetSub, sub.LinkTarget);
+                            }
+                        }
+                        catch { }
+                        continue;
+                    }
+
                     if (!IsDescendantOf(targetSub, sub.FullName))
                     {
                         queue.Enqueue((sub.FullName, targetSub));
@@ -442,7 +578,7 @@ public sealed class TransferEngine
             }
         }
 
-        // If move, clean up source directories in post-order
+        // If move, clean up source directories in post-order only if no errors occurred
         if (mode == FileTransferMode.Move && errors.Count == 0)
         {
             sourceDirsInPostOrder.Reverse();
@@ -474,7 +610,7 @@ public sealed class TransferEngine
         return await job.PromptConflictAsync(conflict, ct).ConfigureAwait(false);
     }
 
-    private static async Task<(bool success, string? destinationPath, string? error)> TransferSingleFileAsync(
+    private static async Task<(bool success, string? destinationPath, FileTransferStatus status, string? error)> TransferSingleFileAsync(
         OperationJob job,
         string sourceFile,
         string targetFile,
@@ -483,45 +619,107 @@ public sealed class TransferEngine
         Action<long> onChunkTransferred,
         CancellationToken ct)
     {
+        var targetDir = Path.GetDirectoryName(targetFile);
+        if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir))
+        {
+            Directory.CreateDirectory(targetDir);
+        }
+
         if (mode == FileTransferMode.Move && sameVolumeMove)
         {
             try
             {
-                var targetDir = Path.GetDirectoryName(targetFile);
-                if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir))
-                {
-                    Directory.CreateDirectory(targetDir);
-                }
-
+                // Safe same-volume move replace:
+                // NEVER do File.Delete(targetFile) before File.Move!
                 if (File.Exists(targetFile))
                 {
-                    File.Delete(targetFile);
+                    try
+                    {
+                        var targetAttrs = File.GetAttributes(targetFile);
+                        if ((targetAttrs & FileAttributes.ReadOnly) != 0)
+                        {
+                            File.SetAttributes(targetFile, targetAttrs & ~FileAttributes.ReadOnly);
+                        }
+                    }
+                    catch { }
+
+                    try
+                    {
+                        File.Move(sourceFile, targetFile, overwrite: true);
+                    }
+                    catch
+                    {
+                        // Fallback: safe temp-copy + replace + source delete
+                        var tempFile = Path.Combine(targetDir ?? Directory.GetCurrentDirectory(), $".clanker-transfer-{Guid.NewGuid():N}.tmp");
+                        try
+                        {
+                            File.Copy(sourceFile, tempFile, overwrite: true);
+                            File.Move(tempFile, targetFile, overwrite: true);
+                            try
+                            {
+                                File.Delete(sourceFile);
+                            }
+                            catch (Exception delEx)
+                            {
+                                return (true, targetFile, FileTransferStatus.PartialSuccessSourceDeleteFailed, $"Destination copy succeeded, but source could not be deleted: {delEx.Message}");
+                            }
+                        }
+                        finally
+                        {
+                            try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
+                        }
+                    }
                 }
-                File.Move(sourceFile, targetFile);
+                else
+                {
+                    try
+                    {
+                        File.Move(sourceFile, targetFile);
+                    }
+                    catch
+                    {
+                        var tempFile = Path.Combine(targetDir ?? Directory.GetCurrentDirectory(), $".clanker-transfer-{Guid.NewGuid():N}.tmp");
+                        try
+                        {
+                            File.Copy(sourceFile, tempFile, overwrite: true);
+                            File.Move(tempFile, targetFile, overwrite: true);
+                            try
+                            {
+                                File.Delete(sourceFile);
+                            }
+                            catch (Exception delEx)
+                            {
+                                return (true, targetFile, FileTransferStatus.PartialSuccessSourceDeleteFailed, $"Destination copy succeeded, but source could not be deleted: {delEx.Message}");
+                            }
+                        }
+                        finally
+                        {
+                            try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
+                        }
+                    }
+                }
 
                 long fileLen = 0;
                 try { fileLen = new FileInfo(targetFile).Length; } catch { }
                 onChunkTransferred(fileLen);
-                return (true, targetFile, null);
+                return (true, targetFile, FileTransferStatus.Succeeded, null);
             }
             catch (Exception ex)
             {
-                return (false, null, ex.Message);
+                return (false, null, FileTransferStatus.Failed, ex.Message);
             }
         }
 
+        // Copy or cross-volume Move: Safe overwrite via temporary sibling
+        string? tempPath = null;
         try
         {
-            var targetDir = Path.GetDirectoryName(targetFile);
-            if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir))
-            {
-                Directory.CreateDirectory(targetDir);
-            }
-
             var sourceInfo = new FileInfo(sourceFile);
+            var destDirectory = targetDir ?? Directory.GetCurrentDirectory();
+            tempPath = Path.Combine(destDirectory, $".clanker-transfer-{Guid.NewGuid():N}.tmp");
 
             await using (var sourceStream = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, useAsync: true))
-            await using (var destinationStream = new FileStream(targetFile, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
+            await using (var destinationStream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
             {
                 byte[] buffer = new byte[BufferSize];
                 int bytesRead;
@@ -534,18 +732,36 @@ public sealed class TransferEngine
                     await destinationStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct).ConfigureAwait(false);
                     onChunkTransferred(bytesRead);
                 }
+                await destinationStream.FlushAsync(ct).ConfigureAwait(false);
             }
 
-            // Preserve file metadata
+            // Preserve file metadata on temp file before replacing destination
             try
             {
-                File.SetAttributes(targetFile, sourceInfo.Attributes);
-                File.SetCreationTimeUtc(targetFile, sourceInfo.CreationTimeUtc);
-                File.SetLastWriteTimeUtc(targetFile, sourceInfo.LastWriteTimeUtc);
+                File.SetAttributes(tempPath, sourceInfo.Attributes);
+                File.SetCreationTimeUtc(tempPath, sourceInfo.CreationTimeUtc);
+                File.SetLastWriteTimeUtc(tempPath, sourceInfo.LastWriteTimeUtc);
             }
             catch { }
 
-            // If move, delete source file now that copy fully succeeded
+            // Atomically/safely replace target with tempPath
+            if (File.Exists(targetFile))
+            {
+                try
+                {
+                    var existingAttrs = File.GetAttributes(targetFile);
+                    if ((existingAttrs & FileAttributes.ReadOnly) != 0)
+                    {
+                        File.SetAttributes(targetFile, existingAttrs & ~FileAttributes.ReadOnly);
+                    }
+                }
+                catch { }
+            }
+
+            File.Move(tempPath, targetFile, overwrite: true);
+            tempPath = null; // Successfully replaced target, no temp file to clean up
+
+            // If move, delete source file now that destination is complete
             if (mode == FileTransferMode.Move)
             {
                 try
@@ -554,19 +770,19 @@ public sealed class TransferEngine
                 }
                 catch (Exception delEx)
                 {
-                    return (true, targetFile, $"File copied, but source could not be deleted: {delEx.Message}");
+                    return (true, targetFile, FileTransferStatus.PartialSuccessSourceDeleteFailed, $"Destination copy succeeded, but source could not be deleted: {delEx.Message}");
                 }
             }
 
-            return (true, targetFile, null);
+            return (true, targetFile, FileTransferStatus.Succeeded, null);
         }
         catch (OperationCanceledException)
         {
             try
             {
-                if (File.Exists(targetFile))
+                if (tempPath != null && File.Exists(tempPath))
                 {
-                    File.Delete(targetFile);
+                    File.Delete(tempPath);
                 }
             }
             catch { }
@@ -576,14 +792,55 @@ public sealed class TransferEngine
         {
             try
             {
-                if (File.Exists(targetFile))
+                if (tempPath != null && File.Exists(tempPath))
                 {
-                    File.Delete(targetFile);
+                    File.Delete(tempPath);
                 }
             }
             catch { }
-            return (false, null, ex.Message);
+            return (false, null, FileTransferStatus.Failed, ex.Message);
         }
+    }
+
+    public static bool TryValidateCustomFileName(string? customName, string targetDirectory, out string validName, out string? errorMessage)
+    {
+        validName = string.Empty;
+        if (string.IsNullOrWhiteSpace(customName))
+        {
+            errorMessage = "File name cannot be empty.";
+            return false;
+        }
+
+        var trimmed = customName.Trim();
+        if (trimmed is "." or ".." || Path.IsPathRooted(trimmed))
+        {
+            errorMessage = "File name cannot be a rooted path or relative navigation ('.' or '..').";
+            return false;
+        }
+
+        var invalidChars = Path.GetInvalidFileNameChars().Concat(new[] { '/', '\\' }).Distinct().ToArray();
+        if (trimmed.IndexOfAny(invalidChars) >= 0)
+        {
+            errorMessage = "File name contains invalid characters or path separators.";
+            return false;
+        }
+
+        if (Path.GetFileName(trimmed) != trimmed)
+        {
+            errorMessage = "File name cannot contain directory components.";
+            return false;
+        }
+
+        var candidatePath = Path.Combine(targetDirectory, trimmed);
+        if (File.Exists(candidatePath) || Directory.Exists(candidatePath))
+        {
+            errorMessage = $"Destination already exists: {trimmed}";
+            return false;
+        }
+
+        validName = trimmed;
+        errorMessage = null;
+        return true;
     }
 
     private static (long totalFiles, long totalBytes) CalculateTotals(IReadOnlyList<string> sourcePaths, CancellationToken ct)
@@ -620,7 +877,11 @@ public sealed class TransferEngine
                         }
                         foreach (var sub in di.GetDirectories())
                         {
-                            q.Enqueue(sub.FullName);
+                            var isReparse = (sub.Attributes & FileAttributes.ReparsePoint) != 0 || sub.LinkTarget != null;
+                            if (!isReparse)
+                            {
+                                q.Enqueue(sub.FullName);
+                            }
                         }
                     }
                     catch { }

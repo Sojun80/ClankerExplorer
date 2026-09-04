@@ -42,21 +42,10 @@ public sealed class FileOperationService : IFileOperationService
             return new FileTransferResult(Array.Empty<FileTransferItemResult>());
         }
 
-        if (string.IsNullOrWhiteSpace(request.DestinationDirectory) ||
-            !Directory.Exists(request.DestinationDirectory))
-        {
-            return new FileTransferResult(
-                sources.Select(source => new FileTransferItemResult(
-                    source,
-                    null,
-                    FileTransferStatus.Failed,
-                    "The destination directory does not exist.")).ToArray());
-        }
-
         var normalizedRequest = request with { SourcePaths = sources };
-        return await Task.Run(
-            () => TransferCore(normalizedRequest, cancellationToken),
-            cancellationToken).ConfigureAwait(false);
+        var job = QueueTransfer(normalizedRequest);
+        using var reg = cancellationToken.Register(() => job.RequestCancel());
+        return await job.CompletionTask.ConfigureAwait(false);
     }
 
     public async Task<FileOperationResult> CreateAsync(
