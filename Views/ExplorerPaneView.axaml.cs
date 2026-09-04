@@ -242,6 +242,7 @@ public partial class ExplorerPaneView : UserControl
         vm.FolderViewStateRestored += RestoreFolderViewState;
         vm.RequestScrollItemIntoView += OnRequestScrollItemIntoView;
         vm.RequestSyncSelection += OnRequestSyncSelection;
+        vm.RequestThumbnailViewportUpdate += ScheduleThumbnailViewportUpdate;
         RestoreFolderViewState();
     }
 
@@ -1026,7 +1027,14 @@ public partial class ExplorerPaneView : UserControl
     {
         if (TabsScrollViewer != null && TabScrollButtonsPanel != null)
         {
-            bool canScroll = TabsScrollViewer.Extent.Width > TabsScrollViewer.Viewport.Width + 4;
+            var content = TabsScrollViewer.Presenter?.Content as Control;
+            double contentWidth = content != null && content.Bounds.Width > 0 ? content.Bounds.Width : TabsScrollViewer.Extent.Width;
+            double viewportWidth = TabsScrollViewer.Viewport.Width;
+            if (contentWidth <= viewportWidth + 4 && TabsScrollViewer.Offset.X > 0)
+            {
+                TabsScrollViewer.Offset = new Vector(0, TabsScrollViewer.Offset.Y);
+            }
+            bool canScroll = contentWidth > viewportWidth + 4;
             TabScrollButtonsPanel.IsVisible = canScroll;
         }
     }

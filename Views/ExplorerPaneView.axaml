@@ -84,8 +84,25 @@
           <TextBlock Text="{Binding PaneLabel}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
         </Border>
 
-        <!-- Right controls: Notepad++ Style Scroll Arrows (Only visible when tabs overflow!) -->
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="2,0,6,0">
+        <!-- Right controls: Operations Status Button + Notepad++ Style Scroll Arrows (Only visible when tabs overflow!) -->
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="2,0,6,0">
+          <!-- Operations toggle / status control near tab controls -->
+          <Button Command="{Binding ToggleOperationsCommand}"
+                  Background="Transparent" BorderThickness="1" CornerRadius="4" Padding="6,2" Height="24"
+                  BorderBrush="{DynamicResource AppBorderBrush}"
+                  ToolTip.Tip="Toggle Operations Workspace" VerticalAlignment="Center">
+            <Button.Styles>
+              <Style Selector="Button:pointerover">
+                <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+              </Style>
+            </Button.Styles>
+            <TextBlock Text="{Binding Operations.SummaryStatusText}"
+                       FontSize="11"
+                       FontFamily="{DynamicResource AppMonoFont}"
+                       Foreground="{DynamicResource AppTextBrush}"
+                       VerticalAlignment="Center"/>
+          </Button>
+
           <StackPanel x:Name="TabScrollButtonsPanel" Orientation="Horizontal" Spacing="2" IsVisible="False">
             <!-- Scroll Left Arrow Button -->
             <Button x:Name="TabScrollLeftBtn" Click="OnTabScrollLeftClicked"

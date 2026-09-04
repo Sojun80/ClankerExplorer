@@ -21,10 +21,18 @@ public sealed class DirectoryChangeReconciler
         : StringComparer.Ordinal;
 
     private readonly ExplorerTabViewModel _tab;
+    private readonly object _syncLock = new();
+    private Task _processingChain = Task.CompletedTask;
+    private long _currentGeneration = 0;
 
     public DirectoryChangeReconciler(ExplorerTabViewModel tab)
     {
         _tab = tab ?? throw new ArgumentNullException(nameof(tab));
+    }
+
+    public void Reset()
+    {
+        Interlocked.Increment(ref _currentGeneration);
     }
 
     public void HandleBatch(DirectoryChangeBatch batch)
@@ -34,26 +42,59 @@ public sealed class DirectoryChangeReconciler
         // Ignore events from other directories (e.g. previous directory before navigation)
         if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
 
+        long gen = Volatile.Read(ref _currentGeneration);
+
         // Fallback to state-preserving full refresh if overflow or large burst
         if (batch.IsOverflow || batch.Changes.Count >= FallbackThreshold)
         {
             Dispatcher.UIThread.Post(() =>
             {
+                if (gen != Volatile.Read(ref _currentGeneration)) return;
                 if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
                 _ = _tab.RefreshAsync();
             }, DispatcherPriority.Background);
             return;
         }
 
-        // Pre-resolve metadata off UI thread to avoid blocking UI with disk I/O
-        Task.Run(() =>
+        lock (_syncLock)
         {
-            var resolved = ResolveMetadata(batch.Changes);
-            Dispatcher.UIThread.Post(() =>
-            {
-                ApplyResolvedBatch(batch.DirectoryPath, resolved);
-            }, DispatcherPriority.Background);
-        });
+            _processingChain = ProcessBatchSequentialAsync(_processingChain, batch, gen);
+        }
+    }
+
+    private async Task ProcessBatchSequentialAsync(Task previousTask, DirectoryChangeBatch batch, long gen)
+    {
+        try
+        {
+            await previousTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // Ignore previous task failure so sequential pipeline continues
+        }
+
+        if (gen != Volatile.Read(ref _currentGeneration)) return;
+        if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
+
+        List<ResolvedChange> resolved;
+        try
+        {
+            resolved = await Task.Run(() => ResolveMetadata(batch.Changes)).ConfigureAwait(false);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (gen != Volatile.Read(ref _currentGeneration)) return;
+        if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (gen != Volatile.Read(ref _currentGeneration)) return;
+            if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
+            ApplyResolvedBatch(batch.DirectoryPath, resolved);
+        }, DispatcherPriority.Background);
     }
 
     public void ReconcileCreatedOrChangedSync(string fullPath)
@@ -259,12 +300,16 @@ public sealed class DirectoryChangeReconciler
         var existing = _tab.Items.FirstOrDefault(i => PathComparer.Equals(i.FullPath, fullPath));
         if (existing == null) return false;
 
+        int deletedFilteredIndex = _tab.FilteredItems.IndexOf(existing);
+        bool wasFocused = _tab.SelectedItem == existing;
+        bool wasSelected = _tab.SelectedItems.Contains(existing) || existing.IsThumbnailSelected;
+
         _tab.Items.Remove(existing);
 
         bool removedFromFiltered = false;
-        if (_tab.FilteredItems.Contains(existing))
+        if (deletedFilteredIndex >= 0)
         {
-            _tab.FilteredItems.Remove(existing);
+            _tab.FilteredItems.RemoveAt(deletedFilteredIndex);
             removedFromFiltered = true;
         }
 
@@ -272,10 +317,27 @@ public sealed class DirectoryChangeReconciler
         {
             _tab.SelectedItems.Remove(existing);
         }
+        existing.IsThumbnailSelected = false;
 
-        if (_tab.SelectedItem == existing)
+        if (wasFocused || (wasSelected && _tab.SelectedItems.Count == 0))
         {
-            _tab.SelectedItem = _tab.SelectedItems.LastOrDefault() ?? _tab.FilteredItems.LastOrDefault();
+            FileItem? newSelection = null;
+            if (_tab.FilteredItems.Count > 0)
+            {
+                // Select nearest item: item now occupying deleted index, or previous item if deleted at end
+                int targetIndex = Math.Clamp(deletedFilteredIndex, 0, _tab.FilteredItems.Count - 1);
+                newSelection = _tab.FilteredItems[targetIndex];
+            }
+
+            _tab.SelectedItem = newSelection;
+            if (newSelection != null)
+            {
+                newSelection.IsThumbnailSelected = true;
+                if (!_tab.SelectedItems.Contains(newSelection))
+                {
+                    _tab.SelectedItems.Add(newSelection);
+                }
+            }
         }
 
         return removedFromFiltered;
@@ -292,13 +354,17 @@ public sealed class DirectoryChangeReconciler
             existing.SizeBytes = change.SizeBytes;
             existing.FormattedSize = change.IsDirectory ? "<DIR>" : FileSystemService.FormatBytes(change.SizeBytes);
             existing.ModifiedTime = change.ModifiedTime;
+            existing.CreatedTime = change.CreatedTime;
+            existing.AccessedTime = change.AccessedTime;
             existing.AttributesString = change.AttributesString;
             existing.ThumbnailImage = null; // Invalidate thumbnail for re-fetch
+
+            _tab.TriggerThumbnailViewportUpdate();
 
             // If sort affects this field, reposition in FilteredItems if needed
             if (_tab.FilteredItems.Contains(existing))
             {
-                if (_tab.SortColumn is "Size" or "Modified" or "Date Modified")
+                if (_tab.SortColumn is "Size" or "Modified" or "Date Modified" or "Created" or "Date Created" or "Accessed" or "Date Accessed" or "Attributes")
                 {
                     _tab.FilteredItems.Remove(existing);
                     int insertIdx = FindSortedIndex(_tab.FilteredItems, existing, comparer);
@@ -306,6 +372,12 @@ public sealed class DirectoryChangeReconciler
                     return true;
                 }
             }
+            return false;
+        }
+
+        // If this was an in-place Changed event and the item is not in the collection, do not recreate it
+        if (change.Event.Kind == DirectoryChangeKind.Changed)
+        {
             return false;
         }
 
@@ -376,7 +448,12 @@ public sealed class DirectoryChangeReconciler
         targetItem.SizeBytes = change.SizeBytes;
         targetItem.FormattedSize = change.IsDirectory ? "<DIR>" : FileSystemService.FormatBytes(change.SizeBytes);
         targetItem.ModifiedTime = change.ModifiedTime;
+        targetItem.CreatedTime = change.CreatedTime;
+        targetItem.AccessedTime = change.AccessedTime;
+        targetItem.AttributesString = change.AttributesString;
         targetItem.ThumbnailImage = null; // Invalidate thumbnail
+
+        _tab.TriggerThumbnailViewportUpdate();
 
         bool wasInFiltered = _tab.FilteredItems.Contains(targetItem);
         bool nowMatches = MatchesFilter(targetItem, _tab.FilterText, _tab.IsFilterRegex);

@@ -63,7 +63,7 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
 
         lock (_gate)
         {
-            if (IsRunning && _pathComparer.Equals(WatchedPath, fullPath))
+            if (IsRunning && _watcher != null && _watcher.EnableRaisingEvents && _pathComparer.Equals(WatchedPath, fullPath))
             {
                 return;
             }
@@ -80,6 +80,7 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
         {
             if (!Directory.Exists(fullPath))
             {
+                Stop();
                 return;
             }
 
@@ -100,8 +101,6 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
             watcher.Renamed += OnWatcherRenamed;
             watcher.Error += OnWatcherError;
 
-            watcher.EnableRaisingEvents = true;
-
             lock (_gate)
             {
                 if (_isDisposed)
@@ -111,6 +110,24 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
                 }
                 _watcher = watcher;
                 IsRunning = true;
+            }
+
+            try
+            {
+                watcher.EnableRaisingEvents = true;
+            }
+            catch (Exception ex)
+            {
+                lock (_gate)
+                {
+                    if (ReferenceEquals(_watcher, watcher))
+                    {
+                        _watcher = null;
+                        IsRunning = false;
+                    }
+                }
+                watcher.Dispose();
+                ErrorOccurred?.Invoke(this, ex);
             }
         }
         catch (Exception ex)
@@ -174,21 +191,45 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
         var ex = e.GetException();
         ErrorOccurred?.Invoke(this, ex);
 
+        FileSystemWatcher? failedWatcher;
         string currentWatched;
         lock (_gate)
         {
             currentWatched = WatchedPath ?? string.Empty;
+            failedWatcher = _watcher;
+            _watcher = null;
+            IsRunning = false;
             _pendingChanges.Clear();
             _firstEventUtcTicks = 0;
         }
 
         _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
 
+        if (failedWatcher != null)
+        {
+            try
+            {
+                failedWatcher.EnableRaisingEvents = false;
+                failedWatcher.Created -= OnWatcherCreated;
+                failedWatcher.Deleted -= OnWatcherDeleted;
+                failedWatcher.Changed -= OnWatcherChanged;
+                failedWatcher.Renamed -= OnWatcherRenamed;
+                failedWatcher.Error -= OnWatcherError;
+                failedWatcher.Dispose();
+            }
+            catch { }
+        }
+
         if (!string.IsNullOrEmpty(currentWatched))
         {
-            // Trigger an overflow batch to request a safe full refresh
+            // Trigger an overflow batch to request a safe full refresh and watcher recreation
             BatchReady?.Invoke(this, new DirectoryChangeBatch(currentWatched, Array.Empty<FileChangeEvent>(), IsOverflow: true));
         }
+    }
+
+    public void RaiseErrorForTesting(Exception ex)
+    {
+        OnWatcherError(this, new ErrorEventArgs(ex));
     }
 
     public void EnqueueChange(FileChangeEvent change)
@@ -229,6 +270,10 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
                         // File was deleted then created: treat as changed
                         _pendingChanges[change.FullPath] = change with { Kind = DirectoryChangeKind.Changed };
                     }
+                    else
+                    {
+                        _pendingChanges[change.FullPath] = change;
+                    }
                 }
                 else
                 {
@@ -244,6 +289,23 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
                         // Created and deleted within same window: cancel out completely
                         _pendingChanges.Remove(change.FullPath);
                     }
+                    else if (existingDeleted.Kind == DirectoryChangeKind.Renamed &&
+                             !string.IsNullOrEmpty(existingDeleted.OldFullPath))
+                    {
+                        // File was Renamed(A -> B), now Deleted(B)
+                        // This must ultimately remove A (what ClankerExplorer currently knows it as)
+                        _pendingChanges.Remove(change.FullPath);
+                        string origPath = existingDeleted.OldFullPath;
+                        if (_pendingChanges.TryGetValue(origPath, out var atOrig) && atOrig.Kind == DirectoryChangeKind.Created)
+                        {
+                            // Created(A) -> Renamed(A -> B) -> Deleted(B): cancel out completely
+                            _pendingChanges.Remove(origPath);
+                        }
+                        else
+                        {
+                            _pendingChanges[origPath] = new FileChangeEvent(DirectoryChangeKind.Deleted, origPath);
+                        }
+                    }
                     else
                     {
                         _pendingChanges[change.FullPath] = change;
@@ -258,9 +320,11 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
             case DirectoryChangeKind.Changed:
                 if (_pendingChanges.TryGetValue(change.FullPath, out var existingChanged))
                 {
-                    if (existingChanged.Kind == DirectoryChangeKind.Created)
+                    if (existingChanged.Kind == DirectoryChangeKind.Created ||
+                        existingChanged.Kind == DirectoryChangeKind.Renamed)
                     {
                         // Created + Changed -> stays Created
+                        // Renamed + Changed -> stays Renamed (do NOT overwrite pending rename with Changed!)
                     }
                     else
                     {
@@ -285,7 +349,16 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
                     else if (existingOld.Kind == DirectoryChangeKind.Renamed)
                     {
                         // Renamed(A->B) + Renamed(B->C) -> Renamed(A->C)
-                        _pendingChanges[change.FullPath] = change with { OldFullPath = existingOld.OldFullPath };
+                        string originalSource = existingOld.OldFullPath ?? change.OldFullPath;
+                        if (_pathComparer.Equals(change.FullPath, originalSource))
+                        {
+                            // Renamed A -> B -> A: returned to original name, treat as Changed
+                            _pendingChanges[change.FullPath] = new FileChangeEvent(DirectoryChangeKind.Changed, change.FullPath);
+                        }
+                        else
+                        {
+                            _pendingChanges[change.FullPath] = change with { OldFullPath = originalSource };
+                        }
                     }
                     else
                     {

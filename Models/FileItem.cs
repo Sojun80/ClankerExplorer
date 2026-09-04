@@ -8,10 +8,31 @@ namespace ClankerExplorer.Models;
 
 public partial class FileItem : ObservableObject
 {
-    public string Name { get; set; } = string.Empty;
-    public string Extension { get; set; } = string.Empty;
-    public string FullPath { get; set; } = string.Empty;
-    public string ParentPath { get; set; } = string.Empty;
+    [ObservableProperty]
+    private string _name = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ExtensionDisplay))]
+    [NotifyPropertyChangedFor(nameof(HasExtensionBadge))]
+    [NotifyPropertyChangedFor(nameof(ItemTypeDisplay))]
+    [NotifyPropertyChangedFor(nameof(IconKind))]
+    private string _extension = string.Empty;
+
+    partial void OnExtensionChanged(string value)
+    {
+        _fileIcon = null;
+        _largeIcon = null;
+        OnPropertyChanged(nameof(FileIcon));
+        OnPropertyChanged(nameof(LargeIcon));
+        OnPropertyChanged(nameof(HasFileIcon));
+        OnPropertyChanged(nameof(HasLargeIcon));
+    }
+
+    [ObservableProperty]
+    private string _fullPath = string.Empty;
+
+    [ObservableProperty]
+    private string _parentPath = string.Empty;
 
     private bool _isDirectory;
     public bool IsDirectory
@@ -19,13 +40,26 @@ public partial class FileItem : ObservableObject
         get => _isDirectory;
         set
         {
-            _isDirectory = value;
-            _sizeBarFill = -1;
-            _sizeBarBrush = null;
+            if (SetProperty(ref _isDirectory, value))
+            {
+                _sizeBarFill = -1;
+                _sizeBarBrush = null;
+                OnPropertyChanged(nameof(SizeDisplay));
+                OnPropertyChanged(nameof(FormattedSize));
+                OnPropertyChanged(nameof(SizeBarFill));
+                OnPropertyChanged(nameof(SizeBarFillPercent));
+                OnPropertyChanged(nameof(HasSizeBar));
+                OnPropertyChanged(nameof(SizeBarBrush));
+                OnPropertyChanged(nameof(ExtensionDisplay));
+                OnPropertyChanged(nameof(HasExtensionBadge));
+                OnPropertyChanged(nameof(ItemTypeDisplay));
+                OnPropertyChanged(nameof(IconKind));
+            }
         }
     }
 
-    public bool IsSymbolicLink { get; set; }
+    [ObservableProperty]
+    private bool _isSymbolicLink;
 
     private long _sizeBytes;
     public long SizeBytes
@@ -33,9 +67,16 @@ public partial class FileItem : ObservableObject
         get => _sizeBytes;
         set
         {
-            _sizeBytes = value;
-            _sizeBarFill = -1;
-            _sizeBarBrush = null;
+            if (SetProperty(ref _sizeBytes, value))
+            {
+                _sizeBarFill = -1;
+                _sizeBarBrush = null;
+                OnPropertyChanged(nameof(SizeBarFill));
+                OnPropertyChanged(nameof(SizeBarFillPercent));
+                OnPropertyChanged(nameof(HasSizeBar));
+                OnPropertyChanged(nameof(SizeBarBrush));
+                OnPropertyChanged(nameof(SizeDisplay));
+            }
         }
     }
 
@@ -66,10 +107,22 @@ public partial class FileItem : ObservableObject
         }
     }
 
-    public string FormattedSize { get; set; } = string.Empty;
-    public DateTime ModifiedTime { get; set; }
-    public DateTime CreatedTime { get; set; }
-    public DateTime AccessedTime { get; set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SizeDisplay))]
+    private string _formattedSize = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FormattedModifiedTime))]
+    private DateTime _modifiedTime;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FormattedCreatedTime))]
+    private DateTime _createdTime;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FormattedAccessedTime))]
+    private DateTime _accessedTime;
+
     public string FormattedModifiedTime => FormatSmartDateTime(ModifiedTime);
     public string FormattedCreatedTime => FormatSmartDateTime(CreatedTime);
     public string FormattedAccessedTime => FormatSmartDateTime(AccessedTime);
@@ -122,13 +175,26 @@ public partial class FileItem : ObservableObject
     }
     
     // Windows Attributes & Linux Permissions
-    public bool IsHidden { get; set; }
-    public bool IsSystem { get; set; }
-    public bool IsReadOnly { get; set; }
-    public bool IsArchive { get; set; }
-    public string AttributesString { get; set; } = string.Empty;
-    public string PermissionsString { get; set; } = string.Empty;
-    public string OwnerGroupString { get; set; } = string.Empty;
+    [ObservableProperty]
+    private bool _isHidden;
+
+    [ObservableProperty]
+    private bool _isSystem;
+
+    [ObservableProperty]
+    private bool _isReadOnly;
+
+    [ObservableProperty]
+    private bool _isArchive;
+
+    [ObservableProperty]
+    private string _attributesString = string.Empty;
+
+    [ObservableProperty]
+    private string _permissionsString = string.Empty;
+
+    [ObservableProperty]
+    private string _ownerGroupString = string.Empty;
 
     // Cut State & Dimming
     [ObservableProperty]

@@ -79,6 +79,15 @@
               </StackPanel>
             </ToggleButton>
 
+            <!-- Operations Workspace Toggle -->
+            <ToggleButton IsChecked="{Binding ShowOperationsWorkspace, Mode=TwoWay}" Classes="power-btn"
+                          ToolTip.Tip="Toggle Operations Workspace">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="⚡" FontSize="11" Foreground="{DynamicResource AppHighlightBrush}"/>
+                <TextBlock Text="Operations"/>
+              </StackPanel>
+            </ToggleButton>
+
             <!-- PowerShell Launcher (Left click normal, Right click Admin) -->
             <Button Command="{Binding OpenTerminalCommand}" Classes="power-btn"
                     ToolTip.Tip="Open PowerShell (Right-click for Admin)">
@@ -512,22 +521,30 @@
           </ScrollViewer>
         </Border>
 
-        <!-- Column 1: Center Panes (Single 100% or Dual Split 50%/50%) -->
-        <Grid Grid.Column="1" ColumnDefinitions="*,Auto,*" MinWidth="250">
-          <!-- Left / Primary Pane -->
-          <views:ExplorerPaneView Grid.Column="0"
-                                  Grid.ColumnSpan="{Binding $parent[Window].((vm:MainViewModel)DataContext).LeftPaneColumnSpan}"
-                                  DataContext="{Binding LeftPane}"
-                                  PointerPressed="OnLeftPanePointerPressed"/>
+        <!-- Column 1: Center Panes (Single 100% or Dual Split 50%/50%) or Operations Workspace -->
+        <Grid Grid.Column="1" MinWidth="250">
+          <!-- Center Panes -->
+          <Grid ColumnDefinitions="*,Auto,*" IsVisible="{Binding !ShowOperationsWorkspace}">
+            <!-- Left / Primary Pane -->
+            <views:ExplorerPaneView Grid.Column="0"
+                                    Grid.ColumnSpan="{Binding $parent[Window].((vm:MainViewModel)DataContext).LeftPaneColumnSpan}"
+                                    DataContext="{Binding LeftPane}"
+                                    PointerPressed="OnLeftPanePointerPressed"/>
 
-          <!-- Grid Splitter (for dual pane) -->
-          <GridSplitter Grid.Column="1" Width="4" Background="{DynamicResource AppBorderBrush}"
-                        IsVisible="{Binding IsDualPane}"/>
+            <!-- Grid Splitter (for dual pane) -->
+            <GridSplitter Grid.Column="1" Width="4" Background="{DynamicResource AppBorderBrush}"
+                          IsVisible="{Binding IsDualPane}"/>
 
-          <!-- Right / Secondary Pane -->
-          <views:ExplorerPaneView Grid.Column="2" DataContext="{Binding RightPane}"
-                                  IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsDualPane}"
-                                  PointerPressed="OnRightPanePointerPressed"/>
+            <!-- Right / Secondary Pane -->
+            <views:ExplorerPaneView Grid.Column="2" DataContext="{Binding RightPane}"
+                                    IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsDualPane}"
+                                    PointerPressed="OnRightPanePointerPressed"/>
+          </Grid>
+
+          <!-- Operations Workspace -->
+          <Panel IsVisible="{Binding ShowOperationsWorkspace}">
+            <views:OperationsView DataContext="{Binding Operations}"/>
+          </Panel>
         </Grid>
 
         <!-- Column 2: Resizable Inspector Splitter (Wide hit target, thin line) -->

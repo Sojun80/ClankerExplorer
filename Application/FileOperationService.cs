@@ -8,6 +8,7 @@ namespace ClankerExplorer.AppLayer;
 public sealed class FileOperationService : IFileOperationService
 {
     private readonly ArchiveService _archiveService;
+    public ClankerExplorer.AppLayer.Operations.IOperationManager Operations { get; }
 
     private static StringComparer PathComparer =>
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -15,9 +16,18 @@ public sealed class FileOperationService : IFileOperationService
     private static StringComparison PathComparison =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-    public FileOperationService(ArchiveService? archiveService = null)
+    public FileOperationService(
+        ArchiveService? archiveService = null,
+        ClankerExplorer.AppLayer.Operations.IOperationManager? operationManager = null)
     {
         _archiveService = archiveService ?? ArchiveService.Instance;
+        Operations = operationManager ?? ClankerExplorer.AppLayer.Operations.OperationManager.Instance;
+    }
+
+    public ClankerExplorer.AppLayer.Operations.OperationJob QueueTransfer(FileTransferRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Operations.EnqueueTransfer(request);
     }
 
     public async Task<FileTransferResult> TransferAsync(

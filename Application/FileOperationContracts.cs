@@ -14,7 +14,8 @@ public enum FileConflictPolicy
     AutoRename,
     Fail,
     Skip,
-    Overwrite
+    Overwrite,
+    Prompt
 }
 
 public enum FileTransferStatus
@@ -34,7 +35,7 @@ public sealed record FileTransferRequest(
     IReadOnlyList<string> SourcePaths,
     string DestinationDirectory,
     FileTransferMode Mode,
-    FileConflictPolicy ConflictPolicy = FileConflictPolicy.AutoRename);
+    FileConflictPolicy ConflictPolicy = FileConflictPolicy.Prompt);
 
 public sealed record FileTransferItemResult(
     string SourcePath,
@@ -137,6 +138,12 @@ public interface IFileCommandDispatcher
 
 public interface IFileOperationService
 {
+    ClankerExplorer.AppLayer.Operations.IOperationManager Operations =>
+        ClankerExplorer.AppLayer.Operations.OperationManager.Instance;
+
+    ClankerExplorer.AppLayer.Operations.OperationJob QueueTransfer(FileTransferRequest request) =>
+        Operations.EnqueueTransfer(request);
+
     Task<FileTransferResult> TransferAsync(
         FileTransferRequest request,
         CancellationToken cancellationToken = default);

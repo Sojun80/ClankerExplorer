@@ -339,4 +339,285 @@ public sealed class DirectoryWatcherTests
         Assert.False(watcher.IsRunning);
         Assert.Empty(tab.Items);
     }
+
+    [Fact]
+    public async Task RegressionA_RenameFollowedByChanged_PreservesRenameSemantics()
+    {
+        using var fs = new TemporaryFileSystem();
+        var fileA = Path.Combine(fs.FolderA, "fileA.txt");
+        var fileB = Path.Combine(fs.FolderA, "fileB.txt");
+        File.WriteAllText(fileA, "initial content");
+
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 40);
+        using var tab = new ExplorerTabViewModel(fs.FolderA, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Contains(tab.Items, i => i.Name == "fileA.txt");
+
+        // Rename A -> B, then mutate B
+        File.Move(fileA, fileB);
+        File.AppendAllText(fileB, " - appended extra content for change");
+
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Renamed, fileB, fileA));
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Changed, fileB));
+
+        bool reconciled = await WaitForConditionAsync(() =>
+            tab.Items.Any(i => i.Name == "fileB.txt") &&
+            !tab.Items.Any(i => i.Name == "fileA.txt"));
+
+        Assert.True(reconciled, "Only fileB.txt should exist and fileA.txt should be gone.");
+        Assert.Single(tab.Items, i => i.Name == "fileB.txt");
+        Assert.DoesNotContain(tab.Items, i => i.Name == "fileA.txt");
+
+        var itemB = tab.Items.First(i => i.Name == "fileB.txt");
+        Assert.Equal(fileB, itemB.FullPath);
+        Assert.True(itemB.SizeBytes > "initial content".Length);
+    }
+
+    [Fact]
+    public async Task RegressionB_RenameFollowedByDelete_NeitherItemExists()
+    {
+        using var fs = new TemporaryFileSystem();
+        var fileA = Path.Combine(fs.FolderA, "to_rename_then_del.txt");
+        var fileB = Path.Combine(fs.FolderA, "renamed_target.txt");
+        File.WriteAllText(fileA, "will be deleted");
+
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 40);
+        using var tab = new ExplorerTabViewModel(fs.FolderA, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Contains(tab.Items, i => i.Name == "to_rename_then_del.txt");
+
+        // Enqueue Rename A -> B followed by Delete B within debounce window
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Renamed, fileB, fileA));
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Deleted, fileB));
+
+        bool neitherExists = await WaitForConditionAsync(() =>
+            !tab.Items.Any(i => i.Name == "to_rename_then_del.txt") &&
+            !tab.Items.Any(i => i.Name == "renamed_target.txt"));
+
+        Assert.True(neitherExists, "Neither original nor renamed item should exist in tab items.");
+        Assert.DoesNotContain(tab.FilteredItems, i => i.Name == "to_rename_then_del.txt");
+        Assert.DoesNotContain(tab.FilteredItems, i => i.Name == "renamed_target.txt");
+    }
+
+    [Fact]
+    public async Task RegressionC_ChainedRenames_ResolvesOnlyToFinalName()
+    {
+        using var fs = new TemporaryFileSystem();
+        var fileA = Path.Combine(fs.FolderA, "chainA.txt");
+        var fileB = Path.Combine(fs.FolderA, "chainB.txt");
+        var fileC = Path.Combine(fs.FolderA, "chainC.txt");
+        File.WriteAllText(fileA, "chain test");
+
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 40);
+        using var tab = new ExplorerTabViewModel(fs.FolderA, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Contains(tab.Items, i => i.Name == "chainA.txt");
+
+        File.Move(fileA, fileC);
+
+        // Enqueue chained renames: A -> B, then B -> C
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Renamed, fileB, fileA));
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Renamed, fileC, fileB));
+
+        bool resolved = await WaitForConditionAsync(() =>
+            tab.Items.Any(i => i.Name == "chainC.txt") &&
+            !tab.Items.Any(i => i.Name == "chainA.txt") &&
+            !tab.Items.Any(i => i.Name == "chainB.txt"));
+
+        Assert.True(resolved, "Only chainC.txt should exist.");
+        Assert.Single(tab.Items, i => i.Name == "chainC.txt");
+        Assert.DoesNotContain(tab.Items, i => i.Name == "chainA.txt");
+        Assert.DoesNotContain(tab.Items, i => i.Name == "chainB.txt");
+    }
+
+    [Fact]
+    public async Task RegressionD_ChangedMetadataLookupCompletingAfterDelete_DoesNotReappear()
+    {
+        using var fs = new TemporaryFileSystem();
+        var targetFile = Path.Combine(fs.FolderA, "race_file.txt");
+        File.WriteAllText(targetFile, "content");
+
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 40);
+        using var tab = new ExplorerTabViewModel(fs.FolderA, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Contains(tab.Items, i => i.Name == "race_file.txt");
+
+        // 1. Reconcile deletion of targetFile
+        tab.Reconciler.ReconcileDeletedSync(targetFile);
+        Dispatcher.UIThread.RunJobs();
+        Assert.DoesNotContain(tab.Items, i => i.Name == "race_file.txt");
+
+        // 2. Simulate late arrival of an asynchronous Changed batch whose metadata lookup resolved earlier
+        var lateChangedBatch = new DirectoryChangeBatch(
+            fs.FolderA,
+            new[] { new FileChangeEvent(DirectoryChangeKind.Changed, targetFile) });
+
+        tab.Reconciler.HandleBatch(lateChangedBatch);
+
+        // Wait for reconciler pipeline to execute
+        await Task.Delay(150);
+        Dispatcher.UIThread.RunJobs();
+
+        // The deleted item must NOT reappear
+        Assert.DoesNotContain(tab.Items, i => i.Name == "race_file.txt");
+        Assert.DoesNotContain(tab.FilteredItems, i => i.Name == "race_file.txt");
+    }
+
+    [Fact]
+    public async Task RegressionE_NavigationWhileReconciliationPending_DoesNotModifyNewDirectory()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 40);
+        using var tab = new ExplorerTabViewModel(fs.FolderA, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(Path.GetFullPath(fs.FolderA), tab.CurrentPath);
+
+        // Navigate to FolderB
+        tab.NavigateTo(fs.FolderB);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(Path.GetFullPath(fs.FolderB), tab.CurrentPath);
+
+        // Simulate a stale batch from FolderA arriving while on FolderB
+        var staleBatch = new DirectoryChangeBatch(
+            fs.FolderA,
+            new[] { new FileChangeEvent(DirectoryChangeKind.Created, Path.Combine(fs.FolderA, "stale_from_A.txt")) });
+
+        tab.Reconciler.HandleBatch(staleBatch);
+
+        await Task.Delay(150);
+        Dispatcher.UIThread.RunJobs();
+
+        // Stale result from FolderA must NOT modify FolderB items
+        Assert.DoesNotContain(tab.Items, i => i.Name == "stale_from_A.txt");
+        Assert.DoesNotContain(tab.FilteredItems, i => i.Name == "stale_from_A.txt");
+    }
+
+    [Fact]
+    public void RegressionF_ChangedMetadataUpdatesObservableFileItemProperties()
+    {
+        var item = new FileItem
+        {
+            Name = "test.txt",
+            Extension = ".txt",
+            FullPath = @"C:\dummy\test.txt",
+            SizeBytes = 100,
+            ModifiedTime = DateTime.UtcNow.AddHours(-2),
+            CreatedTime = DateTime.UtcNow.AddHours(-5),
+            AccessedTime = DateTime.UtcNow.AddHours(-1),
+            AttributesString = "Normal"
+        };
+
+        var notifications = new HashSet<string>();
+        item.PropertyChanged += (s, e) =>
+        {
+            if (!string.IsNullOrEmpty(e.PropertyName))
+            {
+                notifications.Add(e.PropertyName);
+            }
+        };
+
+        // Mutate metadata properties
+        item.SizeBytes = 5000;
+        item.FormattedSize = "5 KB";
+        item.ModifiedTime = DateTime.UtcNow;
+        item.CreatedTime = DateTime.UtcNow.AddHours(-1);
+        item.AccessedTime = DateTime.UtcNow;
+        item.AttributesString = "ReadOnly, Archive";
+        item.PermissionsString = "rw-r--r--";
+        item.OwnerGroupString = "root:root";
+
+        Assert.Contains(nameof(FileItem.SizeBytes), notifications);
+        Assert.Contains(nameof(FileItem.SizeDisplay), notifications);
+        Assert.Contains(nameof(FileItem.FormattedSize), notifications);
+        Assert.Contains(nameof(FileItem.ModifiedTime), notifications);
+        Assert.Contains(nameof(FileItem.FormattedModifiedTime), notifications);
+        Assert.Contains(nameof(FileItem.CreatedTime), notifications);
+        Assert.Contains(nameof(FileItem.FormattedCreatedTime), notifications);
+        Assert.Contains(nameof(FileItem.AccessedTime), notifications);
+        Assert.Contains(nameof(FileItem.FormattedAccessedTime), notifications);
+        Assert.Contains(nameof(FileItem.AttributesString), notifications);
+        Assert.Contains(nameof(FileItem.PermissionsString), notifications);
+        Assert.Contains(nameof(FileItem.OwnerGroupString), notifications);
+    }
+
+    [Fact]
+    public async Task RegressionG_DeleteSelectedItemFromMiddle_MovesToNearestWithoutJumpingToEnd()
+    {
+        using var fs = new TemporaryFileSystem();
+        var middleDir = Path.Combine(fs.Root, "middle_select_test");
+        Directory.CreateDirectory(middleDir);
+
+        // Create 10 files
+        for (int i = 0; i < 10; i++)
+        {
+            File.WriteAllText(Path.Combine(middleDir, $"item_{i:D2}.txt"), $"content {i}");
+        }
+
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 40);
+        using var tab = new ExplorerTabViewModel(middleDir, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(10, tab.FilteredItems.Count);
+
+        // Select item at index 4 (item_04.txt)
+        var selectedItem = tab.FilteredItems[4];
+        Assert.Equal("item_04.txt", selectedItem.Name);
+
+        tab.SelectedItem = selectedItem;
+        tab.SelectedItems.Add(selectedItem);
+        selectedItem.IsThumbnailSelected = true;
+
+        // Delete item_04.txt externally
+        File.Delete(selectedItem.FullPath);
+        tab.Reconciler.ReconcileDeletedSync(selectedItem.FullPath);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(9, tab.FilteredItems.Count);
+        Assert.NotNull(tab.SelectedItem);
+
+        // Nearest item now occupying index 4 is item_05.txt
+        Assert.Equal("item_05.txt", tab.SelectedItem.Name);
+        Assert.NotEqual("item_09.txt", tab.SelectedItem.Name);
+    }
+
+    [Fact]
+    public async Task RegressionH_WatcherErrorOverflow_RefreshesAndRestartsWatcher()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 30);
+        using var tab = new ExplorerTabViewModel(fs.FolderA, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(watcher.IsRunning);
+
+        // Simulate watcher buffer overflow / internal error
+        watcher.RaiseErrorForTesting(new InternalBufferOverflowException("Test buffer overflow"));
+
+        // Wait for tab refresh and watcher restart
+        bool restarted = await WaitForConditionAsync(() => watcher.IsRunning, timeoutMs: 3000);
+        Assert.True(restarted, "Watcher should restart after error/overflow.");
+
+        // Subsequent external changes should be detected and processed
+        var newFile = Path.Combine(fs.FolderA, "post_recovery.txt");
+        File.WriteAllText(newFile, "post recovery content");
+
+        bool detected = await WaitForConditionAsync(() =>
+            tab.FilteredItems.Any(i => i.Name == "post_recovery.txt"), timeoutMs: 3000);
+
+        Assert.True(detected, "Subsequent external file should appear after watcher recovery.");
+    }
 }

@@ -1,0 +1,385 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:ClankerExplorer.ViewModels"
+             xmlns:ops="clr-namespace:ClankerExplorer.AppLayer.Operations"
+             x:Class="ClankerExplorer.Views.OperationsView"
+             x:DataType="vm:OperationsViewModel"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600">
+
+  <UserControl.Styles>
+    <Style Selector="Border.job-card">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="Padding" Value="12,10"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+    <Style Selector="Border.job-card.attention">
+      <Setter Property="BorderBrush" Value="#F59E0B"/>
+      <Setter Property="BorderThickness" Value="2"/>
+    </Style>
+
+    <Style Selector="Border.badge-type">
+      <Setter Property="Background" Value="#1E293B"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppHighlightBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="3"/>
+      <Setter Property="Padding" Value="6,1"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style Selector="Border.badge-state">
+      <Setter Property="Background" Value="#1E293B"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CornerRadius" Value="3"/>
+      <Setter Property="Padding" Value="6,1"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style Selector="Button.op-btn">
+      <Setter Property="Background" Value="{DynamicResource AppBgBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="8,3"/>
+      <Setter Property="FontSize" Value="11"/>
+    </Style>
+    <Style Selector="Button.op-btn:pointerover">
+      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+    <Style Selector="Button.op-btn-action">
+      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="10,4"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style Selector="Button.op-btn-action:pointerover">
+      <Setter Property="Background" Value="{DynamicResource AppHighlightBrush}"/>
+      <Setter Property="Foreground" Value="#000000"/>
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*" Background="{DynamicResource AppBgBrush}">
+    <!-- Workspace Header Bar -->
+    <Border Grid.Row="0" Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1" Padding="14,10">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <!-- Title & Badges -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <TextBlock Text="⚡" FontSize="16" Foreground="{DynamicResource AppHighlightBrush}" VerticalAlignment="Center"/>
+          <TextBlock Text="OPERATIONS" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}" FontFamily="{DynamicResource AppMonoFont}" VerticalAlignment="Center"/>
+
+          <!-- Active status indicators -->
+          <Border Background="#10B981" CornerRadius="3" Padding="6,1" VerticalAlignment="Center"
+                  IsVisible="{Binding RunningCount}">
+            <TextBlock Text="{Binding RunningCount, StringFormat='{}{0} running'}" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" FontFamily="{DynamicResource AppMonoFont}"/>
+          </Border>
+
+          <Border Background="#F59E0B" CornerRadius="3" Padding="6,1" VerticalAlignment="Center"
+                  IsVisible="{Binding NeedsAttentionCount}">
+            <TextBlock Text="{Binding NeedsAttentionCount, StringFormat='{}⚠ {0} attention'}" FontSize="10" FontWeight="Bold" Foreground="#000000" FontFamily="{DynamicResource AppMonoFont}"/>
+          </Border>
+
+          <Border Background="#64748B" CornerRadius="3" Padding="6,1" VerticalAlignment="Center"
+                  IsVisible="{Binding QueuedCount}">
+            <TextBlock Text="{Binding QueuedCount, StringFormat='{}{0} queued'}" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" FontFamily="{DynamicResource AppMonoFont}"/>
+          </Border>
+        </StackPanel>
+
+        <!-- Right action buttons -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Button Command="{Binding ClearCompletedCommand}" Classes="op-btn" ToolTip.Tip="Clear completed history">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+              <TextBlock Text="🗑️" FontSize="11"/>
+              <TextBlock Text="Clear History"/>
+            </StackPanel>
+          </Button>
+          <Button Command="{Binding CloseWorkspaceCommand}" Classes="op-btn-action" ToolTip.Tip="Hide operations and return to explorer">
+            <TextBlock Text="✕ Close Workspace"/>
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Workspace Body -->
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="16" Margin="16">
+
+        <!-- Empty State Message -->
+        <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                CornerRadius="8" Padding="32,24" HorizontalAlignment="Center" Margin="0,40,0,0">
+          <Border.IsVisible>
+            <MultiBinding Converter="{x:Static BoolConverters.And}">
+              <Binding Path="!ActiveJobs.Count"/>
+              <Binding Path="!HistoryJobs.Count"/>
+            </MultiBinding>
+          </Border.IsVisible>
+          <StackPanel Spacing="10" HorizontalAlignment="Center">
+            <TextBlock Text="⚡" FontSize="28" HorizontalAlignment="Center" Foreground="{DynamicResource AppHighlightBrush}"/>
+            <TextBlock Text="No Active or Recent Operations" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" Foreground="{DynamicResource AppTextBrush}"/>
+            <TextBlock Text="File transfers, moves, and long-running operations will run here in the background."
+                       FontSize="11.5" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center"/>
+            <TextBlock Text="You can freely browse folders or hide this workspace at any time."
+                       FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" HorizontalAlignment="Center"/>
+          </StackPanel>
+        </Border>
+
+        <!-- Section 1: Active Operations -->
+        <StackPanel Spacing="8" IsVisible="{Binding ActiveJobs.Count}">
+          <TextBlock Text="ACTIVE OPERATIONS" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}"
+                     FontFamily="{DynamicResource AppMonoFont}" Margin="2,0,0,0"/>
+
+          <ItemsControl ItemsSource="{Binding ActiveJobs}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:OperationJobViewModel">
+                <Border Classes="job-card" Classes.attention="{Binding Job.CurrentConflict, Converter={x:Static ObjectConverters.IsNotNull}}">
+                  <StackPanel Spacing="8">
+                    <!-- Row 1: Header / Badges / Actions -->
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <!-- Left: Operation Type & Title -->
+                      <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Border Classes="badge-type">
+                          <TextBlock Text="{Binding Job.Type}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                        </Border>
+                        <TextBlock Text="{Binding Job.DisplayName}" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+                      </StackPanel>
+
+                      <!-- Right: State badge + Controls -->
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <!-- State Badge -->
+                        <Border Classes="badge-state">
+                          <TextBlock Text="{Binding Job.State}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                        </Border>
+
+                        <!-- Pause Button -->
+                        <Button Command="{Binding $parent[UserControl].((vm:OperationsViewModel)DataContext).PauseJobCommand}"
+                                CommandParameter="{Binding}"
+                                Classes="op-btn" ToolTip.Tip="Pause transfer"
+                                IsVisible="{Binding Job.State, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static ops:OperationState.Running}}">
+                          <TextBlock Text="⏸ Pause"/>
+                        </Button>
+
+                        <!-- Resume Button -->
+                        <Button Command="{Binding $parent[UserControl].((vm:OperationsViewModel)DataContext).ResumeJobCommand}"
+                                CommandParameter="{Binding}"
+                                Classes="op-btn" ToolTip.Tip="Resume transfer"
+                                IsVisible="{Binding Job.State, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static ops:OperationState.Paused}}">
+                          <TextBlock Text="▶ Resume"/>
+                        </Button>
+
+                        <!-- Cancel Button -->
+                        <Button Command="{Binding $parent[UserControl].((vm:OperationsViewModel)DataContext).CancelJobCommand}"
+                                CommandParameter="{Binding}"
+                                Classes="op-btn" ToolTip.Tip="Cancel operation">
+                          <TextBlock Text="✕ Cancel"/>
+                        </Button>
+
+                        <!-- Details Expand Toggle -->
+                        <Button Command="{Binding ToggleExpandedCommand}" Classes="op-btn" ToolTip.Tip="Toggle details">
+                          <TextBlock Text="{Binding Job.IsExpanded, Converter={x:Static ObjectConverters.IsNull}, FallbackValue='Details'}" FontSize="10"/>
+                        </Button>
+                      </StackPanel>
+                    </Grid>
+
+                    <!-- Row 2: Progress Bar & Metrics -->
+                    <StackPanel Spacing="4">
+                      <ProgressBar Value="{Binding Job.Progress.Percentage}" Minimum="0" Maximum="100" Height="6"
+                                   Foreground="{DynamicResource AppAccentBrush}" Background="{DynamicResource AppBgBrush}" CornerRadius="3"/>
+
+                      <Grid ColumnDefinitions="Auto,*,Auto">
+                        <!-- Left: Progress Bytes & Items -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="{Binding Job.Progress.Percentage, StringFormat='{}{0:0.#}%'}" FontSize="11" FontWeight="Bold"
+                                     Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                          <TextBlock Text="{Binding Job.Progress.FormattedBytes}" FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                          <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}"/>
+                          <TextBlock Text="{Binding Job.Progress.FormattedItems}" FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                        </StackPanel>
+
+                        <!-- Center: Current item -->
+                        <TextBlock Grid.Column="1" Text="{Binding Job.Progress.CurrentItem}" FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}"
+                                   TextTrimming="CharacterEllipsis" Margin="10,0" HorizontalAlignment="Center"/>
+
+                        <!-- Right: Speed & Time Remaining -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="{Binding Job.Progress.FormattedSpeed}" FontSize="10.5" Foreground="{DynamicResource AppTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                          <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}" IsVisible="{Binding Job.Progress.FormattedRemaining, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                          <TextBlock Text="{Binding Job.Progress.FormattedRemaining}" FontSize="10.5" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                        </StackPanel>
+                      </Grid>
+                    </StackPanel>
+
+                    <!-- Row 3: Conflict Resolution Panel (Appears inline when NeedsAttention) -->
+                    <Border Background="#1E1B18" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="5" Padding="12,10" Margin="0,4,0,0"
+                            IsVisible="{Binding Job.CurrentConflict, Converter={x:Static ObjectConverters.IsNotNull}}">
+                      <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <TextBlock Text="⚠" FontSize="13" Foreground="#F59E0B"/>
+                          <TextBlock Text="Destination already contains:" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AppTextBrush}"/>
+                          <TextBlock Text="{Binding Job.CurrentConflict.DestinationPath}" FontSize="11" FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppHighlightBrush}" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+
+                        <!-- Inline New Name Input for Rename -->
+                        <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                          <TextBlock Grid.Column="0" Text="New Name:" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                          <TextBox Grid.Column="1" Text="{Binding InlineNewName, Mode=TwoWay}"
+                                   Background="{DynamicResource AppBgBrush}" Foreground="{DynamicResource AppTextBrush}"
+                                   BorderBrush="{DynamicResource AppBorderBrush}" FontSize="11" Padding="6,3" VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <!-- Action Buttons & Apply to Remaining -->
+                        <DockPanel LastChildFill="False">
+                          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8">
+                            <Button Command="{Binding ResolveReplaceCommand}" Classes="op-btn-action">
+                              <TextBlock Text="Replace (Overwrite)"/>
+                            </Button>
+                            <Button Command="{Binding ResolveKeepBothCommand}" Classes="op-btn">
+                              <TextBlock Text="Keep Both (Auto-Rename)"/>
+                            </Button>
+                            <Button Command="{Binding ResolveRenameCommand}" Classes="op-btn">
+                              <TextBlock Text="Rename to New Name"/>
+                            </Button>
+                            <Button Command="{Binding ResolveSkipCommand}" Classes="op-btn">
+                              <TextBlock Text="Skip"/>
+                            </Button>
+                          </StackPanel>
+
+                          <CheckBox DockPanel.Dock="Right" IsChecked="{Binding ApplyToRemaining, Mode=TwoWay}"
+                                    VerticalAlignment="Center" Margin="10,0,0,0">
+                            <TextBlock Text="Apply to remaining conflicts" FontSize="11" Foreground="{DynamicResource AppSubTextBrush}"/>
+                          </CheckBox>
+                        </DockPanel>
+                      </StackPanel>
+                    </Border>
+
+                    <!-- Row 4: Expanded Details Panel -->
+                    <Border Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                            CornerRadius="4" Padding="10,8" Margin="0,4,0,0" IsVisible="{Binding Job.IsExpanded}">
+                      <StackPanel Spacing="6">
+                        <!-- Metadata summary -->
+                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" Margin="0,0,0,4">
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Destination: " FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}"/>
+                          <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Job.DestinationDirectory}" FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+
+                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Started: " FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}"/>
+                          <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Job.StartedTime, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppTextBrush}"/>
+
+                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Job ID: " FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}"/>
+                          <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Job.Id}" FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppSubTextBrush}"/>
+                        </Grid>
+
+                        <!-- Errors list -->
+                        <StackPanel Spacing="2" IsVisible="{Binding Job.Errors.Count}">
+                          <TextBlock Text="ERRORS:" FontSize="10" FontWeight="Bold" Foreground="#EF4444" FontFamily="{DynamicResource AppMonoFont}"/>
+                          <ItemsControl ItemsSource="{Binding Job.Errors}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate DataType="ops:OperationError">
+                                <TextBlock Text="{Binding Message}" FontSize="10.5" Foreground="#EF4444" Margin="6,1"/>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+
+                        <!-- Recent Event Logs -->
+                        <StackPanel Spacing="2" IsVisible="{Binding Job.Events.Count}">
+                          <TextBlock Text="EVENT LOG:" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                          <ItemsControl ItemsSource="{Binding Job.Events}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate DataType="ops:OperationLogEntry">
+                                <TextBlock Text="{Binding Message}" FontSize="10" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}" Margin="6,1"/>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <!-- Section 2: Session History -->
+        <StackPanel Spacing="8" IsVisible="{Binding HistoryJobs.Count}">
+          <TextBlock Text="SESSION HISTORY" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource AppSubTextBrush}"
+                     FontFamily="{DynamicResource AppMonoFont}" Margin="2,0,0,0"/>
+
+          <ItemsControl ItemsSource="{Binding HistoryJobs}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:OperationJobViewModel">
+                <Border Classes="job-card" Opacity="0.9">
+                  <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <!-- Left: Type & Name -->
+                      <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Border Classes="badge-type">
+                          <TextBlock Text="{Binding Job.Type}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                        </Border>
+                        <TextBlock Text="{Binding Job.DisplayName}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AppTextBrush}" VerticalAlignment="Center"/>
+                      </StackPanel>
+
+                      <!-- Right: Status badge & Toggle Details -->
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Border Classes="badge-state">
+                          <TextBlock Text="{Binding Job.State}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AppTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                        </Border>
+                        <Button Command="{Binding ToggleExpandedCommand}" Classes="op-btn" ToolTip.Tip="Toggle details">
+                          <TextBlock Text="Details" FontSize="10"/>
+                        </Button>
+                      </StackPanel>
+                    </Grid>
+
+                    <!-- Summary line -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding Job.Summary, Converter={x:Static ObjectConverters.IsNotNull}}">
+                      <TextBlock Text="{Binding Job.Summary.SucceededCount, StringFormat='{}{0} succeeded'}" FontSize="10.5" Foreground="#10B981" FontFamily="{DynamicResource AppMonoFont}"/>
+                      <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}"/>
+                      <TextBlock Text="{Binding Job.Summary.SkippedCount, StringFormat='{}{0} skipped'}" FontSize="10.5" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                      <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}"/>
+                      <TextBlock Text="{Binding Job.Summary.RenamedCount, StringFormat='{}{0} renamed'}" FontSize="10.5" Foreground="{DynamicResource AppHighlightBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                      <TextBlock Text="•" Foreground="{DynamicResource AppBorderBrush}"/>
+                      <TextBlock Text="{Binding Job.Summary.FailedCount, StringFormat='{}{0} failed'}" FontSize="10.5" Foreground="#EF4444" FontFamily="{DynamicResource AppMonoFont}"/>
+                    </StackPanel>
+
+                    <!-- Expanded details for history item -->
+                    <Border Background="{DynamicResource AppBgBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                            CornerRadius="4" Padding="10,8" Margin="0,4,0,0" IsVisible="{Binding Job.IsExpanded}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="{Binding Job.DestinationDirectory, StringFormat='Destination: {0}'}" FontSize="10.5" FontFamily="{DynamicResource AppMonoFont}" Foreground="{DynamicResource AppSubTextBrush}"/>
+                        <!-- Errors -->
+                        <ItemsControl ItemsSource="{Binding Job.Errors}" IsVisible="{Binding Job.Errors.Count}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="ops:OperationError">
+                              <TextBlock Text="{Binding Message}" FontSize="10" Foreground="#EF4444"/>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- Events -->
+                        <ItemsControl ItemsSource="{Binding Job.Events}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="ops:OperationLogEntry">
+                              <TextBlock Text="{Binding Message}" FontSize="9.5" Foreground="{DynamicResource AppSubTextBrush}" FontFamily="{DynamicResource AppMonoFont}"/>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

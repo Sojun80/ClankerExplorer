@@ -117,6 +117,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     public bool CanGoForward => HistoryIndex < History.Count - 1;
 
     public IDirectoryWatcher Watcher => _watcher;
+    public DirectoryChangeReconciler Reconciler => _reconciler;
 
     public ExplorerTabViewModel(string? initialPath = null, IDirectoryWatcher? watcher = null)
     {
@@ -128,6 +129,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         initialPath ??= FileSystemService.DefaultRootPath;
         ClipboardFileService.ClipboardChanged += UpdateCutStatus;
         NavigateTo(initialPath);
+    }
+
+    public event Action? RequestThumbnailViewportUpdate;
+
+    public void TriggerThumbnailViewportUpdate()
+    {
+        RequestThumbnailViewportUpdate?.Invoke();
     }
 
     public void NotifyFilteredItemsChanged()
@@ -157,6 +165,8 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             // Invalid path format
         }
 
+        _reconciler.Reset();
+
         if (HistoryIndex < History.Count - 1)
         {
             History.RemoveRange(HistoryIndex + 1, History.Count - (HistoryIndex + 1));
@@ -177,11 +187,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     public void GoBack()
     {
         if (!CanGoBack || _isDisposed) return;
+        _reconciler.Reset();
         // Remember the folder we're leaving so we can re-select it after loading
         PendingSelectPath = History[HistoryIndex];
         HistoryIndex--;
         CurrentPath = History[HistoryIndex];
         UpdateTitle(CurrentPath);
+        _watcher.Start(CurrentPath);
         _ = RefreshAsync();
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
@@ -190,9 +202,11 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     public void GoForward()
     {
         if (!CanGoForward || _isDisposed) return;
+        _reconciler.Reset();
         HistoryIndex++;
         CurrentPath = History[HistoryIndex];
         UpdateTitle(CurrentPath);
+        _watcher.Start(CurrentPath);
         _ = RefreshAsync();
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
@@ -225,6 +239,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     {
         if (_isDisposed) return;
 
+        _reconciler.Reset();
         _loadCts?.Cancel();
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;

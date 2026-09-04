@@ -5,6 +5,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Media.Imaging;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
+using ClankerExplorer.Tests.TestInfrastructure;
 using ClankerExplorer.ViewModels;
 using Xunit;
 
@@ -108,21 +109,19 @@ public class VideoThumbnailCustomTimeTests
         Assert.False(pane.IsVideoFileSelected);
     }
 
-    [Fact]
-    public void ExplorerPaneViewModel_GenerateThumbnailAtTime_RaisesRequestEvent()
+    [AvaloniaFact]
+    public async Task ExplorerPaneViewModel_GenerateThumbnailAtTime_RaisesRequestEvent()
     {
-        var pane = new ExplorerPaneViewModel("test", "Test");
-        var tab = new ExplorerTabViewModel(@"C:\FakeFolder");
-        pane.Tabs.Add(tab);
-        pane.SelectedTab = tab;
+        using var fs = new TemporaryFileSystem();
+        var videoPath = Path.Combine(fs.FolderA, "sample.mp4");
+        File.WriteAllText(videoPath, "dummy");
 
-        var videoItem = new FileItem
-        {
-            Name = "sample.mp4",
-            FullPath = @"C:\FakeFolder\sample.mp4",
-            Extension = ".mp4",
-            IsDirectory = false
-        };
+        using var pane = new ExplorerPaneViewModel("test", fs.FolderA);
+        var tab = pane.SelectedTab!;
+        await tab.RefreshAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        var videoItem = tab.FilteredItems.First(i => i.Name == "sample.mp4");
         tab.SelectedItem = videoItem;
 
         FileItem? requestedItem = null;

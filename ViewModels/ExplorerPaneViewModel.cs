@@ -17,6 +17,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     private readonly Dictionary<ExplorerTabViewModel, PropertyChangedEventHandler> _tabPropertyHandlers = new();
     private readonly Dictionary<ExplorerTabViewModel, Action<FileItem>> _tabScrollHandlers = new();
     private readonly Dictionary<ExplorerTabViewModel, Action> _tabSyncHandlers = new();
+    private readonly Dictionary<ExplorerTabViewModel, Action> _tabThumbnailHandlers = new();
     private readonly Action _clipboardChangedHandler;
     private readonly Action _quickAccessChangedHandler;
     private readonly Action<AppSettings> _settingsChangedHandler;
@@ -291,6 +292,16 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Func<Task<(int successCount, List<string> failedPaths, List<string> createdDestinationPaths)>>? RequestPasteFiles;
     public event Action<FileItem>? RequestScrollItemIntoView;
     public event Action? RequestSyncSelection;
+    public event Action? RequestThumbnailViewportUpdate;
+    public event Action? RequestToggleOperations;
+
+    public ClankerExplorer.AppLayer.Operations.IOperationManager Operations => _fileOperationService.Operations;
+
+    [RelayCommand]
+    public void ToggleOperations()
+    {
+        RequestToggleOperations?.Invoke();
+    }
 
     public Avalonia.Controls.DataGridLength NameColumnWidthDisplay =>
         new Avalonia.Controls.DataGridLength(ColumnWidthName > 0 ? ColumnWidthName : 280, Avalonia.Controls.DataGridLengthUnitType.Pixel);
@@ -874,6 +885,14 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         };
         _tabSyncHandlers[tab] = syncHandler;
         tab.SelectionRestored += syncHandler;
+
+        Action thumbHandler = () =>
+        {
+            if (tab == SelectedTab && IsThumbnailView)
+                RequestThumbnailViewportUpdate?.Invoke();
+        };
+        _tabThumbnailHandlers[tab] = thumbHandler;
+        tab.RequestThumbnailViewportUpdate += thumbHandler;
     }
 
     public void UnwireTabEvents(ExplorerTabViewModel tab)
@@ -889,6 +908,10 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         if (_tabSyncHandlers.Remove(tab, out var syncHandler))
         {
             tab.SelectionRestored -= syncHandler;
+        }
+        if (_tabThumbnailHandlers.Remove(tab, out var thumbHandler))
+        {
+            tab.RequestThumbnailViewportUpdate -= thumbHandler;
         }
     }
 

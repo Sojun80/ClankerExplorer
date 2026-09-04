@@ -15,7 +15,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly Action _quickAccessChangedHandler;
     public IFileOperationService FileOperations { get; }
+    public OperationsViewModel Operations { get; }
     private bool _isDisposed;
+
+    [ObservableProperty]
+    private bool _showOperationsWorkspace;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(LeftPaneColumnSpan))]
@@ -118,6 +122,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MainViewModel(bool loadSidebarData = true, IFileOperationService? fileOperationService = null)
     {
         FileOperations = fileOperationService ?? new FileOperationService();
+        Operations = new OperationsViewModel(FileOperations.Operations);
+        Operations.RequestClose += () => ShowOperationsWorkspace = false;
+
         var settings = SettingsService.Instance.CurrentSettings;
         var startPath = string.IsNullOrWhiteSpace(settings.DefaultPath) ? FileSystemService.DefaultRootPath : settings.DefaultPath;
         if (!Directory.Exists(startPath)) startPath = FileSystemService.DefaultRootPath;
@@ -284,6 +291,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         pane.RequestVideoThumbnailAtTime += item => RequestVideoThumbnailAtTime?.Invoke(item);
         pane.RequestDeleteWithConfirmation += (item, perm) => RequestDeleteWithConfirmation?.Invoke(item, perm);
         pane.RequestDeleteMultipleWithConfirmation += (items, perm) => RequestDeleteMultipleWithConfirmation?.Invoke(items, perm);
+        pane.RequestToggleOperations += ToggleOperations;
     }
 
     public void SetActivePane(string paneId)
@@ -420,6 +428,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var currentPath = ActivePane.SelectedTab?.CurrentPath ?? @"C:\";
         CurrentDrive = Drives.FirstOrDefault(d => currentPath.StartsWith(d.Letter, StringComparison.OrdinalIgnoreCase) ||
                                                  (d.IsNetworkDrive && currentPath.StartsWith(d.RootPath, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [RelayCommand]
+    public void ToggleOperations()
+    {
+        ShowOperationsWorkspace = !ShowOperationsWorkspace;
     }
 
     [RelayCommand]
@@ -565,6 +579,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_isDisposed) return;
         _isDisposed = true;
         QuickAccessService.Instance.QuickAccessChanged -= _quickAccessChangedHandler;
+        Operations.Dispose();
         LeftPane.Dispose();
         RightPane.Dispose();
     }
