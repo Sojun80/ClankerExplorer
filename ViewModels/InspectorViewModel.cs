@@ -358,8 +358,9 @@ public partial class InspectorViewModel : ObservableObject, IPreviewService, IDi
     public async Task YieldFileAsync(string filePath)
     {
         if (string.IsNullOrEmpty(filePath)) return;
+        if (!OwnsFile(filePath)) return;
 
-        // Invalidate any in-flight preview loading or hash calculations for this or previous files
+        // Invalidate any in-flight preview loading or hash calculations for this file
         _previewCts?.Cancel();
         _previewCts = null;
         Interlocked.Increment(ref _previewGeneration);
@@ -370,18 +371,22 @@ public partial class InspectorViewModel : ObservableObject, IPreviewService, IDi
         // Record yielded path so automatic selection refreshes won't immediately reacquire this file
         _yieldedFilePath = filePath;
 
-        bool owns = OwnsFile(filePath);
-        if (owns || _hasVideoMedia || _videoPlayer.OwnsFile(filePath) || IsVideoPlaying)
-        {
-            // Yield video player resources with real completion semantics
-            await _videoPlayer.YieldAsync(filePath).ConfigureAwait(true);
+        // Yield thumbnail service ownership and any background thumbnail generation
+        await ThumbnailService.Instance.YieldFileAsync(filePath).ConfigureAwait(false);
 
-            _hasVideoMedia = false;
-            IsVideoPlaying = false;
-            IsVideoSessionActive = false;
-            OnPropertyChanged(nameof(VlcMediaPlayer));
-            OnPropertyChanged(nameof(PlayPauseButtonIcon));
-        }
+        // Yield video player resources with real completion semantics
+        await _videoPlayer.YieldAsync(filePath).ConfigureAwait(true);
+
+        _hasVideoMedia = false;
+        IsVideoPlaying = false;
+        IsVideoSessionActive = false;
+        _currentFilePath = null;
+        ImagePreview = null;
+        ImageDimensions = string.Empty;
+        VideoPosterImage = null;
+        PdfCurrentPageBitmap = null;
+        OnPropertyChanged(nameof(VlcMediaPlayer));
+        OnPropertyChanged(nameof(PlayPauseButtonIcon));
     }
 
     public async Task LoadPreviewAsync(string? filePath)

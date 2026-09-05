@@ -1112,6 +1112,20 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         RequestVideoThumbnailAtTime?.Invoke(target);
     }
 
+    /// <summary>
+    /// Prepares a file for external shell/application launch by deterministically yielding preview
+    /// and thumbnail ownership and waiting for in-flight extraction to exit before normal activation.
+    /// </summary>
+    public async Task PrepareForExternalOpenAsync(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        if (PreviewService != null)
+        {
+            await PreviewService.YieldFileAsync(path);
+        }
+        await ThumbnailService.Instance.YieldFileAsync(path);
+    }
+
     [RelayCommand]
     public async Task OpenItem(FileItem? item = null)
     {
@@ -1128,10 +1142,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         }
         else
         {
-            if (PreviewService != null)
-            {
-                await PreviewService.YieldFileAsync(target.FullPath);
-            }
+            await PrepareForExternalOpenAsync(target.FullPath);
             FileSystemService.Instance.OpenItem(target.FullPath);
         }
     }
@@ -1172,10 +1183,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         var target = SelectedTab?.SelectedItem;
         if (target != null && !target.IsDirectory)
         {
-            if (PreviewService != null)
-            {
-                await PreviewService.YieldFileAsync(target.FullPath);
-            }
+            await PrepareForExternalOpenAsync(target.FullPath);
             FileSystemService.Instance.EditFile(target.FullPath);
         }
     }
@@ -1186,10 +1194,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         var target = item ?? SelectedTab?.SelectedItem;
         if (target != null && !target.IsDirectory)
         {
-            if (PreviewService != null)
-            {
-                await PreviewService.YieldFileAsync(target.FullPath);
-            }
+            await PrepareForExternalOpenAsync(target.FullPath);
             FileSystemService.Instance.OpenWith(target.FullPath);
         }
     }
@@ -1594,9 +1599,9 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public async Task OpenVSCode()
     {
         var path = SelectedTab?.SelectedItem?.FullPath ?? SelectedTab?.CurrentPath ?? @"C:\";
-        if (PreviewService != null)
+        if (!Directory.Exists(path))
         {
-            await PreviewService.YieldFileAsync(path);
+            await PrepareForExternalOpenAsync(path);
         }
         FileSystemService.Instance.OpenEditor(path);
     }

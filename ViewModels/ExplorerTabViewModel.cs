@@ -102,6 +102,14 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private FileItem? _selectedItem;
 
+    partial void OnSelectedItemChanged(FileItem? value)
+    {
+        if (value != null && !string.IsNullOrEmpty(value.FullPath))
+        {
+            ThumbnailService.Instance.ClearYieldGuard(value.FullPath);
+        }
+    }
+
     [ObservableProperty]
     private ObservableCollection<FileItem> _items = new();
 

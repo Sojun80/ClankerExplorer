@@ -30,6 +30,7 @@ public class VideoThumbnailService : IDisposable
     // Depth ratios used when cycling "New Thumbnail": 15%, 30%, 45%, 60%, 75%, 90%
     private static readonly double[] DepthRatios = new[] { 0.15, 0.30, 0.45, 0.60, 0.75, 0.90 };
     private readonly ConcurrentDictionary<string, int> _depthIndexByPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeExtractionsByPath = new(StringComparer.OrdinalIgnoreCase);
 
     // Throttle concurrent video decodes so disk/GPU are not overwhelmed
     private readonly SemaphoreSlim _decodeThrottle = new(3, 3);
@@ -40,6 +41,30 @@ public class VideoThumbnailService : IDisposable
         if (string.IsNullOrWhiteSpace(filePath)) return false;
         var ext = Path.GetExtension(filePath);
         return VideoExtensions.Contains(ext);
+    }
+
+    private static string NormalizePath(string path)
+    {
+        string full = Path.GetFullPath(path);
+        return OperatingSystem.IsWindows() ? full.ToUpperInvariant() : full;
+    }
+
+    /// <summary>
+    /// Cancels any active thumbnail extraction work currently running for the specified file.
+    /// </summary>
+    public Task CancelWorkForFileAsync(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return Task.CompletedTask;
+        try
+        {
+            string key = NormalizePath(filePath);
+            if (_activeExtractionsByPath.TryGetValue(key, out var cts))
+            {
+                cts.Cancel();
+            }
+        }
+        catch { }
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -100,15 +125,24 @@ public class VideoThumbnailService : IDisposable
     {
         if (!OperatingSystem.IsWindows() || !File.Exists(filePath)) return TimeSpan.Zero;
 
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        string normalizedKey = NormalizePath(filePath);
+        _activeExtractionsByPath[normalizedKey] = linkedCts;
+        var token = linkedCts.Token;
+
         try
         {
-            var storageFile = await StorageFile.GetFileFromPathAsync(filePath).AsTask(cancellationToken).ConfigureAwait(false);
-            var clip = await MediaClip.CreateFromFileAsync(storageFile).AsTask(cancellationToken).ConfigureAwait(false);
+            var storageFile = await StorageFile.GetFileFromPathAsync(filePath).AsTask(token).ConfigureAwait(false);
+            var clip = await MediaClip.CreateFromFileAsync(storageFile).AsTask(token).ConfigureAwait(false);
             return clip.OriginalDuration;
         }
         catch
         {
             return TimeSpan.Zero;
+        }
+        finally
+        {
+            _activeExtractionsByPath.TryRemove(normalizedKey, out _);
         }
     }
 
@@ -141,13 +175,20 @@ public class VideoThumbnailService : IDisposable
 
         if (targetSize <= 0) targetSize = 256;
 
-        await _decodeThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        string normalizedKey = NormalizePath(filePath);
+        _activeExtractionsByPath[normalizedKey] = linkedCts;
+        var token = linkedCts.Token;
+
+        await _decodeThrottle.WaitAsync(token).ConfigureAwait(false);
+        MediaComposition? composition = null;
+        Windows.Storage.Streams.IRandomAccessStreamWithContentType? imageStream = null;
         try
         {
-            if (cancellationToken.IsCancellationRequested) return null;
+            if (token.IsCancellationRequested) return null;
 
-            var storageFile = await StorageFile.GetFileFromPathAsync(filePath).AsTask(cancellationToken).ConfigureAwait(false);
-            var clip = await MediaClip.CreateFromFileAsync(storageFile).AsTask(cancellationToken).ConfigureAwait(false);
+            var storageFile = await StorageFile.GetFileFromPathAsync(filePath).AsTask(token).ConfigureAwait(false);
+            var clip = await MediaClip.CreateFromFileAsync(storageFile).AsTask(token).ConfigureAwait(false);
 
             if (timeOffset < TimeSpan.Zero) timeOffset = TimeSpan.Zero;
             if (clip.OriginalDuration > TimeSpan.Zero && timeOffset > clip.OriginalDuration)
@@ -156,20 +197,20 @@ public class VideoThumbnailService : IDisposable
                 if (timeOffset < TimeSpan.Zero) timeOffset = TimeSpan.Zero;
             }
 
-            var composition = new MediaComposition();
+            composition = new MediaComposition();
             composition.Clips.Add(clip);
 
-            var imageStream = await composition.GetThumbnailAsync(
+            imageStream = await composition.GetThumbnailAsync(
                 timeOffset,
                 targetSize,
                 0,
-                VideoFramePrecision.NearestFrame).AsTask(cancellationToken).ConfigureAwait(false);
+                VideoFramePrecision.NearestFrame).AsTask(token).ConfigureAwait(false);
 
             if (imageStream == null || imageStream.Size == 0) return null;
 
             using var netStream = imageStream.AsStreamForRead();
             using var mem = new MemoryStream();
-            await netStream.CopyToAsync(mem, cancellationToken).ConfigureAwait(false);
+            await netStream.CopyToAsync(mem, token).ConfigureAwait(false);
             mem.Position = 0;
             return new Bitmap(mem);
         }
@@ -182,9 +223,9 @@ public class VideoThumbnailService : IDisposable
             // Silent, headless fallback to Windows Shell Thumbnail Provider
             try
             {
-                if (OperatingSystem.IsWindows())
+                if (OperatingSystem.IsWindows() && !token.IsCancellationRequested)
                 {
-                    return ThumbnailService.ExtractWindowsShellThumbnail(filePath, targetSize);
+                    return ThumbnailService.ExtractWindowsShellThumbnail(filePath, targetSize, token);
                 }
                 return null;
             }
@@ -195,6 +236,9 @@ public class VideoThumbnailService : IDisposable
         }
         finally
         {
+            imageStream?.Dispose();
+            try { composition?.Clips.Clear(); } catch { }
+            _activeExtractionsByPath.TryRemove(normalizedKey, out _);
             _decodeThrottle.Release();
         }
     }
@@ -208,13 +252,20 @@ public class VideoThumbnailService : IDisposable
 
         if (targetWidth <= 0) targetWidth = 640;
 
-        await _decodeThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        string normalizedKey = NormalizePath(filePath);
+        _activeExtractionsByPath[normalizedKey] = linkedCts;
+        var token = linkedCts.Token;
+
+        await _decodeThrottle.WaitAsync(token).ConfigureAwait(false);
+        MediaComposition? composition = null;
+        Windows.Storage.Streams.IRandomAccessStreamWithContentType? imageStream = null;
         try
         {
-            if (cancellationToken.IsCancellationRequested) return null;
+            if (token.IsCancellationRequested) return null;
 
-            var storageFile = await StorageFile.GetFileFromPathAsync(filePath).AsTask(cancellationToken).ConfigureAwait(false);
-            var clip = await MediaClip.CreateFromFileAsync(storageFile).AsTask(cancellationToken).ConfigureAwait(false);
+            var storageFile = await StorageFile.GetFileFromPathAsync(filePath).AsTask(token).ConfigureAwait(false);
+            var clip = await MediaClip.CreateFromFileAsync(storageFile).AsTask(token).ConfigureAwait(false);
 
             if (timeOffset < TimeSpan.Zero) timeOffset = TimeSpan.Zero;
             if (clip.OriginalDuration > TimeSpan.Zero && timeOffset > clip.OriginalDuration)
@@ -223,20 +274,20 @@ public class VideoThumbnailService : IDisposable
                 if (timeOffset < TimeSpan.Zero) timeOffset = TimeSpan.Zero;
             }
 
-            var composition = new MediaComposition();
+            composition = new MediaComposition();
             composition.Clips.Add(clip);
 
-            var imageStream = await composition.GetThumbnailAsync(
+            imageStream = await composition.GetThumbnailAsync(
                 timeOffset,
                 targetWidth,
                 targetHeight,
-                VideoFramePrecision.NearestFrame).AsTask(cancellationToken).ConfigureAwait(false);
+                VideoFramePrecision.NearestFrame).AsTask(token).ConfigureAwait(false);
 
             if (imageStream == null || imageStream.Size == 0) return null;
 
             using var netStream = imageStream.AsStreamForRead();
             var mem = new MemoryStream();
-            await netStream.CopyToAsync(mem, cancellationToken).ConfigureAwait(false);
+            await netStream.CopyToAsync(mem, token).ConfigureAwait(false);
             mem.Position = 0;
             return mem;
         }
@@ -246,6 +297,9 @@ public class VideoThumbnailService : IDisposable
         }
         finally
         {
+            imageStream?.Dispose();
+            try { composition?.Clips.Clear(); } catch { }
+            _activeExtractionsByPath.TryRemove(normalizedKey, out _);
             _decodeThrottle.Release();
         }
     }

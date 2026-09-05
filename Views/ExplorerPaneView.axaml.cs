@@ -505,7 +505,7 @@ public partial class ExplorerPaneView : UserControl
         }
 
         int configuredDelay = SettingsService.Instance.CurrentSettings.ThumbnailScrollDebounceMilliseconds;
-        int delay = Math.Clamp(Math.Max(180, configuredDelay), 150, 250);
+        int delay = Math.Clamp(Math.Max(300, configuredDelay), 280, 350);
         _thumbnailDebounceTimer.Interval = TimeSpan.FromMilliseconds(delay);
         _thumbnailDebounceTimer.Stop();
         _thumbnailDebounceTimer.Start();

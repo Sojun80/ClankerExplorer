@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using Avalonia.Headless.XUnit;
 using Xunit;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services.Preview;
@@ -40,7 +41,7 @@ public class PreviewLifecycleAndYieldTests
     {
         using var player = new NativeVideoPlayer();
         string tempFile = Path.Combine(Path.GetTempPath(), $"test_vid_{Guid.NewGuid():N}.mp4");
-        File.WriteAllText(tempFile, "fake video data");
+        File.WriteAllBytes(tempFile, VideoSmokeTests.MinimalMp4Fixture);
         try
         {
             await player.YieldAsync(tempFile);
@@ -52,14 +53,14 @@ public class PreviewLifecycleAndYieldTests
         }
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void InspectorViewModel_ImplementsIPreviewService()
     {
         using var inspector = new InspectorViewModel();
         Assert.IsAssignableFrom<IPreviewService>(inspector);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task InspectorViewModel_YieldFileAsync_StopsPlaybackAndCleansUpSession()
     {
         using var fs = new TemporaryFileSystem();
@@ -82,7 +83,7 @@ public class PreviewLifecycleAndYieldTests
         Assert.False(inspector.IsVideoSessionActive);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task InspectorViewModel_YieldFileAsync_PreventsAutomaticReacquisitionUntilSelectionChanges()
     {
         using var fs = new TemporaryFileSystem();
@@ -114,7 +115,7 @@ public class PreviewLifecycleAndYieldTests
         Assert.Equal("text", inspector.ActivePreviewType);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task InspectorViewModel_PlayVideo_ResetsYieldGuard()
     {
         using var fs = new TemporaryFileSystem();
@@ -136,23 +137,23 @@ public class PreviewLifecycleAndYieldTests
         Assert.Equal("text", inspector.ActivePreviewType);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task ExplorerPaneViewModel_OpenItem_YieldsPreviewServiceBeforeOpening()
     {
         using var fs = new TemporaryFileSystem();
         TestEnvironment.ResetGlobalSettings(fs.FolderA);
 
-        var pane = new ExplorerPaneViewModel("TestPane", fs.FolderA);
+        using var pane = new ExplorerPaneViewModel("TestPane", fs.FolderA);
         var mockPreview = new MockPreviewService();
         pane.PreviewService = mockPreview;
 
-        string targetFile = Path.Combine(fs.FolderA, "document.txt");
-        File.WriteAllText(targetFile, "some text");
+        // Target file does not exist on disk, verifying yielding happens before launch without spawning external GUI process
+        string targetFile = Path.Combine(fs.FolderA, "nonexistent_document.txt");
 
         var fileItem = new FileItem
         {
             FullPath = targetFile,
-            Name = "document.txt",
+            Name = "nonexistent_document.txt",
             IsDirectory = false
         };
 
@@ -161,13 +162,13 @@ public class PreviewLifecycleAndYieldTests
         Assert.Contains(targetFile, mockPreview.YieldedPaths);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task ExplorerPaneViewModel_OpenWith_YieldsPreviewServiceBeforeOpening()
     {
         using var fs = new TemporaryFileSystem();
         TestEnvironment.ResetGlobalSettings(fs.FolderA);
 
-        var pane = new ExplorerPaneViewModel("TestPane", fs.FolderA);
+        using var pane = new ExplorerPaneViewModel("TestPane", fs.FolderA);
         var mockPreview = new MockPreviewService();
         pane.PreviewService = mockPreview;
 
@@ -186,13 +187,13 @@ public class PreviewLifecycleAndYieldTests
         Assert.Contains(targetFile, mockPreview.YieldedPaths);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task ExplorerPaneViewModel_EditItem_YieldsPreviewServiceBeforeOpening()
     {
         using var fs = new TemporaryFileSystem();
         TestEnvironment.ResetGlobalSettings(fs.FolderA);
 
-        var pane = new ExplorerPaneViewModel("TestPane", fs.FolderA);
+        using var pane = new ExplorerPaneViewModel("TestPane", fs.FolderA);
         var mockPreview = new MockPreviewService();
         pane.PreviewService = mockPreview;
 
@@ -211,5 +212,85 @@ public class PreviewLifecycleAndYieldTests
         await pane.EditItem();
 
         Assert.Contains(targetFile, mockPreview.YieldedPaths);
+    }
+
+    [AvaloniaFact]
+    public async Task InspectorViewModel_YieldFileAsync_UnrelatedFile_DoesNotAffectActivePreview()
+    {
+        using var fs = new TemporaryFileSystem();
+        string fileA = Path.Combine(fs.FolderA, "active_video.mp4");
+        string fileB = Path.Combine(fs.FolderA, "unrelated.mp4");
+        File.WriteAllBytes(fileA, VideoSmokeTests.MinimalMp4Fixture);
+        File.WriteAllBytes(fileB, VideoSmokeTests.MinimalMp4Fixture);
+
+        using var inspector = new InspectorViewModel();
+        await inspector.LoadPreviewAsync(fileA);
+
+        inspector.IsVideoPlaying = true;
+        inspector.IsVideoSessionActive = true;
+
+        Assert.True(inspector.OwnsFile(fileA));
+        Assert.False(inspector.OwnsFile(fileB));
+
+        // Yield unrelated file B
+        await inspector.YieldFileAsync(fileB);
+
+        // File A playback and session should remain completely intact
+        Assert.True(inspector.IsVideoPlaying);
+        Assert.True(inspector.IsVideoSessionActive);
+        Assert.True(inspector.OwnsFile(fileA));
+
+        // Clean up active file before disposing temporary directory
+        await inspector.YieldFileAsync(fileA);
+    }
+
+    [AvaloniaFact]
+    public async Task ExplorerPaneViewModel_OpenItem_YieldsBothPreviewAndThumbnailService()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+
+        using var pane = new ExplorerPaneViewModel("TestPane", fs.FolderA);
+        var mockPreview = new MockPreviewService();
+        pane.PreviewService = mockPreview;
+
+        // Target file does not exist on disk, verifying yielding happens before launch without spawning external GUI process
+        string targetFile = Path.Combine(fs.FolderA, "nonexistent_video.mp4");
+
+        var fileItem = new FileItem
+        {
+            FullPath = targetFile,
+            Name = "nonexistent_video.mp4",
+            IsDirectory = false
+        };
+
+        await pane.OpenItem(fileItem);
+
+        // Both preview and thumbnail services must have been yielded
+        Assert.Contains(targetFile, mockPreview.YieldedPaths);
+        Assert.True(ClankerExplorer.Services.ThumbnailService.Instance.IsYielded(targetFile));
+
+        ClankerExplorer.Services.ThumbnailService.Instance.ClearYieldGuard(targetFile);
+    }
+
+    [Fact]
+    public async Task NativeVideoPlayer_YieldAsync_VerifiesExclusiveAccess()
+    {
+        using var player = new NativeVideoPlayer();
+        string tempFile = Path.Combine(Path.GetTempPath(), $"exclusive_test_{Guid.NewGuid():N}.mp4");
+        File.WriteAllBytes(tempFile, VideoSmokeTests.MinimalMp4Fixture);
+        try
+        {
+            player.Open(tempFile);
+            await player.YieldAsync(tempFile);
+
+            // File must be openable with FileShare.None (exclusive access)
+            using var fs = new FileStream(tempFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            Assert.NotNull(fs);
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
     }
 }

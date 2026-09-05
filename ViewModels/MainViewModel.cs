@@ -194,7 +194,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                await Inspector.YieldFileAsync(filePath);
+                if (Inspector != null)
+                {
+                    await Inspector.YieldFileAsync(filePath);
+                }
+                await ThumbnailService.Instance.YieldFileAsync(filePath);
                 FileSystemService.Instance.OpenItem(filePath);
             }
         };

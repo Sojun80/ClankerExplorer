@@ -88,11 +88,11 @@ public sealed class ThumbnailPipelineHardeningTests : IDisposable
 
         _ = service.LoadViewportAsync(visible, prefetch, 128, cts.Token);
 
-        // Max total queue is 48
-        Assert.True(service.QueuedRequestCount <= 48,
-            $"Queue depth was {service.QueuedRequestCount}, expected <= 48");
-        Assert.True(service.MaxObservedQueueDepth <= 48,
-            $"MaxObservedQueueDepth was {service.MaxObservedQueueDepth}, expected <= 48");
+        // Max total queue is 20
+        Assert.True(service.QueuedRequestCount <= 20,
+            $"Queue depth was {service.QueuedRequestCount}, expected <= 20");
+        Assert.True(service.MaxObservedQueueDepth <= 20,
+            $"MaxObservedQueueDepth was {service.MaxObservedQueueDepth}, expected <= 20");
         Assert.True(service.DroppedQueueFullCount > 0,
             "Expected DroppedQueueFullCount to be > 0 when queue limit is reached");
 
@@ -131,20 +131,20 @@ public sealed class ThumbnailPipelineHardeningTests : IDisposable
     [Fact]
     public void StaleEviction_DiscardsOldPrefetchOnNewViewport()
     {
-        using var service = new ThumbnailService(workerCount: 2);
+        using var service = new ThumbnailService(workerCount: 1);
         using var cts1 = new CancellationTokenSource();
         using var cts2 = new CancellationTokenSource();
 
-        var itemOld = new FileItem
+        var oldPrefetch = Enumerable.Range(0, 4).Select(i => new FileItem
         {
-            Name = "old_prefetch.png",
-            FullPath = @"C:\Fake\old_prefetch.png",
+            Name = $"old_prefetch_{i}.png",
+            FullPath = $@"C:\Fake\old_prefetch_{i}.png",
             SizeBytes = 1024,
             ModifiedTime = DateTime.UtcNow
-        };
+        }).ToList();
 
         // Old prefetch queued
-        _ = service.LoadViewportAsync(Array.Empty<FileItem>(), new[] { itemOld }, 128, cts1.Token);
+        _ = service.LoadViewportAsync(Array.Empty<FileItem>(), oldPrefetch, 128, cts1.Token);
 
         var itemNew = new FileItem
         {
@@ -257,6 +257,153 @@ public sealed class ThumbnailPipelineHardeningTests : IDisposable
         Assert.True(service.MemoryCacheHitCount > hitsBefore);
 
         first.Dispose();
+    }
+
+    [Fact]
+    public void StaleVisibleWork_FromOldViewportGenerations_IsDiscardedOnNewViewport()
+    {
+        using var service = new ThumbnailService(workerCount: 2);
+        using var cts1 = new CancellationTokenSource();
+        using var cts2 = new CancellationTokenSource();
+
+        var oldItems = Enumerable.Range(0, 10).Select(i => new FileItem
+        {
+            Name = $"old_vis_{i}.png",
+            FullPath = $@"C:\Old\old_vis_{i}.png",
+            SizeBytes = 1024,
+            ModifiedTime = DateTime.UtcNow
+        }).ToList();
+
+        // Enqueue old visible generation
+        _ = service.LoadViewportAsync(oldItems, Array.Empty<FileItem>(), 128, cts1.Token);
+
+        var newItems = Enumerable.Range(0, 5).Select(i => new FileItem
+        {
+            Name = $"new_vis_{i}.png",
+            FullPath = $@"C:\New\new_vis_{i}.png",
+            SizeBytes = 1024,
+            ModifiedTime = DateTime.UtcNow
+        }).ToList();
+
+        // Enqueue new visible generation: should discard old generation's visible items
+        _ = service.LoadViewportAsync(newItems, Array.Empty<FileItem>(), 128, cts2.Token);
+
+        Assert.True(service.DiscardedStaleCount > 0,
+            $"Expected DiscardedStaleCount > 0 when replacing viewport generation, got {service.DiscardedStaleCount}");
+
+        service.CancelPendingRequests();
+    }
+
+    [Fact]
+    public void PrefetchDoesNotRun_DuringActiveScrolling()
+    {
+        using var service = new ThumbnailService(workerCount: 2);
+        using var cts = new CancellationTokenSource();
+
+        service.NotifyScrollActivity();
+        Assert.True(service.IsActivelyScrolling);
+
+        var prefetch = Enumerable.Range(0, 5).Select(i => new FileItem
+        {
+            Name = $"pre_{i}.png",
+            FullPath = $@"C:\Fake\pre_{i}.png",
+            SizeBytes = 1024,
+            ModifiedTime = DateTime.UtcNow
+        }).ToList();
+
+        _ = service.LoadViewportAsync(Array.Empty<FileItem>(), prefetch, 128, cts.Token);
+
+        // While scrolling, prefetch should not be enqueued
+        Assert.Equal(0, service.QueuedRequestCount);
+
+        service.CancelPendingRequests();
+    }
+
+    [Fact]
+    public void QueueSignalCount_DoesNotCreateWorkerSpin_AfterClearingQueues()
+    {
+        using var service = new ThumbnailService(workerCount: 2);
+        using var cts = new CancellationTokenSource();
+
+        var items = Enumerable.Range(0, 20).Select(i => new FileItem
+        {
+            Name = $"spin_test_{i}.png",
+            FullPath = $@"C:\Fake\spin_test_{i}.png",
+            SizeBytes = 1024,
+            ModifiedTime = DateTime.UtcNow
+        }).ToList();
+
+        _ = service.LoadViewportAsync(items, Array.Empty<FileItem>(), 128, cts.Token);
+        Assert.True(service.QueuedRequestCount > 0);
+
+        // Cancel all pending
+        service.CancelPendingRequests();
+
+        Assert.Equal(0, service.QueuedRequestCount);
+
+        // Workers should not be spinning on phantom permits
+        Thread.Sleep(50);
+        Assert.Equal(0, service.ActiveWorkerCount);
+    }
+
+    [Fact]
+    public async Task YieldFileAsync_RemovesQueuedWork_ForOnlyThatPath()
+    {
+        using var service = new ThumbnailService(workerCount: 2);
+        using var cts = new CancellationTokenSource();
+
+        var b0 = new FileItem { Name = "b0.mp4", FullPath = @"C:\Videos\b0.mp4", SizeBytes = 1024, ModifiedTime = DateTime.UtcNow };
+        var b1 = new FileItem { Name = "b1.mp4", FullPath = @"C:\Videos\b1.mp4", SizeBytes = 1024, ModifiedTime = DateTime.UtcNow };
+        var b2 = new FileItem { Name = "b2.mp4", FullPath = @"C:\Videos\b2.mp4", SizeBytes = 1024, ModifiedTime = DateTime.UtcNow };
+        var itemA = new FileItem { Name = "target_video.mp4", FullPath = @"C:\Videos\target_video.mp4", SizeBytes = 1024, ModifiedTime = DateTime.UtcNow };
+        var b3 = new FileItem { Name = "b3.mp4", FullPath = @"C:\Videos\b3.mp4", SizeBytes = 1024, ModifiedTime = DateTime.UtcNow };
+
+        _ = service.LoadViewportAsync(new[] { b0, b1, b2, itemA, b3 }, Array.Empty<FileItem>(), 128, cts.Token);
+
+        int queuedBefore = service.QueuedRequestCount;
+        Assert.True(queuedBefore >= 3, $"Expected queued >= 3, but was {queuedBefore}");
+
+        await service.YieldFileAsync(itemA.FullPath);
+
+        // Item A was removed from queue, unrelated items remain queued
+        Assert.True(service.QueuedRequestCount < queuedBefore);
+        Assert.True(service.QueuedRequestCount > 0);
+        Assert.True(service.CancelledCount > 0);
+
+        service.CancelPendingRequests();
+    }
+
+    [Fact]
+    public async Task YieldFileAsync_PreventsImmediateReacquisition_UntilExplicitIntent()
+    {
+        using var service = new ThumbnailService(workerCount: 2);
+        using var cts1 = new CancellationTokenSource();
+        using var cts2 = new CancellationTokenSource();
+
+        var item = new FileItem
+        {
+            Name = "video.mp4",
+            FullPath = @"C:\Videos\video.mp4",
+            SizeBytes = 1024,
+            ModifiedTime = DateTime.UtcNow
+        };
+
+        await service.YieldFileAsync(item.FullPath);
+        Assert.True(service.IsYielded(item.FullPath));
+
+        // Attempting to re-enqueue via viewport load should be suppressed
+        _ = service.LoadViewportAsync(new[] { item }, Array.Empty<FileItem>(), 128, cts1.Token);
+        Assert.Equal(0, service.QueuedRequestCount);
+
+        // Explicit user intent clears the yield guard
+        service.ClearYieldGuard(item.FullPath);
+        Assert.False(service.IsYielded(item.FullPath));
+
+        // Now it can be enqueued normally
+        _ = service.LoadViewportAsync(new[] { item }, Array.Empty<FileItem>(), 128, cts2.Token);
+        Assert.Equal(1, service.QueuedRequestCount);
+
+        service.CancelPendingRequests();
     }
 
     public void Dispose() => TestEnvironment.ResetGlobalSettings(TestEnvironment.DefaultFolder);

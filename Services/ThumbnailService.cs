@@ -24,9 +24,11 @@ namespace ClankerExplorer.Services;
 public class ThumbnailService : IDisposable
 {
     private const int CacheFormatVersion = 2;
-    private const int MaxTotalQueue = 48;
-    private const int MaxVisibleQueue = 36;
-    private const int MaxPrefetchQueue = 12;
+    private const int MaxTotalQueue = 20;
+    private const int MaxVisibleQueue = 16;
+    private const int MaxPrefetchQueue = 4;
+    private const int MaxSettledExpensiveGenerationWorkers = 2;
+    private static readonly TimeSpan YieldOwnershipWindow = TimeSpan.FromSeconds(5);
 
     private static readonly Lazy<ThumbnailService> _instance = new(() => new ThumbnailService());
     public static ThumbnailService Instance => _instance.Value;
@@ -40,11 +42,14 @@ public class ThumbnailService : IDisposable
     private readonly Queue<ThumbnailRequest> _visibleQueue = new();
     private readonly Queue<ThumbnailRequest> _prefetchQueue = new();
     private readonly HashSet<string> _queuedKeys = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _inProgressKeys = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _queueSignal = new(0);
     private readonly CancellationTokenSource _workerCts = new();
     private readonly ConcurrentDictionary<string, Task<Bitmap?>> _inflight = new();
     private readonly ConcurrentDictionary<string, byte> _failedSources = new();
     private readonly ConcurrentQueue<string> _failureLru = new();
+    private readonly ConcurrentDictionary<string, (CancellationTokenSource Cts, Task Task)> _inflightGenerationsByPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _yieldedPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _diskCacheDirectory;
     private readonly int _workerCount;
 
@@ -83,7 +88,7 @@ public class ThumbnailService : IDisposable
         Directory.CreateDirectory(_diskCacheDirectory);
 
         int configuredWorkers = SettingsService.Instance.CurrentSettings.ThumbnailWorkerCount;
-        _workerCount = Math.Clamp(workerCount ?? configuredWorkers, 2, 4);
+        _workerCount = Math.Clamp(workerCount ?? configuredWorkers, 2, 3);
     }
 
     /// <summary>
@@ -95,14 +100,14 @@ public class ThumbnailService : IDisposable
     }
 
     /// <summary>
-    /// Indicates whether the user was scrolling within the last 200 ms.
+    /// Indicates whether the user was scrolling within the last 250 ms.
     /// </summary>
     public bool IsActivelyScrolling
     {
         get
         {
             long last = Volatile.Read(ref _lastScrollTimestamp);
-            return last != 0 && Stopwatch.GetElapsedTime(last).TotalMilliseconds < 200;
+            return last != 0 && Stopwatch.GetElapsedTime(last).TotalMilliseconds < 250;
         }
     }
 
@@ -150,10 +155,28 @@ public class ThumbnailService : IDisposable
                 _queuedKeys.Remove(droppedPrefetch.Key);
                 droppedPrefetch.Completion.TrySetCanceled();
                 Interlocked.Increment(ref _discardedStaleCount);
+                if (_queueSignal.CurrentCount > 0) _queueSignal.Wait(0);
             }
 
-            // Prune cancelled requests from visible queue
-            PruneQueue(_visibleQueue);
+            // Drop visible requests from older generations or cancelled
+            int visibleCount = _visibleQueue.Count;
+            for (int i = 0; i < visibleCount; i++)
+            {
+                var req = _visibleQueue.Dequeue();
+                if (req.CancellationToken.IsCancellationRequested || req.Generation < generation)
+                {
+                    _queuedKeys.Remove(req.Key);
+                    req.Completion.TrySetCanceled();
+                    Interlocked.Increment(ref _discardedStaleCount);
+                    if (_queueSignal.CurrentCount > 0) _queueSignal.Wait(0);
+                }
+                else
+                {
+                    _visibleQueue.Enqueue(req);
+                }
+            }
+
+            SyncQueueSignal_Locked();
         }
 
         // Fast-path: satisfy visible items from memory cache first so they don't enter the queue
@@ -161,7 +184,7 @@ public class ThumbnailService : IDisposable
         var unassignedVisible = new List<FileItem>();
         foreach (var item in visibleItems)
         {
-            if (item.IsDirectory || item.SizeBytes <= 0 || cancellationToken.IsCancellationRequested) continue;
+            if (item.IsDirectory || item.SizeBytes <= 0 || cancellationToken.IsCancellationRequested || IsYielded(item.FullPath)) continue;
 
             string key = GetCacheKey(item.FullPath, item.SizeBytes, item.ModifiedTime.Ticks, sizeBucket);
             if (TryGetMemoryEntry(key, out var memBitmap))
@@ -182,7 +205,7 @@ public class ThumbnailService : IDisposable
 
         foreach (var item in unassignedVisible)
         {
-            if (!cancellationToken.IsCancellationRequested)
+            if (!cancellationToken.IsCancellationRequested && !IsYielded(item.FullPath))
             {
                 completions.Add(EnqueueAsync(item, targetSize, ThumbnailPriority.Visible, generation, cancellationToken));
             }
@@ -193,7 +216,7 @@ public class ThumbnailService : IDisposable
         {
             foreach (var item in prefetchItems)
             {
-                if (!item.IsDirectory && item.SizeBytes > 0 && !cancellationToken.IsCancellationRequested)
+                if (!item.IsDirectory && item.SizeBytes > 0 && !cancellationToken.IsCancellationRequested && !IsYielded(item.FullPath))
                 {
                     completions.Add(EnqueueAsync(item, targetSize, ThumbnailPriority.Prefetch, generation, cancellationToken));
                 }
@@ -225,6 +248,7 @@ public class ThumbnailService : IDisposable
             }
 
             _queuedKeys.Clear();
+            while (_queueSignal.CurrentCount > 0 && _queueSignal.Wait(0)) { }
         }
 
         while (_publicationQueue.TryDequeue(out _)) { }
@@ -241,6 +265,7 @@ public class ThumbnailService : IDisposable
                 _queuedKeys.Remove(request.Key);
                 request.Completion.TrySetCanceled(request.CancellationToken);
                 Interlocked.Increment(ref _discardedStaleCount);
+                if (_queueSignal.CurrentCount > 0) _queueSignal.Wait(0);
             }
             else
             {
@@ -262,6 +287,13 @@ public class ThumbnailService : IDisposable
             return Task.FromCanceled(cancellationToken);
         }
 
+        if (IsYielded(item.FullPath))
+        {
+            var tcs = new TaskCompletionSource<Bitmap?>();
+            tcs.TrySetCanceled();
+            return tcs.Task;
+        }
+
         int sizeBucket = GetCanonicalSize(targetSize);
         string key = GetCacheKey(item.FullPath, item.SizeBytes, item.ModifiedTime.Ticks, sizeBucket);
 
@@ -279,8 +311,8 @@ public class ThumbnailService : IDisposable
 
         lock (_queueGate)
         {
-            // De-duplication: check if already queued
-            if (_queuedKeys.Contains(key))
+            // De-duplication: check if already queued or actively in progress
+            if (_queuedKeys.Contains(key) || _inProgressKeys.Contains(key))
             {
                 Interlocked.Increment(ref _suppressedDuplicateCount);
                 completion.TrySetResult(null);
@@ -288,6 +320,7 @@ public class ThumbnailService : IDisposable
             }
 
             int currentTotal = _visibleQueue.Count + _prefetchQueue.Count;
+            bool evictedAny = false;
 
             // Enforce hard upper bound on total queue
             if (currentTotal >= MaxTotalQueue)
@@ -306,6 +339,7 @@ public class ThumbnailService : IDisposable
                     _queuedKeys.Remove(evictedPrefetch.Key);
                     evictedPrefetch.Completion.TrySetCanceled();
                     Interlocked.Increment(ref _droppedQueueFullCount);
+                    evictedAny = true;
                 }
                 // If no prefetch, evict the oldest visible request to make room
                 else if (_visibleQueue.TryDequeue(out var evictedVisible))
@@ -313,6 +347,7 @@ public class ThumbnailService : IDisposable
                     _queuedKeys.Remove(evictedVisible.Key);
                     evictedVisible.Completion.TrySetCanceled();
                     Interlocked.Increment(ref _droppedQueueFullCount);
+                    evictedAny = true;
                 }
             }
 
@@ -330,6 +365,7 @@ public class ThumbnailService : IDisposable
                     _queuedKeys.Remove(oldestVisible.Key);
                     oldestVisible.Completion.TrySetCanceled();
                     Interlocked.Increment(ref _droppedQueueFullCount);
+                    evictedAny = true;
                 }
             }
 
@@ -341,10 +377,168 @@ public class ThumbnailService : IDisposable
             {
                 _maxObservedQueueDepth = newTotal;
             }
+
+            if (!evictedAny)
+            {
+                _queueSignal.Release();
+            }
+
+            SyncQueueSignal_Locked();
         }
 
-        _queueSignal.Release();
         return completion.Task;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        try
+        {
+            string full = Path.GetFullPath(path).Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+            return OperatingSystem.IsWindows() ? full.ToUpperInvariant() : full;
+        }
+        catch
+        {
+            return OperatingSystem.IsWindows() ? path.ToUpperInvariant() : path;
+        }
+    }
+
+    public bool IsYielded(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        string normalized = NormalizePath(path);
+        if (_yieldedPaths.TryGetValue(normalized, out long timestamp))
+        {
+            if (Stopwatch.GetElapsedTime(timestamp) < YieldOwnershipWindow)
+            {
+                return true;
+            }
+            _yieldedPaths.TryRemove(normalized, out _);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Explicitly clears the yield guard for a file, allowing new thumbnail work to be queued.
+    /// Called when the user deliberately re-selects or interacts with the file.
+    /// </summary>
+    public void ClearYieldGuard(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        _yieldedPaths.TryRemove(NormalizePath(path), out _);
+    }
+
+    /// <summary>
+    /// Yields thumbnail generation ownership for the specified file: cancels queued work,
+    /// aborts in-flight generation/extraction, purges pending UI publications, and suppresses
+    /// reacquisition until explicit user interaction or the ownership window expires.
+    /// </summary>
+    public async Task YieldFileAsync(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        string normalized = NormalizePath(path);
+        _yieldedPaths[normalized] = Stopwatch.GetTimestamp();
+
+        // 1. Remove queued work for this file
+        lock (_queueGate)
+        {
+            FilterQueue_Locked(_visibleQueue, normalized);
+            FilterQueue_Locked(_prefetchQueue, normalized);
+            SyncQueueSignal_Locked();
+        }
+
+        // 2. Remove pending UI publications for this file
+        int pubCount = _publicationQueue.Count;
+        var retainedPubs = new List<ThumbnailPublication>(pubCount);
+        while (_publicationQueue.TryDequeue(out var pub))
+        {
+            if (!string.Equals(NormalizePath(pub.Path), normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                retainedPubs.Add(pub);
+            }
+        }
+        foreach (var pub in retainedPubs)
+        {
+            _publicationQueue.Enqueue(pub);
+        }
+
+        // 3. In-flight thumbnail task cancellation & await completion
+        if (_inflightGenerationsByPath.TryGetValue(normalized, out var inflight))
+        {
+            try
+            {
+                inflight.Cts.Cancel();
+                await inflight.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            }
+            catch { }
+        }
+
+        // 4. Invalidate single-item in-flight cache task if present
+        var inflightKeys = _inflight.Keys.Where(k => k.Contains(normalized, StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var k in inflightKeys)
+        {
+            _inflight.TryRemove(k, out _);
+        }
+
+        // 5. Cancel in-flight video thumbnail decode if VideoThumbnailService is decoding it
+        await VideoThumbnailService.Instance.CancelWorkForFileAsync(path).ConfigureAwait(false);
+
+        // 6. Verify file handle is genuinely released by the OS before returning
+        if (File.Exists(path))
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                try
+                {
+                    using var probe = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.None);
+                    break;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    try
+                    {
+                        using var probeRead = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None, 1, FileOptions.None);
+                        break;
+                    }
+                    catch (IOException)
+                    {
+                        if (i == 19) break;
+                        await Task.Delay(25).ConfigureAwait(false);
+                    }
+                }
+                catch (IOException)
+                {
+                    if (i == 19) break;
+                    await Task.Delay(25).ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
+    private void FilterQueue_Locked(Queue<ThumbnailRequest> queue, string normalizedPath)
+    {
+        int count = queue.Count;
+        for (int i = 0; i < count; i++)
+        {
+            var req = queue.Dequeue();
+            if (string.Equals(NormalizePath(req.Path), normalizedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _queuedKeys.Remove(req.Key);
+                req.Completion.TrySetCanceled();
+                Interlocked.Increment(ref _cancelledCount);
+            }
+            else
+            {
+                queue.Enqueue(req);
+            }
+        }
+    }
+
+    private void SyncQueueSignal_Locked()
+    {
+        int currentTotal = _visibleQueue.Count + _prefetchQueue.Count;
+        while (_queueSignal.CurrentCount > currentTotal && _queueSignal.Wait(0)) { }
     }
 
     private void EnsureWorkersStarted()
@@ -381,56 +575,76 @@ public class ThumbnailService : IDisposable
                 if (request != null)
                 {
                     _queuedKeys.Remove(request.Key);
+                    _inProgressKeys.Add(request.Key);
                 }
+                SyncQueueSignal_Locked();
             }
 
             if (request == null) continue;
 
-            // Check stale: cancelled?
-            if (request.CancellationToken.IsCancellationRequested)
-            {
-                request.Completion.TrySetCanceled(request.CancellationToken);
-                Interlocked.Increment(ref _discardedStaleCount);
-                continue;
-            }
-
-            // Check stale: old prefetch generation?
-            if (request.Priority == ThumbnailPriority.Prefetch && request.Generation < _viewportGeneration)
-            {
-                request.Completion.TrySetCanceled();
-                Interlocked.Increment(ref _discardedStaleCount);
-                continue;
-            }
-
-            // Check active scrolling throttling:
-            // While actively scrolling, drop prefetch requests immediately
-            if (IsActivelyScrolling && request.Priority == ThumbnailPriority.Prefetch)
-            {
-                request.Completion.TrySetCanceled();
-                Interlocked.Increment(ref _discardedStaleCount);
-                continue;
-            }
-
-            Interlocked.Increment(ref _activeWorkers);
             try
             {
-                var bitmap = await ProcessRequestAsync(request);
-                request.Completion.TrySetResult(bitmap);
-            }
-            catch (OperationCanceledException)
-            {
-                request.Completion.TrySetCanceled(request.CancellationToken);
-                Interlocked.Increment(ref _discardedStaleCount);
-            }
-            catch (Exception ex)
-            {
-                Interlocked.Increment(ref _failedCount);
-                request.Completion.TrySetResult(null);
-                System.Diagnostics.Debug.WriteLine($"[ThumbnailService] Error generating thumbnail for {request.Path}: {ex.Message}");
+                // Check stale: cancelled?
+                if (request.CancellationToken.IsCancellationRequested)
+                {
+                    request.Completion.TrySetCanceled(request.CancellationToken);
+                    Interlocked.Increment(ref _discardedStaleCount);
+                    continue;
+                }
+
+                // Check yielded?
+                if (IsYielded(request.Path))
+                {
+                    request.Completion.TrySetCanceled();
+                    Interlocked.Increment(ref _discardedStaleCount);
+                    continue;
+                }
+
+                // Check stale: old prefetch generation?
+                if (request.Priority == ThumbnailPriority.Prefetch && request.Generation < _viewportGeneration)
+                {
+                    request.Completion.TrySetCanceled();
+                    Interlocked.Increment(ref _discardedStaleCount);
+                    continue;
+                }
+
+                // Check active scrolling throttling:
+                // While actively scrolling, drop prefetch requests immediately
+                if (IsActivelyScrolling && request.Priority == ThumbnailPriority.Prefetch)
+                {
+                    request.Completion.TrySetCanceled();
+                    Interlocked.Increment(ref _discardedStaleCount);
+                    continue;
+                }
+
+                Interlocked.Increment(ref _activeWorkers);
+                try
+                {
+                    var bitmap = await ProcessRequestAsync(request);
+                    request.Completion.TrySetResult(bitmap);
+                }
+                catch (OperationCanceledException)
+                {
+                    request.Completion.TrySetCanceled(request.CancellationToken);
+                    Interlocked.Increment(ref _discardedStaleCount);
+                }
+                catch (Exception ex)
+                {
+                    Interlocked.Increment(ref _failedCount);
+                    request.Completion.TrySetResult(null);
+                    System.Diagnostics.Debug.WriteLine($"[ThumbnailService] Error generating thumbnail for {request.Path}: {ex.Message}");
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _activeWorkers);
+                }
             }
             finally
             {
-                Interlocked.Decrement(ref _activeWorkers);
+                lock (_queueGate)
+                {
+                    _inProgressKeys.Remove(request.Key);
+                }
             }
         }
     }
@@ -489,8 +703,15 @@ public class ThumbnailService : IDisposable
         ct.ThrowIfCancellationRequested();
 
         // Dynamic worker concurrency check:
-        // During active scrolling, at most 1 worker performs new generation
-        while (IsActivelyScrolling && Volatile.Read(ref _activeGenerationWorkers) >= 1)
+        // While actively scrolling, do NOT start any new expensive generation jobs (0 concurrent jobs)
+        while (IsActivelyScrolling)
+        {
+            await Task.Delay(50, ct);
+            ct.ThrowIfCancellationRequested();
+        }
+
+        // When scrolling settles, at most 2 workers perform new expensive generation concurrently
+        while (Volatile.Read(ref _activeGenerationWorkers) >= MaxSettledExpensiveGenerationWorkers)
         {
             await Task.Delay(50, ct);
             ct.ThrowIfCancellationRequested();
@@ -573,7 +794,7 @@ public class ThumbnailService : IDisposable
     /// </summary>
     public async Task<Bitmap?> GetThumbnailAsync(string path, DateTime modifiedTime, int targetSize, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path) || IsYielded(path)) return null;
 
         var fileInfo = new FileInfo(path);
         int sizeBucket = GetCanonicalSize(targetSize);
@@ -599,7 +820,7 @@ public class ThumbnailService : IDisposable
         var loadTask = _inflight.GetOrAdd(key, _ => Task.Run(async () =>
         {
             Interlocked.Increment(ref _cacheMisses);
-            var generated = await LoadOrGenerateAsync(path, key, sizeBucket, CancellationToken.None);
+            var generated = await LoadOrGenerateAsync(path, key, sizeBucket, cancellationToken);
             if (generated != null)
             {
                 Interlocked.Increment(ref _generatedCount);
@@ -653,40 +874,50 @@ public class ThumbnailService : IDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        Bitmap? result = null;
-        string ext = Path.GetExtension(path);
+        string normalized = NormalizePath(path);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _inflightGenerationsByPath[normalized] = (linkedCts, tcs.Task);
 
         try
         {
+            var ct = linkedCts.Token;
+            ct.ThrowIfCancellationRequested();
+
+            Bitmap? result = null;
+            string ext = Path.GetExtension(path);
+
             // 1. Direct Image Provider
             if (DirectImageExtensions.Contains(ext))
             {
-                result = DecodeImageFile(path, sizeBucket, cancellationToken);
+                result = DecodeImageFile(path, sizeBucket, ct);
             }
             // 2. Video Provider (try Windows Shell provider first for silent, fast background extraction)
             else if (VideoThumbnailService.IsVideoFile(path))
             {
-                if (OperatingSystem.IsWindows() && !cancellationToken.IsCancellationRequested)
+                if (OperatingSystem.IsWindows() && !ct.IsCancellationRequested)
                 {
-                    result = ExtractWindowsShellThumbnail(path, sizeBucket, cancellationToken);
+                    result = ExtractWindowsShellThumbnail(path, sizeBucket, ct);
                 }
 
-                if (result == null && !cancellationToken.IsCancellationRequested)
+                if (result == null && !ct.IsCancellationRequested)
                 {
-                    result = await VideoThumbnailService.Instance.ExtractSmartVideoThumbnailAsync(path, sizeBucket, cancellationToken);
+                    result = await VideoThumbnailService.Instance.ExtractSmartVideoThumbnailAsync(path, sizeBucket, ct);
                 }
             }
             // 3. 3D Model Provider (STL)
             else if (Preview.StlPreviewService.Instance.IsStlFile(path))
             {
-                result = await Preview.StlPreviewService.Instance.GenerateThumbnailAsync(path, sizeBucket, cancellationToken);
+                result = await Preview.StlPreviewService.Instance.GenerateThumbnailAsync(path, sizeBucket, ct);
             }
 
             // 4. Windows Shell Provider (for PDFs, 3D models, Documents, and fallback)
-            if (result == null && OperatingSystem.IsWindows() && !cancellationToken.IsCancellationRequested)
+            if (result == null && OperatingSystem.IsWindows() && !ct.IsCancellationRequested)
             {
-                result = ExtractWindowsShellThumbnail(path, sizeBucket, cancellationToken);
+                result = ExtractWindowsShellThumbnail(path, sizeBucket, ct);
             }
+
+            return result;
         }
         catch (OperationCanceledException)
         {
@@ -697,8 +928,11 @@ public class ThumbnailService : IDisposable
             System.Diagnostics.Debug.WriteLine($"[ThumbnailService] Extraction error for {path}: {ex.Message}");
             return null;
         }
-
-        return result;
+        finally
+        {
+            _inflightGenerationsByPath.TryRemove(normalized, out _);
+            tcs.TrySetResult(true);
+        }
     }
 
     public static string GetCacheKey(string path, long fileSize, long ticks, int sizeBucket)
@@ -1004,25 +1238,30 @@ public class ThumbnailService : IDisposable
         if (cancellationToken.IsCancellationRequested) return null;
 
         IntPtr hBitmap = IntPtr.Zero;
+        IShellItem? shellItem = null;
+        IThumbnailProvider? provider = null;
+        IntPtr pProvider = IntPtr.Zero;
+
         try
         {
-            int hr = SHCreateItemFromParsingName(filePath, IntPtr.Zero, IShellItemGuid, out var shellItem);
+            int hr = SHCreateItemFromParsingName(filePath, IntPtr.Zero, IShellItemGuid, out shellItem);
             if (hr != 0 || shellItem == null) return null;
 
             if (cancellationToken.IsCancellationRequested) return null;
 
-            int hrBind = shellItem.BindToHandler(IntPtr.Zero, BHID_ThumbnailHandler, IID_IThumbnailProvider, out var pProvider);
+            int hrBind = shellItem.BindToHandler(IntPtr.Zero, BHID_ThumbnailHandler, IID_IThumbnailProvider, out pProvider);
             if (hrBind == 0 && pProvider != IntPtr.Zero)
             {
                 try
                 {
                     if (cancellationToken.IsCancellationRequested) return null;
-                    var provider = (IThumbnailProvider)Marshal.GetObjectForIUnknown(pProvider);
+                    provider = (IThumbnailProvider)Marshal.GetObjectForIUnknown(pProvider);
                     hr = provider.GetThumbnail((uint)targetSize, out hBitmap, out _);
                 }
                 finally
                 {
                     Marshal.Release(pProvider);
+                    pProvider = IntPtr.Zero;
                 }
             }
 
@@ -1037,6 +1276,14 @@ public class ThumbnailService : IDisposable
         }
         finally
         {
+            if (provider != null)
+            {
+                try { Marshal.FinalReleaseComObject(provider); } catch { }
+            }
+            if (shellItem != null)
+            {
+                try { Marshal.FinalReleaseComObject(shellItem); } catch { }
+            }
             if (hBitmap != IntPtr.Zero)
             {
                 DeleteObject(hBitmap);

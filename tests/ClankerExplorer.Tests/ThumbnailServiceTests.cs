@@ -84,7 +84,7 @@ public sealed class ThumbnailServiceTests : IDisposable
         (image.ThumbnailImage as IDisposable)?.Dispose();
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void ExplorerPaneViewModel_ViewModeAndSizingCalculations_ReflectThumbnailSettings()
     {
         using var fs = new TemporaryFileSystem();
@@ -162,7 +162,7 @@ public sealed class ThumbnailServiceTests : IDisposable
         }
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task ThumbnailSelection_PreservesControlAndShiftSemantics()
     {
         using var fs = new TemporaryFileSystem();

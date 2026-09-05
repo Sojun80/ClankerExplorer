@@ -285,8 +285,25 @@ public class NativeVideoPlayer : IDisposable
             {
                 try
                 {
-                    using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.None);
+                    using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.None);
                     break;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Fall back to Read with FileShare.None if file is read-only
+                    try
+                    {
+                        using var fsRead = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.None, 1, FileOptions.None);
+                        break;
+                    }
+                    catch (IOException)
+                    {
+                        await Task.Delay(10).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        break;
+                    }
                 }
                 catch (IOException)
                 {
@@ -322,18 +339,6 @@ public class NativeVideoPlayer : IDisposable
     {
         if (_isDisposed) return;
         _isDisposed = true;
-        try
-        {
-            if (_mediaPlayer != null)
-            {
-                try { _mediaPlayer.Stop(); } catch { }
-                try { _mediaPlayer.Media = null; } catch { }
-                try { _mediaPlayer.Dispose(); } catch { }
-                _mediaPlayer = null;
-            }
-            _currentMedia?.Dispose();
-            _currentMedia = null;
-        }
-        catch { }
+        Close();
     }
 }
