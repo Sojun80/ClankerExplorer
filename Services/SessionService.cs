@@ -30,6 +30,12 @@ public class AppSessionState
     public double InspectorWidth { get; set; } = 320;
     public PaneSessionState LeftPane { get; set; } = new();
     public PaneSessionState RightPane { get; set; } = new();
+
+    public int? WindowX { get; set; }
+    public int? WindowY { get; set; }
+    public double? WindowWidth { get; set; }
+    public double? WindowHeight { get; set; }
+    public bool IsMaximized { get; set; }
 }
 
 public class SessionService
@@ -49,17 +55,42 @@ public class SessionService
         _portableSessionFilePath = AppStoragePaths.GetPortableFilePath("session.json", dataDirectory);
     }
 
-    public void SaveSession(MainViewModel vm)
+    public static bool HasValidWindowGeometry(AppSessionState? session)
+    {
+        if (session == null) return false;
+        if (!session.WindowX.HasValue || !session.WindowY.HasValue ||
+            !session.WindowWidth.HasValue || !session.WindowHeight.HasValue)
+            return false;
+
+        return double.IsFinite(session.WindowWidth.Value) &&
+               double.IsFinite(session.WindowHeight.Value) &&
+               session.WindowWidth.Value > 0 &&
+               session.WindowHeight.Value > 0;
+    }
+
+    public void SaveSession(
+        MainViewModel vm,
+        int? windowX = null,
+        int? windowY = null,
+        double? windowWidth = null,
+        double? windowHeight = null,
+        bool isMaximized = false)
     {
         try
         {
+            var existing = LoadSession();
             SaveSession(new AppSessionState
             {
                 IsDualPane = vm.IsDualPane,
                 ActivePaneId = vm.ActivePane == vm.RightPane ? "right" : "left",
                 InspectorWidth = vm.InspectorWidth,
                 LeftPane = BuildPaneSession(vm.LeftPane),
-                RightPane = BuildPaneSession(vm.RightPane)
+                RightPane = BuildPaneSession(vm.RightPane),
+                WindowX = windowX ?? existing?.WindowX,
+                WindowY = windowY ?? existing?.WindowY,
+                WindowWidth = windowWidth ?? existing?.WindowWidth,
+                WindowHeight = windowHeight ?? existing?.WindowHeight,
+                IsMaximized = windowWidth.HasValue ? isMaximized : (existing?.IsMaximized ?? false)
             });
         }
         catch (Exception ex)

@@ -228,4 +228,125 @@ public sealed class PersistenceTests
         Assert.Equal(fs.FolderC, main.RightPane.SelectedTab!.CurrentPath);
         TestEnvironment.ResetGlobalSettings(fs.FolderA);
     }
+
+    [Fact]
+    public void Session_RoundTripPreservesWindowGeometryAndMaximizedState()
+    {
+        using var fs = new TemporaryFileSystem();
+        var service = new SessionService(fs.Config);
+        var expected = new AppSessionState
+        {
+            WindowX = 140,
+            WindowY = 180,
+            WindowWidth = 1420,
+            WindowHeight = 910,
+            IsMaximized = true
+        };
+
+        service.SaveSession(expected);
+        var actual = new SessionService(fs.Config).LoadSession();
+
+        Assert.NotNull(actual);
+        Assert.Equal(140, actual.WindowX);
+        Assert.Equal(180, actual.WindowY);
+        Assert.Equal(1420, actual.WindowWidth);
+        Assert.Equal(910, actual.WindowHeight);
+        Assert.True(actual.IsMaximized);
+        Assert.True(SessionService.HasValidWindowGeometry(actual));
+    }
+
+    [Fact]
+    public void Session_LegacySessionWithoutWindowGeometry_DeserializesNullsAndIsCompatible()
+    {
+        using var fs = new TemporaryFileSystem();
+        string sessionFile = Path.Combine(fs.Config, "session.json");
+        string legacyJson = """
+        {
+          "IsDualPane": false,
+          "ActivePaneId": "left",
+          "InspectorWidth": 320.0,
+          "LeftPane": { "Tabs": [], "ActiveTabIndex": 0 },
+          "RightPane": { "Tabs": [], "ActiveTabIndex": 0 }
+        }
+        """;
+        File.WriteAllText(sessionFile, legacyJson);
+
+        var service = new SessionService(fs.Config);
+        var session = service.LoadSession();
+
+        Assert.NotNull(session);
+        Assert.Null(session.WindowX);
+        Assert.Null(session.WindowY);
+        Assert.Null(session.WindowWidth);
+        Assert.Null(session.WindowHeight);
+        Assert.False(session.IsMaximized);
+        Assert.False(SessionService.HasValidWindowGeometry(session));
+    }
+
+    [Fact]
+    public void WindowGeometryHelper_ClampWindowBounds_PreservesPositionWhenIntersectsWorkArea()
+    {
+        var screens = new[]
+        {
+            new ScreenBounds(0, 0, 1920, 1080, IsPrimary: true)
+        };
+
+        var (x, y, w, h) = WindowGeometryHelper.ClampWindowBounds(150, 120, 1400, 900, screens);
+
+        Assert.Equal(150, x);
+        Assert.Equal(120, y);
+        Assert.Equal(1400, w);
+        Assert.Equal(900, h);
+    }
+
+    [Fact]
+    public void WindowGeometryHelper_ClampWindowBounds_DisconnectedMonitor_RecentersOntoPrimaryScreen()
+    {
+        // Saved window was at X=2560 (2nd monitor), but only primary monitor is currently connected
+        var screens = new[]
+        {
+            new ScreenBounds(0, 0, 1920, 1080, IsPrimary: true)
+        };
+
+        var (x, y, w, h) = WindowGeometryHelper.ClampWindowBounds(2560, 100, 1360, 960, screens);
+
+        // Clamped window must be centered and completely inside primary work area
+        Assert.Equal((1920 - 1360) / 2, x);
+        Assert.Equal((1080 - 960) / 2, y);
+        Assert.Equal(1360, w);
+        Assert.Equal(960, h);
+    }
+
+    [Fact]
+    public void WindowGeometryHelper_ClampWindowBounds_SanitizesZeroNegativeNaNAndAbsurdSizes()
+    {
+        var screens = new[]
+        {
+            new ScreenBounds(0, 0, 1920, 1080, IsPrimary: true)
+        };
+
+        // Case A: zero/negative dimensions reset to defaults
+        var resA = WindowGeometryHelper.ClampWindowBounds(50, 50, 0, -20, screens);
+        Assert.Equal(WindowGeometryHelper.DefaultWindowWidth, resA.Width);
+        Assert.Equal(WindowGeometryHelper.DefaultWindowHeight, resA.Height);
+
+        // Case B: NaN / infinity reset to defaults
+        var resB = WindowGeometryHelper.ClampWindowBounds(50, 50, double.NaN, double.PositiveInfinity, screens);
+        Assert.Equal(WindowGeometryHelper.DefaultWindowWidth, resB.Width);
+        Assert.Equal(WindowGeometryHelper.DefaultWindowHeight, resB.Height);
+
+        // Case C: Absurd sizes (> MaxAbsurdDimension) reset to defaults
+        var resC = WindowGeometryHelper.ClampWindowBounds(0, 0, 50000, 50000, screens);
+        Assert.Equal(WindowGeometryHelper.DefaultWindowWidth, resC.Width);
+        Assert.Equal(WindowGeometryHelper.DefaultWindowHeight, resC.Height);
+
+        // Case C2: Size larger than screen but under absurd threshold clamps to screen work area
+        var resC2 = WindowGeometryHelper.ClampWindowBounds(0, 0, 2500, 1500, screens);
+        Assert.Equal(1920, resC2.Width);
+        Assert.Equal(1080, resC2.Height);
+
+        // Case D: Title bar off-screen above screen (Y = -500) gets clamped onto work area
+        var resD = WindowGeometryHelper.ClampWindowBounds(50, -500, 1200, 800, screens);
+        Assert.True(resD.Y >= 0);
+    }
 }

@@ -469,6 +469,13 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         RawAddressInput = startPath;
 
         WireTabEvents(tab);
+        Tabs.CollectionChanged += (s, e) =>
+        {
+            if (Tabs.Count == 0)
+            {
+                _activeFolderStatePath = null;
+            }
+        };
 
         _clipboardChangedHandler = () => OnPropertyChanged(nameof(CanPaste));
         _quickAccessChangedHandler = NotifyContextMenuProperties;
@@ -599,10 +606,23 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
     private void ApplyFolderViewState(ExplorerTabViewModel tab)
     {
+        string? previousPath = _activeFolderStatePath;
+        FolderViewState state;
+        if (_folderViewStateService.TryGet(tab.CurrentPath, out var saved))
+        {
+            state = saved;
+        }
+        else if (!string.IsNullOrWhiteSpace(previousPath) &&
+                 _folderViewStateService.TryGet(previousPath, out var prevSaved))
+        {
+            state = CreateInheritedFolderViewState(prevSaved);
+        }
+        else
+        {
+            state = CreateDefaultFolderViewState();
+        }
+
         _activeFolderStatePath = tab.CurrentPath;
-        FolderViewState state = _folderViewStateService.TryGet(tab.CurrentPath, out var saved)
-            ? saved
-            : CreateDefaultFolderViewState();
 
         _applyingFolderViewState = true;
         try
@@ -655,6 +675,17 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         if (metadataChanged) _ = tab.RefreshAsync();
         else _ = tab.ApplyFilterAsync();
         FolderViewStateRestored?.Invoke();
+    }
+
+    private static FolderViewState CreateInheritedFolderViewState(FolderViewState source)
+    {
+        var inherited = source.Clone();
+        inherited.DetailsHorizontalOffset = 0;
+        inherited.DetailsVerticalOffset = 0;
+        inherited.ThumbnailVerticalOffset = 0;
+        inherited.DetailsTopItemPath = null;
+        inherited.ThumbnailTopItemPath = null;
+        return inherited;
     }
 
     private FolderViewState CreateDefaultFolderViewState()

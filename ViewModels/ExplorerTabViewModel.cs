@@ -554,8 +554,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         if (_isDisposed || Items == null) return;
 
         // Cancel previous filter computation promptly
-        _filterExecutionCts?.Cancel();
-        _filterExecutionCts?.Dispose();
+        try
+        {
+            _filterExecutionCts?.Cancel();
+            _filterExecutionCts?.Dispose();
+        }
+        catch (ObjectDisposedException) { }
+
         _filterExecutionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var executionToken = _filterExecutionCts.Token;
 

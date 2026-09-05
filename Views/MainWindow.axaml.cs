@@ -14,20 +14,36 @@ public partial class MainWindow : Window
 {
     private ColumnDefinition? PreviewColumnDefinition => MainContentGrid != null && MainContentGrid.ColumnDefinitions.Count > 3 ? MainContentGrid.ColumnDefinitions[3] : null;
 
+    private PixelPoint? _lastNormalPosition;
+    private double? _lastNormalWidth;
+    private double? _lastNormalHeight;
+
     public MainWindow()
     {
         InitializeComponent();
+        RestoreWindowGeometryFromSession();
+
+        PositionChanged += (s, e) => UpdateNormalBounds();
 
         Closing += (s, e) =>
         {
             if (DataContext is MainViewModel vm)
             {
-                SessionService.Instance.SaveSession(vm);
+                UpdateNormalBounds();
+                bool isMaximized = WindowState == WindowState.Maximized;
+                SessionService.Instance.SaveSession(
+                    vm,
+                    _lastNormalPosition?.X,
+                    _lastNormalPosition?.Y,
+                    _lastNormalWidth,
+                    _lastNormalHeight,
+                    isMaximized);
             }
         };
 
         Loaded += (s, e) =>
         {
+            UpdateNormalBounds();
             if (DataContext is MainViewModel vm)
             {
                 SyncPreviewColumn(vm);
@@ -225,6 +241,7 @@ public partial class MainWindow : Window
 
         SizeChanged += (s, e) =>
         {
+            UpdateNormalBounds();
             if (DataContext is MainViewModel vm && vm.ShowInspector && PreviewColumnDefinition != null)
             {
                 double maxAllowed = Math.Max(240, Bounds.Width - 660);
@@ -698,6 +715,68 @@ public partial class MainWindow : Window
         {
             double maxAllowed = Math.Max(240, Bounds.Width - 660);
             vm.InspectorWidth = Math.Clamp(PreviewColumnDefinition.ActualWidth, 240, maxAllowed);
+        }
+    }
+
+    private void RestoreWindowGeometryFromSession()
+    {
+        var session = SessionService.Instance.LoadSession();
+        if (!SessionService.HasValidWindowGeometry(session))
+        {
+            _lastNormalWidth = Width > 0 ? Width : 1360;
+            _lastNormalHeight = Height > 0 ? Height : 960;
+            return;
+        }
+
+        var screens = Screens?.All?.Select(s => new ScreenBounds(
+            s.WorkingArea.X,
+            s.WorkingArea.Y,
+            s.WorkingArea.Width,
+            s.WorkingArea.Height,
+            s == Screens.Primary
+        )).ToList() ?? new List<ScreenBounds>();
+
+        var (x, y, w, h) = WindowGeometryHelper.ClampWindowBounds(
+            session!.WindowX!.Value,
+            session.WindowY!.Value,
+            session.WindowWidth!.Value,
+            session.WindowHeight!.Value,
+            screens,
+            defaultWidth: Width > 0 ? Width : 1360,
+            defaultHeight: Height > 0 ? Height : 960,
+            minWidth: MinWidth > 0 ? MinWidth : 900,
+            minHeight: MinHeight > 0 ? MinHeight : 500);
+
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Position = new PixelPoint(x, y);
+        Width = w;
+        Height = h;
+
+        _lastNormalPosition = Position;
+        _lastNormalWidth = Width;
+        _lastNormalHeight = Height;
+
+        if (session.IsMaximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+    }
+
+    private void UpdateNormalBounds()
+    {
+        if (WindowState == WindowState.Normal)
+        {
+            _lastNormalPosition = Position;
+            if (Bounds.Width > 0 && Bounds.Height > 0)
+            {
+                _lastNormalWidth = Bounds.Width;
+                _lastNormalHeight = Bounds.Height;
+            }
+            else if (Width > 0 && Height > 0)
+            {
+                _lastNormalWidth = Width;
+                _lastNormalHeight = Height;
+            }
         }
     }
 }
