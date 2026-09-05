@@ -48,6 +48,9 @@ public partial class ExplorerPaneView : UserControl
     private Point _dragStartPoint;
     private FileItem? _dragCandidateItem;
     private bool _isDragActive;
+    private bool _dragOccurredForCurrentPress;
+    private FileItem? _pendingPlainClickItem;
+    private bool _isApplyingDetailsSelection;
     private FileItem? _hoveredDragTarget;
 
     public ExplorerPaneView()
@@ -596,9 +599,21 @@ public partial class ExplorerPaneView : UserControl
             _dragStartPoint = e.GetPosition(this);
             _dragCandidateItem = item;
             _isDragActive = false;
+            _dragOccurredForCurrentPress = false;
 
-            if (!item.IsThumbnailSelected || ctrl || shift)
+            // Explorer behavior:
+            // Pressing an item that is already part of a multi-selection must
+            // preserve the group long enough to allow drag-and-drop. If this
+            // turns out to be a click rather than a drag, collapse on release.
+            if (!ctrl && !shift &&
+                item.IsThumbnailSelected &&
+                tab.SelectedItems.Count > 1)
             {
+                _pendingPlainClickItem = item;
+            }
+            else
+            {
+                _pendingPlainClickItem = null;
                 tab.SelectThumbnailItem(item, ctrl, shift);
             }
         }
@@ -768,9 +783,43 @@ public partial class ExplorerPaneView : UserControl
                 _dragStartPoint = e.GetPosition(this);
                 _dragCandidateItem = item;
                 _isDragActive = false;
+                _dragOccurredForCurrentPress = false;
+
+                bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+                bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+
+                if (shift)
+                {
+                    _pendingPlainClickItem = null;
+                    ApplyDetailsRangeSelection(vm, item, additive: ctrl);
+
+                    // Do not allow DataGrid's separate internal anchor to apply
+                    // another range after ours.
+                    e.Handled = true;
+                    return;
+                }
+
+                // Ctrl/plain clicks establish a new Shift anchor.
+                tab.SetSelectionAnchor(item);
+
+                // Preserve an existing multi-selection during pointer-down so
+                // dragging any selected row drags the whole selection.
+                if (!ctrl &&
+                    FileDataGrid.SelectedItems.Contains(item) &&
+                    FileDataGrid.SelectedItems.Count > 1)
+                {
+                    _pendingPlainClickItem = item;
+                    FileDataGrid.Focus();
+                    e.Handled = true;
+                    return;
+                }
+
+                _pendingPlainClickItem = null;
             }
             else if (isRightButton)
             {
+                _pendingPlainClickItem = null;
+
                 if (FileDataGrid.SelectedItems.Contains(item) || tab.SelectedItems.Contains(item))
                 {
                     // Right-clicking an item already part of a multi-selection preserves the multi-selection
@@ -784,6 +833,7 @@ public partial class ExplorerPaneView : UserControl
                     tab.SelectedItems.Clear();
                     tab.SelectedItems.Add(item);
                     tab.SelectedItem = item;
+                    tab.SetSelectionAnchor(item);
                 }
                 vm.NotifyContextMenuProperties();
             }
@@ -793,19 +843,23 @@ public partial class ExplorerPaneView : UserControl
             // Clicked on empty space (below rows or background area)
             if (isRightButton)
             {
+                _pendingPlainClickItem = null;
                 FileDataGrid.SelectedItems.Clear();
                 tab.ClearThumbnailSelection();
                 tab.SelectedItems.Clear();
                 tab.SelectedItem = null;
+                tab.SetSelectionAnchor(null);
                 vm.NotifyContextMenuProperties();
                 vm.TriggerPreviewForSelectedItem();
             }
             else if (isLeftButton && !e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
             {
+                _pendingPlainClickItem = null;
                 FileDataGrid.SelectedItems.Clear();
                 tab.ClearThumbnailSelection();
                 tab.SelectedItems.Clear();
                 tab.SelectedItem = null;
+                tab.SetSelectionAnchor(null);
                 vm.NotifyContextMenuProperties();
                 vm.TriggerPreviewForSelectedItem();
             }
@@ -864,6 +918,7 @@ public partial class ExplorerPaneView : UserControl
                 tab.ClearThumbnailSelection();
                 tab.SelectedItems.Clear();
                 tab.SelectedItem = null;
+                tab.SetSelectionAnchor(null);
                 vm.NotifyContextMenuProperties();
                 vm.TriggerPreviewForSelectedItem();
             }
@@ -873,6 +928,7 @@ public partial class ExplorerPaneView : UserControl
             tab.ClearThumbnailSelection();
             tab.SelectedItems.Clear();
             tab.SelectedItem = null;
+            tab.SetSelectionAnchor(null);
             vm.NotifyContextMenuProperties();
             vm.TriggerPreviewForSelectedItem();
         }
@@ -900,6 +956,7 @@ public partial class ExplorerPaneView : UserControl
                 if (Math.Abs(delta.X) >= 4 || Math.Abs(delta.Y) >= 4)
                 {
                     _isDragActive = true;
+                    _dragOccurredForCurrentPress = true;
                     _isMouseDownForMarquee = false;
                     _isMarqueeActive = false;
                     if (MarqueeBox != null) MarqueeBox.IsVisible = false;
@@ -961,8 +1018,23 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnPointerReleasedTunnel(object? sender, PointerReleasedEventArgs e)
     {
+        bool dragOccurred = _dragOccurredForCurrentPress;
+        var pendingPlainClickItem = _pendingPlainClickItem;
+
+        _pendingPlainClickItem = null;
+        _dragOccurredForCurrentPress = false;
         _dragCandidateItem = null;
         _isDragActive = false;
+
+        var vm = DataContext as ExplorerPaneViewModel;
+
+        if (!dragOccurred &&
+            pendingPlainClickItem != null &&
+            vm != null)
+        {
+            CollapseSelectionToItem(vm, pendingPlainClickItem);
+            e.Handled = true;
+        }
 
         if (_isMouseDownForMarquee)
         {
@@ -974,7 +1046,7 @@ public partial class ExplorerPaneView : UserControl
                 _autoScrollVelocity = 0;
                 e.Pointer.Capture(null);
                 if (MarqueeBox != null) MarqueeBox.IsVisible = false;
-                if (DataContext is ExplorerPaneViewModel vm)
+                if (vm != null)
                 {
                     vm.IsSuppressingPreview = false;
                 }
@@ -1404,6 +1476,7 @@ public partial class ExplorerPaneView : UserControl
             if (Math.Abs(dragDelta.X) >= 4 || Math.Abs(dragDelta.Y) >= 4)
             {
                 _isDragActive = true;
+                _dragOccurredForCurrentPress = true;
                 _isMouseDownForMarquee = false;
                 _isMarqueeActive = false;
                 if (MarqueeBox != null) MarqueeBox.IsVisible = false;
@@ -1516,6 +1589,9 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnFileGridPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
+        _pendingPlainClickItem = null;
+        _dragOccurredForCurrentPress = false;
+
         if (_isMiddleAutoScrolling)
         {
             StopMiddleAutoScroll();
@@ -1832,32 +1908,108 @@ public partial class ExplorerPaneView : UserControl
         }
     }
 
-    private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    private void CollapseSelectionToItem(ExplorerPaneViewModel vm, FileItem item)
     {
-        if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null && FileDataGrid != null)
+        if (vm.SelectedTab == null) return;
+        var tab = vm.SelectedTab;
+
+        if (vm.IsThumbnailView)
         {
-            var tab = vm.SelectedTab;
-            var currentGridSelected = FileDataGrid.SelectedItems.Cast<FileItem>().ToList();
-            if (currentGridSelected.Count > 0)
+            tab.SelectThumbnailItem(item, control: false, shift: false);
+        }
+        else if (FileDataGrid != null)
+        {
+            _isApplyingDetailsSelection = true;
+            try
             {
-                tab.SelectedItems.Clear();
-                foreach (var item in currentGridSelected)
-                {
-                    tab.SelectedItems.Add(item);
-                }
+                FileDataGrid.SelectedItems.Clear();
+                FileDataGrid.SelectedItems.Add(item);
+                FileDataGrid.SelectedItem = item;
             }
-            else if (tab.SelectedItem != null)
+            finally
             {
-                tab.SelectedItems.Clear();
-                tab.SelectedItems.Add(tab.SelectedItem);
-            }
-            else
-            {
-                tab.SelectedItems.Clear();
+                _isApplyingDetailsSelection = false;
             }
 
-            vm.NotifyContextMenuProperties();
+            SyncDetailsSelectionToTab(vm, item);
+            tab.SetSelectionAnchor(item);
         }
+
+        vm.NotifyContextMenuProperties();
+        vm.TriggerPreviewForSelectedItem();
+    }
+
+    private void ApplyDetailsRangeSelection(
+        ExplorerPaneViewModel vm,
+        FileItem item,
+        bool additive)
+    {
+        if (FileDataGrid == null || vm.SelectedTab == null) return;
+
+        var tab = vm.SelectedTab;
+        var range = tab.GetSelectionRange(item);
+        if (range.Count == 0) return;
+
+        _isApplyingDetailsSelection = true;
+        try
+        {
+            if (!additive)
+                FileDataGrid.SelectedItems.Clear();
+
+            foreach (var rangeItem in range)
+            {
+                if (!FileDataGrid.SelectedItems.Contains(rangeItem))
+                    FileDataGrid.SelectedItems.Add(rangeItem);
+            }
+
+            FileDataGrid.SelectedItem = item;
+        }
+        finally
+        {
+            _isApplyingDetailsSelection = false;
+        }
+
+        SyncDetailsSelectionToTab(vm, item);
+        vm.NotifyContextMenuProperties();
+        vm.TriggerPreviewForSelectedItem();
+    }
+
+    private void SyncDetailsSelectionToTab(
+        ExplorerPaneViewModel vm,
+        FileItem? preferredActiveItem = null)
+    {
+        if (FileDataGrid == null || vm.SelectedTab == null) return;
+
+        var tab = vm.SelectedTab;
+        var currentGridSelected = FileDataGrid.SelectedItems
+            .Cast<FileItem>()
+            .ToList();
+
+        tab.SelectedItems.Clear();
+        foreach (var selected in currentGridSelected)
+            tab.SelectedItems.Add(selected);
+
+        FileItem? activeItem = preferredActiveItem
+            ?? FileDataGrid.SelectedItem as FileItem;
+
+        tab.SelectedItem =
+            activeItem != null && currentGridSelected.Contains(activeItem)
+                ? activeItem
+                : currentGridSelected.LastOrDefault();
+    }
+
+    private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isApplyingDetailsSelection) return;
+        if (DataContext is not ExplorerPaneViewModel vm ||
+            vm.SelectedTab == null ||
+            FileDataGrid == null)
+            return;
+
+        // The DataGrid is authoritative here. Do not resurrect an old
+        // SelectedItem after the grid has explicitly cleared its selection.
+        SyncDetailsSelectionToTab(vm);
+        vm.NotifyContextMenuProperties();
     }
 
     private async void OnCopyPathClicked(object? sender, RoutedEventArgs e)

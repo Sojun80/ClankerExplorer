@@ -23,7 +23,10 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     private readonly DirectoryChangeReconciler _reconciler;
     private long _loadGeneration = 0;
     private long _filterGeneration = 0;
-    private int _selectionAnchorIndex = -1;
+    // Keep the selection anchor by item identity rather than index.
+    // Sorting may move an item without changing the logical anchor, while
+    // refresh/filter replacement naturally invalidates a stale item.
+    private FileItem? _selectionAnchorItem;
     private bool _isDisposed;
     private DirectoryReadOptions _directoryReadOptions = DirectoryReadOptions.FromSettings(SettingsService.Instance.CurrentSettings);
     private SortedSourceCache? _sortedCache;
@@ -390,8 +393,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                     }
 
                     SelectedItem = focusedMatch ?? matches.Last();
-                    var firstMatchIndex = FilteredItems.IndexOf(matches[0]);
-                    _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
+                    _selectionAnchorItem = matches[0];
 
                     if (isExplicitNavigationSelect)
                     {
@@ -456,8 +458,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             }
 
             SelectedItem = matches.Last();
-            var firstMatchIndex = FilteredItems.IndexOf(matches[0]);
-            _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
+            _selectionAnchorItem = matches[0];
 
             if (scrollIntoView)
             {
@@ -542,8 +543,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 }
 
                 SelectedItem = focusedMatch ?? matches.Last();
-                var firstMatchIndex = newFiltered.IndexOf(matches[0]);
-                _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
+                _selectionAnchorItem = matches[0];
                 SelectionRestored?.Invoke();
             }
         }
@@ -613,8 +613,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                     }
 
                     SelectedItem = focusedMatch ?? matches.Last();
-                    var firstMatchIndex = newFiltered.IndexOf(matches[0]);
-                    _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
+                    _selectionAnchorItem = matches[0];
                     SelectionRestored?.Invoke();
                 }
             }
@@ -826,6 +825,45 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         return true;
     }
 
+    public void SetSelectionAnchor(FileItem? item)
+    {
+        _selectionAnchorItem =
+            item != null && FilteredItems.Contains(item)
+                ? item
+                : null;
+    }
+
+    public IReadOnlyList<FileItem> GetSelectionRange(FileItem item)
+    {
+        int itemIndex = FilteredItems.IndexOf(item);
+        if (itemIndex < 0)
+            return Array.Empty<FileItem>();
+
+        int anchorIndex = _selectionAnchorItem != null
+            ? FilteredItems.IndexOf(_selectionAnchorItem)
+            : -1;
+
+        // If the old anchor vanished because of a refresh/filter, use the
+        // active selection when possible, otherwise start a new anchor here.
+        if (anchorIndex < 0 && SelectedItem != null)
+            anchorIndex = FilteredItems.IndexOf(SelectedItem);
+
+        if (anchorIndex < 0)
+        {
+            anchorIndex = itemIndex;
+            _selectionAnchorItem = item;
+        }
+
+        int start = Math.Min(anchorIndex, itemIndex);
+        int end = Math.Max(anchorIndex, itemIndex);
+        var range = new List<FileItem>(end - start + 1);
+
+        for (int index = start; index <= end; index++)
+            range.Add(FilteredItems[index]);
+
+        return range;
+    }
+
     public void SelectThumbnailItem(FileItem item, bool control, bool shift)
     {
         int itemIndex = FilteredItems.IndexOf(item);
@@ -833,30 +871,29 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
         if (shift)
         {
-            int anchor = _selectionAnchorIndex >= 0 ? _selectionAnchorIndex : itemIndex;
+            var range = GetSelectionRange(item);
             if (!control) ClearThumbnailSelection();
-            int start = Math.Min(anchor, itemIndex);
-            int end = Math.Max(anchor, itemIndex);
-            for (int index = start; index <= end; index++) AddThumbnailSelection(FilteredItems[index]);
+            foreach (var rangeItem in range)
+                AddThumbnailSelection(rangeItem);
         }
         else if (control)
         {
             if (item.IsThumbnailSelected) RemoveThumbnailSelection(item);
             else AddThumbnailSelection(item);
-            _selectionAnchorIndex = itemIndex;
+            _selectionAnchorItem = item;
         }
         else
         {
             if (SelectedItems.Count == 1 && SelectedItems[0] == item && item.IsThumbnailSelected)
             {
-                _selectionAnchorIndex = itemIndex;
+                _selectionAnchorItem = item;
                 if (SelectedItem != item) SelectedItem = item;
                 return;
             }
 
             ClearThumbnailSelection();
             AddThumbnailSelection(item);
-            _selectionAnchorIndex = itemIndex;
+            _selectionAnchorItem = item;
         }
 
         SelectedItem = item.IsThumbnailSelected ? item : SelectedItems.LastOrDefault();
@@ -883,7 +920,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 SelectedItems.Add(item);
             }
             SelectedItem = FilteredItems.LastOrDefault();
-            _selectionAnchorIndex = FilteredItems.Count > 0 ? FilteredItems.Count - 1 : -1;
+            _selectionAnchorItem = SelectedItem;
         }
     }
 
@@ -892,7 +929,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         foreach (var item in FilteredItems) item.IsThumbnailSelected = true;
         SelectedItems = new ObservableCollection<FileItem>(FilteredItems);
         SelectedItem = SelectedItems.LastOrDefault();
-        _selectionAnchorIndex = SelectedItems.Count > 0 ? SelectedItems.Count - 1 : -1;
+        _selectionAnchorItem = SelectedItem;
     }
 
     public void AddThumbnailSelection(FileItem item)
