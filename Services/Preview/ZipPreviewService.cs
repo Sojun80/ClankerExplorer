@@ -261,12 +261,14 @@ public class ZipPreviewService
                 var psi = new ProcessStartInfo
                 {
                     FileName = cli,
-                    Arguments = $"l -slt \"{filePath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
+                psi.ArgumentList.Add("l");
+                psi.ArgumentList.Add("-slt");
+                psi.ArgumentList.Add(filePath);
 
                 using var proc = Process.Start(psi);
                 if (proc == null) throw new InvalidOperationException("Failed to spawn 7z reader");

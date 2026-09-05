@@ -159,17 +159,20 @@ public class ArchiveService
                 {
                     // If GUI extractor (7zG.exe), run with interactive prompt on conflict
                     bool isGui = exe.EndsWith("7zG.exe", StringComparison.OrdinalIgnoreCase);
-                    string args = isGui
-                        ? $"x \"{archivePath}\" -o\"{destinationDirectory}\""
-                        : $"x \"{archivePath}\" -o\"{destinationDirectory}\" {(overwrite ? "-aoa" : "-aos")}";
 
                     var psi = new ProcessStartInfo
                     {
                         FileName = exe,
-                        Arguments = args,
                         UseShellExecute = false,
                         CreateNoWindow = !isGui
                     };
+                    psi.ArgumentList.Add("x");
+                    psi.ArgumentList.Add(archivePath);
+                    psi.ArgumentList.Add($"-o{destinationDirectory}");
+                    if (!isGui)
+                    {
+                        psi.ArgumentList.Add(overwrite ? "-aoa" : "-aos");
+                    }
 
                     using var proc = Process.Start(psi);
                     if (proc != null)

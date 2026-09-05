@@ -48,7 +48,7 @@ public class NetworkDiscoveryService
             try
             {
                 var (output, _, exitCode) = await FileSystemService.Instance.RunProcessWithTimeoutAsync(
-                    "net.exe", "use", 1500, null, cancellationToken);
+                    "net.exe", new[] { "use" }, 1500, null, cancellationToken);
 
                 if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
                 {
@@ -66,7 +66,7 @@ public class NetworkDiscoveryService
             try
             {
                 var (output, _, exitCode) = await FileSystemService.Instance.RunProcessWithTimeoutAsync(
-                    "net.exe", "view", 2000, null, cancellationToken);
+                    "net.exe", new[] { "view" }, 2000, null, cancellationToken);
 
                 if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
                 {
@@ -108,7 +108,7 @@ public class NetworkDiscoveryService
             try
             {
                 var (output, _, exitCode) = await FileSystemService.Instance.RunProcessWithTimeoutAsync(
-                    "net.exe", $"view \"\\\\{computerNameOrIp}\"", 2500, null, cancellationToken);
+                    "net.exe", new[] { "view", $@"\\{computerNameOrIp}" }, 2500, null, cancellationToken);
 
                 if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
                 {

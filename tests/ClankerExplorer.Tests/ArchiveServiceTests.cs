@@ -28,4 +28,40 @@ public sealed class ArchiveServiceTests
         Assert.False(File.Exists(escapedPath));
         Assert.False(File.Exists(Path.Combine(destination, "escaped.txt")));
     }
+
+    [Fact]
+    public async Task ExtractZip_ExtractsToDestinationWithSpaces()
+    {
+        using var fs = new TemporaryFileSystem();
+        var archivePath = Path.Combine(fs.FolderB, "archive with spaces.zip");
+        var destination = fs.CreateDirectory("FolderB/extracted destination with spaces");
+
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("inner file with spaces.txt");
+            await using var writer = new StreamWriter(entry.Open());
+            await writer.WriteAsync("archive content");
+        }
+
+        var result = await ArchiveService.Instance.ExtractToAsync(archivePath, destination);
+
+        Assert.True(result.success, result.message);
+        var expected = Path.Combine(destination, "inner file with spaces.txt");
+        Assert.True(File.Exists(expected));
+        Assert.Equal("archive content", File.ReadAllText(expected));
+    }
+
+    [Fact]
+    public async Task CreateZip_CreatesZipInDestinationWithSpaces()
+    {
+        using var fs = new TemporaryFileSystem();
+        var sourceFile = fs.CreateFile("FolderA/source file with spaces.txt", "content to zip");
+        var targetZip = Path.Combine(fs.FolderB, "output zip with spaces.zip");
+
+        var result = await ArchiveService.Instance.CreateZipAsync(sourceFile, targetZip);
+
+        Assert.True(result.success, result.message);
+        Assert.True(File.Exists(targetZip));
+    }
 }
+

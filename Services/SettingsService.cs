@@ -91,6 +91,14 @@ public class SettingsService
         }
     }
 
+    public void UpdateSettings(Action<AppSettings> update)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+
+        update(CurrentSettings);
+        SaveSettings();
+    }
+
     public void ExportSettings(string destinationFilePath)
     {
         ExportFullBackup(destinationFilePath);

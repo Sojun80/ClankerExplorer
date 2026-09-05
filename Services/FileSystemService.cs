@@ -71,7 +71,7 @@ public class FileSystemService
         return "Edit";
     }
 
-    public async Task<(string stdout, string stderr, int exitCode)> RunProcessWithTimeoutAsync(
+    public Task<(string stdout, string stderr, int exitCode)> RunProcessWithTimeoutAsync(
         string fileName,
         string arguments,
         int timeoutMs = 3000,
@@ -90,6 +90,40 @@ public class FileSystemService
             StandardErrorEncoding = encoding ?? Encoding.UTF8
         };
 
+        return RunProcessWithTimeoutAsync(psi, timeoutMs, cancellationToken);
+    }
+
+    public Task<(string stdout, string stderr, int exitCode)> RunProcessWithTimeoutAsync(
+        string fileName,
+        IEnumerable<string> arguments,
+        int timeoutMs = 3000,
+        Encoding? encoding = null,
+        CancellationToken cancellationToken = default)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = encoding ?? Encoding.UTF8,
+            StandardErrorEncoding = encoding ?? Encoding.UTF8
+        };
+
+        foreach (var arg in arguments)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        return RunProcessWithTimeoutAsync(psi, timeoutMs, cancellationToken);
+    }
+
+    private static async Task<(string stdout, string stderr, int exitCode)> RunProcessWithTimeoutAsync(
+        ProcessStartInfo psi,
+        int timeoutMs,
+        CancellationToken cancellationToken)
+    {
         try
         {
             using var process = new Process { StartInfo = psi };
@@ -217,7 +251,7 @@ public class FileSystemService
 
         try
         {
-            var (output, _, exitCode) = await RunProcessWithTimeoutAsync("wsl.exe", "-l -q", 2000, Encoding.Unicode, cancellationToken);
+            var (output, _, exitCode) = await RunProcessWithTimeoutAsync("wsl.exe", new[] { "-l", "-q" }, 2000, Encoding.Unicode, cancellationToken);
             if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
             {
                 var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -785,6 +819,165 @@ public class FileSystemService
         }
     }
 
+    public static string NormalizePathForRootComparison(string path)
+    {
+        string full = Path.GetFullPath(path);
+        string trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return full;
+        }
+        return trimmed;
+    }
+
+    public static bool IsProtectedDeleteTarget(string? path)
+    {
+        return IsProtectedDeleteTarget(path, OperatingSystem.IsWindows(), null, null);
+    }
+
+    public static bool IsProtectedDeleteTarget(
+        string? path,
+        bool isWindows,
+        string? customUserProfile = null,
+        string? customWindowsDir = null)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+
+        var comparison = isWindows
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (isWindows && path.Length >= 2 && char.IsLetter(path[0]) && path[1] == ':')
+        {
+            var rest = path.Substring(2);
+            if (rest.All(c => c == '\\' || c == '/'))
+            {
+                return true;
+            }
+        }
+
+        string normalizedTarget;
+        string? pathRoot;
+
+        if (!isWindows && OperatingSystem.IsWindows())
+        {
+            var trimmed = path.TrimEnd('/');
+            normalizedTarget = string.IsNullOrEmpty(trimmed) ? "/" : trimmed;
+            pathRoot = normalizedTarget.StartsWith('/') ? "/" : null;
+        }
+        else
+        {
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            catch
+            {
+                return false;
+            }
+
+            normalizedTarget = NormalizePathForRootComparison(fullPath);
+            pathRoot = Path.GetPathRoot(fullPath);
+        }
+
+        // 1. Filesystem root / drive root
+        if (!string.IsNullOrEmpty(pathRoot))
+        {
+            string normalizedRoot = (!isWindows && OperatingSystem.IsWindows())
+                ? (pathRoot.TrimEnd('/') == "" ? "/" : pathRoot.TrimEnd('/'))
+                : NormalizePathForRootComparison(pathRoot);
+
+            if (string.Equals(normalizedTarget, normalizedRoot, comparison))
+            {
+                return true;
+            }
+        }
+
+        // 2. Drive roots via DriveInfo on Windows
+        if (isWindows && OperatingSystem.IsWindows())
+        {
+            try
+            {
+                foreach (var drive in DriveInfo.GetDrives())
+                {
+                    if (string.Equals(normalizedTarget, NormalizePathForRootComparison(drive.RootDirectory.FullName), comparison))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // 3. Windows directory (on Windows)
+        if (isWindows)
+        {
+            var winDirCandidates = new[]
+            {
+                customWindowsDir,
+                OperatingSystem.IsWindows() ? Environment.GetFolderPath(Environment.SpecialFolder.Windows) : null,
+                Environment.GetEnvironmentVariable("SystemRoot"),
+                Environment.GetEnvironmentVariable("WINDIR")
+            };
+
+            foreach (var winDir in winDirCandidates)
+            {
+                if (!string.IsNullOrWhiteSpace(winDir))
+                {
+                    if (string.Equals(normalizedTarget, NormalizePathForRootComparison(winDir), comparison))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // 4. User profile / home directory
+        var profileCandidates = new[]
+        {
+            customUserProfile,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            isWindows ? Environment.GetEnvironmentVariable("USERPROFILE") : Environment.GetEnvironmentVariable("HOME")
+        };
+
+        foreach (var profile in profileCandidates)
+        {
+            if (!string.IsNullOrWhiteSpace(profile))
+            {
+                string normProfile = (!isWindows && OperatingSystem.IsWindows())
+                    ? (profile.TrimEnd('/') == "" ? "/" : profile.TrimEnd('/'))
+                    : NormalizePathForRootComparison(profile);
+
+                if (string.Equals(normalizedTarget, normProfile, comparison))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // 5. Unix root "/" explicitly
+        if (!isWindows && (normalizedTarget == "/" || path == "/"))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    public static void ValidatePermanentDeleteTarget(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("Path cannot be empty or whitespace.", nameof(path));
+        }
+
+        if (IsProtectedDeleteTarget(path))
+        {
+            throw new InvalidOperationException($"Permanent deletion of protected filesystem location '{path}' was refused.");
+        }
+    }
+
     public async Task DeleteAsync(IEnumerable<string> paths, bool permanent = false, CancellationToken cancellationToken = default)
     {
         await Task.Run(async () =>
@@ -796,13 +989,23 @@ public class FileSystemService
 
                 if (permanent)
                 {
+                    ValidatePermanentDeleteTarget(path);
+
                     if (File.Exists(path))
                     {
                         File.Delete(path);
                     }
                     else if (Directory.Exists(path))
                     {
-                        Directory.Delete(path, true);
+                        var dirInfo = new DirectoryInfo(path);
+                        if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0 || dirInfo.LinkTarget != null)
+                        {
+                            dirInfo.Delete(false);
+                        }
+                        else
+                        {
+                            Directory.Delete(path, true);
+                        }
                     }
                 }
                 else
@@ -830,7 +1033,12 @@ public class FileSystemService
                     else
                     {
                         // Linux / POSIX Trash via gio
-                        var (output, error, exitCode) = await RunProcessWithTimeoutAsync("gio", $"trash \"{path}\"", 3000, cancellationToken: cancellationToken).ConfigureAwait(false);
+                        string gioExe = OperatingSystem.IsLinux() && File.Exists("/usr/bin/gio") ? "/usr/bin/gio" : "gio";
+                        var (output, error, exitCode) = await RunProcessWithTimeoutAsync(
+                            gioExe,
+                            new[] { "trash", "--", path },
+                            3000,
+                            cancellationToken: cancellationToken).ConfigureAwait(false);
                         if (exitCode != 0)
                         {
                             // Never fall back to permanent deletion if trash fails!

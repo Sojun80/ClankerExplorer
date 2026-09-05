@@ -15,7 +15,7 @@ public static class BuildInfoService
         get
         {
             var v = typeof(BuildInfoService).Assembly.GetName().Version;
-            return v != null ? $"{v.Major}.{v.Minor}.{v.Build}" : "1.5.0";
+            return v != null ? $"{v.Major}.{v.Minor}.{v.Build}" : "1.5.1";
         }
     }
 

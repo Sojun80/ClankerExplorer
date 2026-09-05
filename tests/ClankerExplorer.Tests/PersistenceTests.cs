@@ -51,7 +51,8 @@ public sealed class PersistenceTests
         {
             TabWidth = 205,
             ViewMode = "Thumbnails",
-            ThumbnailSize = 224
+            ThumbnailSize = 224,
+            ThemePreset = "CyberDark"
         };
 
         var clone = original.Clone();
@@ -60,6 +61,47 @@ public sealed class PersistenceTests
         Assert.Equal(205, clone.TabWidth);
         Assert.Equal("Thumbnails", clone.ViewMode);
         Assert.Equal(224, clone.ThumbnailSize);
+        Assert.Equal("CyberDark", clone.ThemePreset);
+
+        // Mutating primitive/string on clone does not mutate original
+        clone.TabWidth = 300;
+        clone.ViewMode = "Details";
+        clone.ThemePreset = "DraculaViolet";
+
+        Assert.Equal(205, original.TabWidth);
+        Assert.Equal("Thumbnails", original.ViewMode);
+        Assert.Equal("CyberDark", original.ThemePreset);
+    }
+
+    [Fact]
+    public void SettingsService_UpdateSettings_MutatesPersistsAndRaisesEvent()
+    {
+        using var fs = new TemporaryFileSystem();
+        var service = new SettingsService(fs.Config);
+        AppSettings? eventReceived = null;
+        service.SettingsChanged += s => eventReceived = s;
+
+        service.UpdateSettings(s =>
+        {
+            s.ThumbnailSize = 280;
+            s.ThemePreset = "NordicSlate";
+            s.ConfirmBeforeDelete = false;
+        });
+
+        Assert.Equal(280, service.CurrentSettings.ThumbnailSize);
+        Assert.Equal("NordicSlate", service.CurrentSettings.ThemePreset);
+        Assert.False(service.CurrentSettings.ConfirmBeforeDelete);
+
+        // Verify event fired with updated instance
+        Assert.NotNull(eventReceived);
+        Assert.Equal(280, eventReceived!.ThumbnailSize);
+        Assert.Equal("NordicSlate", eventReceived.ThemePreset);
+
+        // Verify persistence to disk by reloading in a new service instance
+        var reloaded = new SettingsService(fs.Config);
+        Assert.Equal(280, reloaded.CurrentSettings.ThumbnailSize);
+        Assert.Equal("NordicSlate", reloaded.CurrentSettings.ThemePreset);
+        Assert.False(reloaded.CurrentSettings.ConfirmBeforeDelete);
     }
 
     [Fact]

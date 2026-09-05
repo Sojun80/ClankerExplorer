@@ -108,8 +108,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             var settings = SettingsService.Instance.CurrentSettings;
             if (settings.ThumbnailSize != value)
             {
-                settings.ThumbnailSize = value;
-                SettingsService.Instance.SaveSettings(settings);
+                SettingsService.Instance.UpdateSettings(s => s.ThumbnailSize = value);
             }
             if (!_applyingFolderViewState) PersistCurrentFolderViewState();
         }
@@ -153,18 +152,14 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public void SetDetailsView()
     {
         ViewMode = "Details";
-        var s = SettingsService.Instance.CurrentSettings;
-        s.ViewMode = ViewMode;
-        SettingsService.Instance.SaveSettings(s);
+        SettingsService.Instance.UpdateSettings(s => s.ViewMode = ViewMode);
     }
 
     [RelayCommand]
     public void SetThumbnailView()
     {
         ViewMode = "Thumbnails";
-        var s = SettingsService.Instance.CurrentSettings;
-        s.ViewMode = ViewMode;
-        SettingsService.Instance.SaveSettings(s);
+        SettingsService.Instance.UpdateSettings(s => s.ViewMode = ViewMode);
     }
 
     [RelayCommand]
@@ -745,9 +740,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public void ToggleSmartSizing()
     {
         SmartColumnSizing = !SmartColumnSizing;
-        var s = SettingsService.Instance.CurrentSettings;
-        s.SmartColumnSizing = SmartColumnSizing;
-        SettingsService.Instance.SaveSettings(s);
+        SettingsService.Instance.UpdateSettings(s => s.SmartColumnSizing = SmartColumnSizing);
         NotifyColumnWidthsChanged();
         PersistCurrentFolderViewState();
     }
