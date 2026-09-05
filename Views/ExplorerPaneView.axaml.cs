@@ -133,8 +133,9 @@ public partial class ExplorerPaneView : UserControl
                     SaveCurrentColumnLayout();
                     CaptureFolderViewportAnchors();
                 }, RoutingStrategies.Bubble);
-                FileDataGrid.PointerWheelChanged += (_, _) =>
-                    Dispatcher.UIThread.Post(CaptureFolderViewportAnchors, DispatcherPriority.Background);
+                FileDataGrid.AddHandler(PointerWheelChangedEvent, (_, _) =>
+                    Dispatcher.UIThread.Post(CaptureFolderViewportAnchors, DispatcherPriority.Background),
+                    RoutingStrategies.Bubble, handledEventsToo: true);
                 FileDataGrid.KeyUp += (_, _) =>
                     Dispatcher.UIThread.Post(CaptureFolderViewportAnchors, DispatcherPriority.Background);
                 FileDataGrid.ColumnReordered += (sender, args) => SaveCurrentColumnLayout();
@@ -190,6 +191,8 @@ public partial class ExplorerPaneView : UserControl
             _thumbnailDebounceTimer.Stop();
             _folderScrollSaveTimer.Stop();
             _thumbnailViewportCts?.Cancel();
+            ThumbnailService.Instance.CancelPendingRequests();
+            _retainedThumbnailItems.Clear();
         };
     }
 
@@ -225,8 +228,12 @@ public partial class ExplorerPaneView : UserControl
             {
                 if (args.PropertyName is nameof(ExplorerPaneViewModel.ThumbnailRows)
                     or nameof(ExplorerPaneViewModel.IsThumbnailView)
-                    or nameof(ExplorerPaneViewModel.ThumbnailSize))
+                    or nameof(ExplorerPaneViewModel.ThumbnailSize)
+                    or nameof(ExplorerPaneViewModel.SelectedTab))
                 {
+                    _thumbnailViewportCts?.Cancel();
+                    ThumbnailService.Instance.CancelPendingRequests();
+                    _retainedThumbnailItems.Clear();
                     Dispatcher.UIThread.Post(ScheduleThumbnailViewportUpdate, DispatcherPriority.Loaded);
                 }
             };
@@ -476,7 +483,29 @@ public partial class ExplorerPaneView : UserControl
         _thumbnailViewportCts?.Cancel();
         if (DataContext is not ExplorerPaneViewModel vm || !vm.IsThumbnailView) return;
 
-        int delay = Math.Clamp(SettingsService.Instance.CurrentSettings.ThumbnailScrollDebounceMilliseconds, 50, 150);
+        ThumbnailService.Instance.NotifyScrollActivity();
+
+        // Fast-path while scrolling: immediately assign any realized visible items already in memory cache
+        if (ThumbnailListBox != null && vm.SelectedTab != null)
+        {
+            var panel = ThumbnailListBox.FindDescendantOfType<VirtualizingStackPanel>();
+            int firstRow = panel?.FirstRealizedIndex ?? 0;
+            int lastRow = panel?.LastRealizedIndex ?? Math.Min(vm.ThumbnailRows.Count - 1, 3);
+            if (firstRow >= 0 && lastRow >= firstRow)
+            {
+                var items = vm.SelectedTab.FilteredItems;
+                int columns = Math.Max(1, vm.ThumbnailColumnCount);
+                int start = Math.Clamp(firstRow * columns, 0, items.Count);
+                int end = Math.Clamp((lastRow + 1) * columns, start, items.Count);
+                if (end > start)
+                {
+                    ThumbnailService.Instance.TryPopulateFromMemoryCache(items.Skip(start).Take(end - start), (int)vm.ThumbnailSize);
+                }
+            }
+        }
+
+        int configuredDelay = SettingsService.Instance.CurrentSettings.ThumbnailScrollDebounceMilliseconds;
+        int delay = Math.Clamp(Math.Max(180, configuredDelay), 150, 250);
         _thumbnailDebounceTimer.Interval = TimeSpan.FromMilliseconds(delay);
         _thumbnailDebounceTimer.Stop();
         _thumbnailDebounceTimer.Start();

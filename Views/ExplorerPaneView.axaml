@@ -390,6 +390,7 @@
 
       <!-- Main File DataGrid (Details View) -->
       <DataGrid x:Name="FileDataGrid" Grid.Column="1"
+                behaviors:ExplorerScrollBehavior.ScrollMode="Details"
                 HorizontalAlignment="Left"
                 DragDrop.AllowDrop="True"
                 ItemsSource="{Binding SelectedTab.FilteredItems}"
@@ -712,6 +713,7 @@
       <!-- Thumbnail mode: vertically virtualized logical rows. A plain WrapPanel
            realizes every item and is intentionally avoided for large folders. -->
       <ListBox x:Name="ThumbnailListBox" Grid.Column="1"
+               behaviors:ExplorerScrollBehavior.ScrollMode="Thumbnails"
                DragDrop.AllowDrop="True"
                Classes="thumbnail-grid"
                ItemsSource="{Binding ThumbnailRows}"
