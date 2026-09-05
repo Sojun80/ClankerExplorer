@@ -4,11 +4,13 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ClankerExplorer.AppLayer;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services;
+using ClankerExplorer.Services.Preview;
 
 namespace ClankerExplorer.ViewModels;
 
@@ -280,6 +282,8 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     private double _columnWidthOwnerGroup = 110;
 
     public string EditActionLabel => FileSystemService.Instance.GetEditMenuLabel();
+
+    public IPreviewService? PreviewService { get; set; }
 
     public event Action<FileItem?>? FileSelectedForPreview;
     public event Action<string, string>? RequestCreateItem; // "folder" / "file", parentPath
@@ -1109,7 +1113,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    public void OpenItem(FileItem? item = null)
+    public async Task OpenItem(FileItem? item = null)
     {
         var target = item ?? SelectedTab?.SelectedItem;
         if (target == null) return;
@@ -1124,12 +1128,16 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         }
         else
         {
+            if (PreviewService != null)
+            {
+                await PreviewService.YieldFileAsync(target.FullPath);
+            }
             FileSystemService.Instance.OpenItem(target.FullPath);
         }
     }
 
     [RelayCommand]
-    public void OpenSelected()
+    public async Task OpenSelected()
     {
         var items = GetSelectedFileItems();
         if (items.Count == 0 && SelectedTab?.SelectedItem != null)
@@ -1139,7 +1147,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
         if (items.Count == 1)
         {
-            OpenItem(items[0]);
+            await OpenItem(items[0]);
         }
         else if (items.Count > 1)
         {
@@ -1148,32 +1156,40 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             {
                 foreach (var file in nonDirs)
                 {
-                    OpenItem(file);
+                    await OpenItem(file);
                 }
             }
             else if (SelectedTab?.SelectedItem != null)
             {
-                OpenItem(SelectedTab.SelectedItem);
+                await OpenItem(SelectedTab.SelectedItem);
             }
         }
     }
 
     [RelayCommand]
-    public void EditItem()
+    public async Task EditItem()
     {
         var target = SelectedTab?.SelectedItem;
         if (target != null && !target.IsDirectory)
         {
+            if (PreviewService != null)
+            {
+                await PreviewService.YieldFileAsync(target.FullPath);
+            }
             FileSystemService.Instance.EditFile(target.FullPath);
         }
     }
 
     [RelayCommand]
-    public void OpenWith(FileItem? item = null)
+    public async Task OpenWith(FileItem? item = null)
     {
         var target = item ?? SelectedTab?.SelectedItem;
         if (target != null && !target.IsDirectory)
         {
+            if (PreviewService != null)
+            {
+                await PreviewService.YieldFileAsync(target.FullPath);
+            }
             FileSystemService.Instance.OpenWith(target.FullPath);
         }
     }
@@ -1575,9 +1591,13 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    public void OpenVSCode()
+    public async Task OpenVSCode()
     {
         var path = SelectedTab?.SelectedItem?.FullPath ?? SelectedTab?.CurrentPath ?? @"C:\";
+        if (PreviewService != null)
+        {
+            await PreviewService.YieldFileAsync(path);
+        }
         FileSystemService.Instance.OpenEditor(path);
     }
 

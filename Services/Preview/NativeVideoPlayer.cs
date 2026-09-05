@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using LibVLCSharp.Shared;
 
 namespace ClankerExplorer.Services.Preview;
@@ -207,6 +208,95 @@ public class NativeVideoPlayer : IDisposable
                 _mediaPlayer.Volume = isMuted ? 0 : _volume;
             }
             catch { }
+        }
+    }
+
+    /// <summary>
+    /// Checks whether this player currently owns or is loaded with the specified file.
+    /// </summary>
+    public bool OwnsFile(string? filePath)
+    {
+        if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(_currentFilePath)) return false;
+        try
+        {
+            return string.Equals(Path.GetFullPath(filePath), Path.GetFullPath(_currentFilePath), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return string.Equals(filePath, _currentFilePath, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// Asynchronously stops playback, detaches media, disposes the underlying Media object,
+    /// and waits for the OS file lock to be genuinely released before returning.
+    /// </summary>
+    public async Task YieldAsync(string filePath)
+    {
+        if (_isDisposed) return;
+        if (!OwnsFile(filePath)) return;
+
+        try
+        {
+            if (_mediaPlayer != null)
+            {
+                var state = _mediaPlayer.State;
+                if (state == VLCState.Playing || state == VLCState.Paused || state == VLCState.Buffering || state == VLCState.Opening)
+                {
+                    var stoppedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    void OnStopped(object? s, EventArgs e) => stoppedTcs.TrySetResult(true);
+                    void OnError(object? s, EventArgs e) => stoppedTcs.TrySetResult(false);
+
+                    _mediaPlayer.Stopped += OnStopped;
+                    _mediaPlayer.EncounteredError += OnError;
+                    try
+                    {
+                        _mediaPlayer.Stop();
+                        await Task.WhenAny(stoppedTcs.Task, Task.Delay(500)).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        _mediaPlayer.Stopped -= OnStopped;
+                        _mediaPlayer.EncounteredError -= OnError;
+                    }
+                }
+                else
+                {
+                    _mediaPlayer.Stop();
+                }
+
+                _mediaPlayer.Media = null;
+            }
+
+            _currentMedia?.Dispose();
+            _currentMedia = null;
+        }
+        catch { }
+        finally
+        {
+            Duration = TimeSpan.Zero;
+            _currentFilePath = null;
+        }
+
+        // Verify the file handle is genuinely released by the OS before returning
+        if (File.Exists(filePath))
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                try
+                {
+                    using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.None);
+                    break;
+                }
+                catch (IOException)
+                {
+                    await Task.Delay(10).ConfigureAwait(false);
+                }
+                catch
+                {
+                    break;
+                }
+            }
         }
     }
 

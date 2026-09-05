@@ -140,6 +140,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public string BuildDisplayString => BuildInfoService.DisplayString;
     public string BuildTooltipString => BuildInfoService.TooltipString;
+    public string AppVersion => BuildInfoService.AppVersion;
+    public string VersionDisplay => BuildInfoService.VersionDisplay;
+    public string TitleWithVersion => BuildInfoService.TitleWithVersion;
 
     public event Action<string, string>? RequestCreateItem;
     public event Action? RequestOpenNetworkShare;
@@ -183,7 +186,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
             }
         };
-        Search.RequestOpenFile += (filePath) =>
+        Search.RequestOpenFile += async (filePath) =>
         {
             if (ArchiveService.Instance.IsArchive(filePath))
             {
@@ -191,6 +194,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
+                await Inspector.YieldFileAsync(filePath);
                 FileSystemService.Instance.OpenItem(filePath);
             }
         };
@@ -340,6 +344,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void WirePaneEvents(ExplorerPaneViewModel pane)
     {
+        pane.PreviewService = Inspector;
+
         pane.FileSelectedForPreview += item =>
         {
             if (ShowInspector)
@@ -585,9 +591,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    public void OpenVSCode()
+    public async Task OpenVSCode()
     {
-        ActivePane.OpenVSCode();
+        await ActivePane.OpenVSCode();
     }
 
     [RelayCommand]

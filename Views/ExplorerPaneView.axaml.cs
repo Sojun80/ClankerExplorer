@@ -606,12 +606,12 @@ public partial class ExplorerPaneView : UserControl
         vm.NotifyContextMenuProperties();
     }
 
-    private void OnThumbnailItemDoubleTapped(object? sender, TappedEventArgs e)
+    private async void OnThumbnailItemDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (sender is Control { DataContext: FileItem item } && DataContext is ExplorerPaneViewModel vm)
         {
-            vm.OpenItem(item);
             e.Handled = true;
+            await vm.OpenItem(item);
         }
     }
 
@@ -1803,7 +1803,7 @@ public partial class ExplorerPaneView : UserControl
         KeyboardShortcutHandler.HandlePaneKeyDown(vm, e, focused);
     }
 
-    private void OnRowDoubleTapped(object? sender, TappedEventArgs e)
+    private async void OnRowDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab?.SelectedItem == null) return;
 
@@ -1827,8 +1827,8 @@ public partial class ExplorerPaneView : UserControl
 
         if (isRow)
         {
-            vm.OpenItem(vm.SelectedTab.SelectedItem);
             e.Handled = true;
+            await vm.OpenItem(vm.SelectedTab.SelectedItem);
         }
     }
 

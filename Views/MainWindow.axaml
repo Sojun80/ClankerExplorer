@@ -162,11 +162,15 @@
 
             <TextBlock Text="|" Foreground="{DynamicResource AppBorderBrush}" VerticalAlignment="Center" Margin="2,0"/>
 
-            <!-- C-Explorer Brand Label with 'Clanker Explorer' ToolTip -->
+            <!-- C-Explorer Brand Label with Version and ToolTip -->
             <Border Background="Transparent" VerticalAlignment="Center"
-                    ToolTip.Tip="Clanker Explorer">
-              <TextBlock Text="C-Explorer" FontWeight="Bold" FontSize="12"
-                         Foreground="{DynamicResource AppSubTextBrush}" VerticalAlignment="Center"/>
+                    ToolTip.Tip="{Binding BuildTooltipString}">
+              <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                <TextBlock Text="C-Explorer" FontWeight="Bold" FontSize="12"
+                           Foreground="{DynamicResource AppSubTextBrush}" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding VersionDisplay}" FontWeight="SemiBold" FontSize="11"
+                           Foreground="{DynamicResource AppHighlightBrush}" VerticalAlignment="Center"/>
+              </StackPanel>
             </Border>
           </StackPanel>
 

@@ -11,9 +11,9 @@
     <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
     <AssemblyTitle>C-Explorer</AssemblyTitle>
     <Product>C-Explorer</Product>
-    <Version>1.4.0</Version>
-    <AssemblyVersion>1.4.0.0</AssemblyVersion>
-    <FileVersion>1.4.0.0</FileVersion>
+    <Version>1.4.1</Version>
+    <AssemblyVersion>1.4.1.0</AssemblyVersion>
+    <FileVersion>1.4.1.0</FileVersion>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DebugType>embedded</DebugType>
@@ -79,10 +79,14 @@
     <None Include="libvlc\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <Target Name="SyncNet8LegacyOutput" AfterTargets="Build" Condition="'$(SolutionDir)' != '' and '$(SolutionDir)' != '*Undefined*'">
+  <Target Name="SyncNet8LegacyOutput" AfterTargets="Build">
+    <PropertyGroup>
+      <_TargetLegacyBin Condition="'$(SolutionDir)' != '' and '$(SolutionDir)' != '*Undefined*'">$(SolutionDir)bin\$(Configuration)\net8.0\</_TargetLegacyBin>
+      <_TargetLegacyBin Condition="'$(_TargetLegacyBin)' == ''">$(MSBuildThisFileDirectory)bin\$(Configuration)\net8.0\</_TargetLegacyBin>
+    </PropertyGroup>
     <ItemGroup>
       <OutputFiles Include="$(TargetDir)**\*.*" />
     </ItemGroup>
-    <Copy SourceFiles="@(OutputFiles)" DestinationFiles="@(OutputFiles->'$(SolutionDir)bin\$(Configuration)\net8.0\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" ContinueOnError="true" Retries="0" />
+    <Copy SourceFiles="@(OutputFiles)" DestinationFiles="@(OutputFiles->'$(_TargetLegacyBin)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" ContinueOnError="true" Retries="0" />
   </Target>
 </Project>

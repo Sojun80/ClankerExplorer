@@ -133,7 +133,7 @@ public static class KeyboardShortcutHandler
         {
             if (tab.SelectedItem != null)
             {
-                pane.OpenSelected();
+                _ = pane.OpenSelected();
                 e.Handled = true;
                 return true;
             }

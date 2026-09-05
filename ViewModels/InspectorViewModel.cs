@@ -15,12 +15,13 @@ using ClankerExplorer.Services.Metadata;
 
 namespace ClankerExplorer.ViewModels;
 
-public partial class InspectorViewModel : ObservableObject, IDisposable
+public partial class InspectorViewModel : ObservableObject, IPreviewService, IDisposable
 {
     private CancellationTokenSource? _previewCts;
     private CancellationTokenSource? _hashingCts;
     private long _previewGeneration = 0;
     private string? _currentFilePath;
+    private string? _yieldedFilePath;
     private bool _hasVideoMedia;
     private bool _isSeeking;
     private bool _isDisposed;
@@ -285,6 +286,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     /// </summary>
     public void UnloadPreview()
     {
+        _yieldedFilePath = null;
         _previewCts?.Cancel();
         _previewCts = null;
         _hashingCts?.Cancel();
@@ -323,8 +325,89 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
         StatusMessage = "Select a file to inspect";
     }
 
+    /// <summary>
+    /// Checks whether the preview component currently owns or holds open resources for the specified file.
+    /// </summary>
+    public bool OwnsFile(string? filePath)
+    {
+        if (string.IsNullOrEmpty(filePath)) return false;
+        if (!string.IsNullOrEmpty(_currentFilePath))
+        {
+            try
+            {
+                if (string.Equals(Path.GetFullPath(filePath), Path.GetFullPath(_currentFilePath), StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                if (string.Equals(filePath, _currentFilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        return _videoPlayer.OwnsFile(filePath);
+    }
+
+    /// <summary>
+    /// Asynchronously yields preview ownership, releases video/audio media objects and file handles,
+    /// and ensures the file is fully released by the OS before returning.
+    /// </summary>
+    public async Task YieldFileAsync(string filePath)
+    {
+        if (string.IsNullOrEmpty(filePath)) return;
+
+        // Invalidate any in-flight preview loading or hash calculations for this or previous files
+        _previewCts?.Cancel();
+        _previewCts = null;
+        Interlocked.Increment(ref _previewGeneration);
+
+        _hashingCts?.Cancel();
+        _hashingCts = null;
+
+        // Record yielded path so automatic selection refreshes won't immediately reacquire this file
+        _yieldedFilePath = filePath;
+
+        bool owns = OwnsFile(filePath);
+        if (owns || _hasVideoMedia || _videoPlayer.OwnsFile(filePath) || IsVideoPlaying)
+        {
+            // Yield video player resources with real completion semantics
+            await _videoPlayer.YieldAsync(filePath).ConfigureAwait(true);
+
+            _hasVideoMedia = false;
+            IsVideoPlaying = false;
+            IsVideoSessionActive = false;
+            OnPropertyChanged(nameof(VlcMediaPlayer));
+            OnPropertyChanged(nameof(PlayPauseButtonIcon));
+        }
+    }
+
     public async Task LoadPreviewAsync(string? filePath)
     {
+        if (!string.IsNullOrEmpty(filePath) && !string.IsNullOrEmpty(_yieldedFilePath))
+        {
+            try
+            {
+                if (string.Equals(Path.GetFullPath(filePath), Path.GetFullPath(_yieldedFilePath), StringComparison.OrdinalIgnoreCase))
+                {
+                    // Opportunistic yield in effect for this file: do not automatically reacquire preview
+                    return;
+                }
+            }
+            catch
+            {
+                if (string.Equals(filePath, _yieldedFilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+        }
+
+        // Selection has moved to a different file (or cleared); clear yielded file guard
+        _yieldedFilePath = null;
+
         _previewCts?.Cancel();
         _previewCts = new CancellationTokenSource();
         var token = _previewCts.Token;
@@ -616,6 +699,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
 
     public void PlayVideo()
     {
+        _yieldedFilePath = null;
         if (string.IsNullOrEmpty(_currentFilePath) || !File.Exists(_currentFilePath)) return;
 
         if (!_hasVideoMedia)
@@ -666,6 +750,7 @@ public partial class InspectorViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void SeekVideo(double seconds)
     {
+        _yieldedFilePath = null;
         var target = TimeSpan.FromSeconds(Math.Clamp(seconds, 0, VideoDuration.TotalSeconds));
         _isSeeking = true;
         VideoPosition = target;
