@@ -18,6 +18,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 {
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _filterDebounceCts;
+    private CancellationTokenSource? _filterExecutionCts;
     private readonly IDirectoryWatcher _watcher;
     private readonly DirectoryChangeReconciler _reconciler;
     private long _loadGeneration = 0;
@@ -25,6 +26,30 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     private int _selectionAnchorIndex = -1;
     private bool _isDisposed;
     private DirectoryReadOptions _directoryReadOptions = DirectoryReadOptions.FromSettings(SettingsService.Instance.CurrentSettings);
+    private SortedSourceCache? _sortedCache;
+    private long _itemsVersion;
+
+    private sealed class SortedSourceCache
+    {
+        public long ItemsVersion { get; }
+        public string SortColumn { get; }
+        public bool SortAscending { get; }
+        public List<FileItem> Items { get; }
+
+        public SortedSourceCache(long itemsVersion, string sortColumn, bool sortAscending, List<FileItem> items)
+        {
+            ItemsVersion = itemsVersion;
+            SortColumn = sortColumn;
+            SortAscending = sortAscending;
+            Items = items;
+        }
+    }
+
+    public void InvalidateSortedCache()
+    {
+        Interlocked.Increment(ref _itemsVersion);
+        _sortedCache = null;
+    }
 
     /// <summary>
     /// Holds the paths of items to be auto-selected once the directory listing loads.
@@ -96,8 +121,12 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _sortColumn = "Name";
 
+    partial void OnSortColumnChanged(string value) => InvalidateSortedCache();
+
     [ObservableProperty]
     private bool _sortAscending = true;
+
+    partial void OnSortAscendingChanged(bool value) => InvalidateSortedCache();
 
     [ObservableProperty]
     private FileItem? _selectedItem;
@@ -112,6 +141,8 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private ObservableCollection<FileItem> _items = new();
+
+    partial void OnItemsChanged(ObservableCollection<FileItem> value) => InvalidateSortedCache();
 
     [ObservableProperty]
     private ObservableCollection<FileItem> _filteredItems = new();
@@ -155,9 +186,21 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     public void UpdateCutStatus()
     {
         if (Items == null || _isDisposed) return;
-        foreach (var item in Items)
+        var cutSet = ClipboardFileService.GetCutPathsSnapshot();
+        if (cutSet == null || cutSet.Count == 0)
         {
-            item.IsCut = ClipboardFileService.IsPathCut(item.FullPath);
+            foreach (var item in Items)
+            {
+                item.IsCut = false;
+            }
+        }
+        else
+        {
+            foreach (var item in Items)
+            {
+                item.IsCut = !string.IsNullOrEmpty(item.FullPath) &&
+                             cutSet.Contains(item.FullPath.TrimEnd('\\', '/'));
+            }
         }
     }
 
@@ -304,9 +347,21 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                 .Where(i => !TransferEngine.IsActiveTempFile(i.FullPath))
                 .ToList();
 
-            foreach (var item in deduplicatedList)
+            var cutSet = ClipboardFileService.GetCutPathsSnapshot();
+            if (cutSet == null || cutSet.Count == 0)
             {
-                item.IsCut = ClipboardFileService.IsPathCut(item.FullPath);
+                foreach (var item in deduplicatedList)
+                {
+                    item.IsCut = false;
+                }
+            }
+            else
+            {
+                foreach (var item in deduplicatedList)
+                {
+                    item.IsCut = !string.IsNullOrEmpty(item.FullPath) &&
+                                 cutSet.Contains(item.FullPath.TrimEnd('\\', '/'));
+                }
             }
 
             Items = new ObservableCollection<FileItem>(deduplicatedList);
@@ -322,15 +377,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
             if (targetSelectPaths != null && targetSelectPaths.Count > 0)
             {
-                var matches = new List<FileItem>();
-                foreach (var p in targetSelectPaths)
-                {
-                    var match = FilteredItems.FirstOrDefault(f => string.Equals(f.FullPath, p, comparison));
-                    if (match != null && !matches.Contains(match))
-                    {
-                        matches.Add(match);
-                    }
-                }
+                var (matches, focusedMatch) = MatchSelectedItems(FilteredItems, targetSelectPaths, previousFocusedPath, comparer);
 
                 if (matches.Count > 0)
                 {
@@ -341,10 +388,6 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                         m.IsThumbnailSelected = true;
                         SelectedItems.Add(m);
                     }
-
-                    var focusedMatch = !string.IsNullOrEmpty(previousFocusedPath)
-                        ? matches.FirstOrDefault(m => string.Equals(m.FullPath, previousFocusedPath, comparison))
-                        : null;
 
                     SelectedItem = focusedMatch ?? matches.Last();
                     var firstMatchIndex = FilteredItems.IndexOf(matches[0]);
@@ -399,16 +442,8 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         var pathList = paths.Where(p => !string.IsNullOrEmpty(p)).ToList();
         if (pathList.Count == 0) return;
 
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var matches = new List<FileItem>();
-        foreach (var p in pathList)
-        {
-            var match = FilteredItems.FirstOrDefault(f => string.Equals(f.FullPath, p, comparison));
-            if (match != null && !matches.Contains(match))
-            {
-                matches.Add(match);
-            }
-        }
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var (matches, _) = MatchSelectedItems(FilteredItems, pathList, null, comparer);
 
         if (matches.Count > 0)
         {
@@ -473,9 +508,6 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     {
         if (_isDisposed || Items == null) return;
 
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
         var selectedPaths = SelectedItems
@@ -491,21 +523,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
         string? focusedPath = SelectedItem?.FullPath;
 
-        var result = BuildFilteredItems(Items, FilterText, IsFilterRegex, SortColumn, SortAscending);
+        var result = BuildFilteredItems(Items, FilterText, IsFilterRegex, SortColumn, SortAscending, CancellationToken.None);
         var newFiltered = new ObservableCollection<FileItem>(result);
         FilteredItems = newFiltered;
 
         if (selectedPaths.Count > 0)
         {
-            var matches = new List<FileItem>();
-            foreach (var p in selectedPaths)
-            {
-                var match = newFiltered.FirstOrDefault(f => string.Equals(f.FullPath, p, comparison));
-                if (match != null && !matches.Contains(match))
-                {
-                    matches.Add(match);
-                }
-            }
+            var (matches, focusedMatch) = MatchSelectedItems(newFiltered, selectedPaths, focusedPath, comparer);
 
             if (matches.Count > 0)
             {
@@ -516,10 +540,6 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                     m.IsThumbnailSelected = true;
                     SelectedItems.Add(m);
                 }
-
-                var focusedMatch = !string.IsNullOrEmpty(focusedPath)
-                    ? matches.FirstOrDefault(m => string.Equals(m.FullPath, focusedPath, comparison))
-                    : null;
 
                 SelectedItem = focusedMatch ?? matches.Last();
                 var firstMatchIndex = newFiltered.IndexOf(matches[0]);
@@ -532,6 +552,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     public async Task ApplyFilterAsync(CancellationToken cancellationToken = default)
     {
         if (_isDisposed || Items == null) return;
+
+        // Cancel previous filter computation promptly
+        _filterExecutionCts?.Cancel();
+        _filterExecutionCts?.Dispose();
+        _filterExecutionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var executionToken = _filterExecutionCts.Token;
+
         long generation = Interlocked.Increment(ref _filterGeneration);
         var snapshot = Items.ToArray();
         string filterText = FilterText;
@@ -539,9 +566,6 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         string sortColumn = SortColumn;
         bool sortAscending = SortAscending;
 
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
         var selectedPaths = SelectedItems
@@ -557,26 +581,26 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
         string? focusedPath = SelectedItem?.FullPath;
 
-        var result = await Task.Run(
-            () => BuildFilteredItems(snapshot, filterText, isRegex, sortColumn, sortAscending),
-            cancellationToken);
+        List<FileItem> result;
+        try
+        {
+            result = await Task.Run(
+                () => BuildFilteredItems(snapshot, filterText, isRegex, sortColumn, sortAscending, executionToken),
+                executionToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
 
-        if (!_isDisposed && !cancellationToken.IsCancellationRequested && generation == _filterGeneration)
+        if (!_isDisposed && !executionToken.IsCancellationRequested && generation == _filterGeneration)
         {
             var newFiltered = new ObservableCollection<FileItem>(result);
             FilteredItems = newFiltered;
 
             if (selectedPaths.Count > 0)
             {
-                var matches = new List<FileItem>();
-                foreach (var p in selectedPaths)
-                {
-                    var match = newFiltered.FirstOrDefault(f => string.Equals(f.FullPath, p, comparison));
-                    if (match != null && !matches.Contains(match))
-                    {
-                        matches.Add(match);
-                    }
-                }
+                var (matches, focusedMatch) = MatchSelectedItems(newFiltered, selectedPaths, focusedPath, comparer);
 
                 if (matches.Count > 0)
                 {
@@ -588,10 +612,6 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                         SelectedItems.Add(m);
                     }
 
-                    var focusedMatch = !string.IsNullOrEmpty(focusedPath)
-                        ? matches.FirstOrDefault(m => string.Equals(m.FullPath, focusedPath, comparison))
-                        : null;
-
                     SelectedItem = focusedMatch ?? matches.Last();
                     var firstMatchIndex = newFiltered.IndexOf(matches[0]);
                     _selectionAnchorIndex = firstMatchIndex >= 0 ? firstMatchIndex : 0;
@@ -601,54 +621,152 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static List<FileItem> BuildFilteredItems(
-        IEnumerable<FileItem> source,
-        string filterText,
-        bool isFilterRegex,
-        string sortColumn,
-        bool sortAscending)
+    private static (List<FileItem> Matches, FileItem? FocusedMatch) MatchSelectedItems(
+        IEnumerable<FileItem> items,
+        IEnumerable<string> targetPaths,
+        string? preferredFocusedPath,
+        StringComparer comparer)
     {
-        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        IEnumerable<FileItem> query = source
-            .Where(i => i != null)
-            .GroupBy(i => !string.IsNullOrEmpty(i.FullPath) ? i.FullPath : (i.Name ?? string.Empty), comparer)
-            .Select(g => g.First());
-
-        if (!string.IsNullOrWhiteSpace(filterText))
+        var lookup = new Dictionary<string, FileItem>(comparer);
+        foreach (var item in items)
         {
-            if (isFilterRegex)
+            if (!string.IsNullOrEmpty(item.FullPath))
             {
-                try
-                {
-                    var regex = new Regex(filterText, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
-                    query = query.Where(i => regex.IsMatch(i.Name) || regex.IsMatch(i.Extension));
-                }
-                catch
-                {
-                    query = query.Where(i => i.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase));
-                }
-            }
-            else if (filterText.Contains('*') || filterText.Contains('?'))
-            {
-                var glob = "^" + Regex.Escape(filterText).Replace("\\*", ".*").Replace("\\?", ".") + "$";
-                try
-                {
-                    var regex = new Regex(glob, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
-                    query = query.Where(i => regex.IsMatch(i.Name));
-                }
-                catch
-                {
-                    query = query.Where(i => i.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase));
-                }
-            }
-            else
-            {
-                query = query.Where(i => i.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase) ||
-                                         i.Extension.Contains(filterText, StringComparison.OrdinalIgnoreCase));
+                lookup.TryAdd(item.FullPath, item);
             }
         }
 
-        // Sort: files and folders are treated as equals when sorting
+        var matches = new List<FileItem>();
+        var seen = new HashSet<FileItem>();
+        foreach (var p in targetPaths)
+        {
+            if (!string.IsNullOrEmpty(p) && lookup.TryGetValue(p, out var match) && seen.Add(match))
+            {
+                matches.Add(match);
+            }
+        }
+
+        FileItem? focusedMatch = null;
+        if (!string.IsNullOrEmpty(preferredFocusedPath))
+        {
+            lookup.TryGetValue(preferredFocusedPath, out focusedMatch);
+        }
+
+        return (matches, focusedMatch);
+    }
+
+    private List<FileItem> BuildFilteredItems(
+        IReadOnlyList<FileItem> source,
+        string filterText,
+        bool isFilterRegex,
+        string sortColumn,
+        bool sortAscending,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var sortedSource = GetOrBuildSortedSource(source, sortColumn, sortAscending, cancellationToken);
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (string.IsNullOrWhiteSpace(filterText))
+        {
+            return new List<FileItem>(sortedSource);
+        }
+
+        Func<FileItem, bool> filterPredicate;
+        if (isFilterRegex)
+        {
+            try
+            {
+                var regex = new Regex(filterText, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
+                filterPredicate = i => regex.IsMatch(i.Name) || regex.IsMatch(i.Extension);
+            }
+            catch
+            {
+                filterPredicate = i => i.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        else if (filterText.Contains('*') || filterText.Contains('?'))
+        {
+            var glob = "^" + Regex.Escape(filterText).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+            try
+            {
+                var regex = new Regex(glob, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
+                filterPredicate = i => regex.IsMatch(i.Name);
+            }
+            catch
+            {
+                filterPredicate = i => i.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        else
+        {
+            filterPredicate = i => i.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase) ||
+                                  i.Extension.Contains(filterText, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var result = new List<FileItem>();
+        int count = 0;
+        foreach (var item in sortedSource)
+        {
+            if ((++count & 511) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            if (item != null && filterPredicate(item))
+            {
+                result.Add(item);
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return result;
+    }
+
+    private List<FileItem> GetOrBuildSortedSource(
+        IReadOnlyList<FileItem> source,
+        string sortColumn,
+        bool sortAscending,
+        CancellationToken cancellationToken)
+    {
+        long currentVersion = Volatile.Read(ref _itemsVersion);
+        var cache = _sortedCache;
+
+        if (cache != null &&
+            cache.ItemsVersion == currentVersion &&
+            string.Equals(cache.SortColumn, sortColumn, StringComparison.OrdinalIgnoreCase) &&
+            cache.SortAscending == sortAscending)
+        {
+            return cache.Items;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var sorted = SortItems(source, sortColumn, sortAscending, cancellationToken);
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (currentVersion == Volatile.Read(ref _itemsVersion))
+        {
+            _sortedCache = new SortedSourceCache(currentVersion, sortColumn, sortAscending, sorted);
+        }
+
+        return sorted;
+    }
+
+    private static List<FileItem> SortItems(
+        IReadOnlyList<FileItem> source,
+        string sortColumn,
+        bool sortAscending,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Items is already guaranteed deduplicated by RefreshAsync and DirectoryChangeReconciler
+        IEnumerable<FileItem> query = source.Where(i => i != null);
+
         IOrderedEnumerable<FileItem> sorted;
         if (sortAscending)
         {
@@ -683,6 +801,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             };
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return sorted.ToList();
     }
 
@@ -870,6 +989,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         {
             _filterDebounceCts?.Cancel();
             _filterDebounceCts?.Dispose();
+        }
+        catch { }
+
+        try
+        {
+            _filterExecutionCts?.Cancel();
+            _filterExecutionCts?.Dispose();
         }
         catch { }
     }

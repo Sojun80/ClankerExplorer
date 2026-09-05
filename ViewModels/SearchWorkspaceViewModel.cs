@@ -240,9 +240,14 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
         Task.Run(async () =>
         {
             int workerFoldersSkipped = 0;
+            bool isTruncated = false;
             var progress = new DirectProgress<SearchProgressReport>(report =>
             {
                 workerFoldersSkipped = report.FoldersSkipped;
+                if (report.IsTruncated)
+                {
+                    isTruncated = true;
+                }
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
                     if (generation != _searchGeneration || _isDisposed) return;
@@ -337,6 +342,10 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
                         StatusText = TotalResultCount > 0
                             ? $"Search stopped ({TotalResultCount:N0} results)"
                             : "Search stopped";
+                    }
+                    else if (isTruncated)
+                    {
+                        StatusText = $"Showing first {TotalResultCount:N0} results (result limit reached)";
                     }
                     else
                     {

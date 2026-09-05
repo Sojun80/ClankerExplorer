@@ -537,6 +537,69 @@ public sealed class SearchTests
         Assert.True(focusRequested);
     }
 
+    [Fact]
+    public async Task NativeSearchProvider_MaxResultsCap_StopsEnumerationAndReportsTruncated()
+    {
+        using var fs = new TemporaryFileSystem();
+        for (int i = 1; i <= 20; i++)
+        {
+            fs.CreateFile($"FolderA/doc_{i:D2}.txt");
+        }
+
+        var provider = new NativeSearchProvider();
+        var request = new SearchRequest("doc", SearchScope.CurrentFolderAndSubfolders, fs.FolderA)
+        {
+            MaxResults = 5
+        };
+
+        SearchProgressReport? lastReport = null;
+        var progress = new SynchronousProgress<SearchProgressReport>(r => lastReport = r);
+
+        var matches = new List<SearchResultItem>();
+        await foreach (var item in provider.SearchAsync(request, progress))
+        {
+            matches.Add(item);
+        }
+
+        Assert.Equal(5, matches.Count);
+        Assert.NotNull(lastReport);
+        Assert.True(lastReport!.IsTruncated);
+        Assert.Equal(5, lastReport.MatchesFound);
+    }
+
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+        public SynchronousProgress(Action<T> handler) => _handler = handler ?? throw new ArgumentNullException(nameof(handler));
+        public void Report(T value) => _handler(value);
+    }
+
+    [Fact]
+    public async Task SearchWorkspaceViewModel_WhenResultCapReached_DisplaysTruncatedStatusText()
+    {
+        var fakeProvider = new ControllableFakeSearchProvider();
+        for (int i = 1; i <= 10; i++)
+        {
+            fakeProvider.ItemsToReturn.Add(new SearchResultItem
+            {
+                Name = $"item_{i}.txt",
+                FullPath = $@"C:\Test\item_{i}.txt"
+            });
+        }
+        fakeProvider.ReportTruncatedOnComplete = true;
+
+        var searchService = new SearchService(fakeProvider);
+        using var vm = new SearchWorkspaceViewModel(searchService, getCurrentFolder: () => @"C:\Test");
+
+        vm.Query = "item";
+        vm.SubmitSearch();
+
+        bool finished = await WaitForConditionAsync(() => !vm.IsSearching, timeoutMs: 3000);
+        Assert.True(finished);
+        Assert.Contains("Showing first", vm.StatusText);
+        Assert.Contains("(result limit reached)", vm.StatusText);
+    }
+
     private static async Task<bool> WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 20)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -557,6 +620,7 @@ public sealed class SearchTests
         public bool IsAvailable => true;
 
         public int DelayMs { get; set; } = 0;
+        public bool ReportTruncatedOnComplete { get; set; } = false;
         public List<SearchResultItem> ItemsToReturn { get; } = new();
         public int SkippedFoldersToReport { get; set; } = 0;
         public int SearchCallCount { get; private set; }
@@ -585,6 +649,11 @@ public sealed class SearchTests
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return item;
+            }
+
+            if (ReportTruncatedOnComplete)
+            {
+                progress?.Report(new SearchProgressReport(SkippedFoldersToReport, ItemsToReturn.Count, null, IsTruncated: true));
             }
         }
     }

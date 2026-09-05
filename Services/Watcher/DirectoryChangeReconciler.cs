@@ -444,6 +444,7 @@ public sealed class DirectoryChangeReconciler
         bool wasSelected = _tab.SelectedItems.Contains(existing) || existing.IsThumbnailSelected;
 
         _tab.Items.Remove(existing);
+        _tab.InvalidateSortedCache();
 
         bool removedFromFiltered = false;
         if (deletedFilteredIndex >= 0)
@@ -489,7 +490,9 @@ public sealed class DirectoryChangeReconciler
         var existing = _tab.Items.FirstOrDefault(i => PathComparer.Equals(i.FullPath, change.Event.FullPath));
         if (existing != null)
         {
+            _tab.InvalidateSortedCache();
             // Existing item changed
+            existing.Extension = change.Extension;
             existing.SizeBytes = change.SizeBytes;
             existing.FormattedSize = change.IsDirectory ? "<DIR>" : FileSystemService.FormatBytes(change.SizeBytes);
             existing.ModifiedTime = change.ModifiedTime;
@@ -538,6 +541,7 @@ public sealed class DirectoryChangeReconciler
         };
 
         _tab.Items.Add(newItem);
+        _tab.InvalidateSortedCache();
 
         if (MatchesFilter(newItem, _tab.FilterText, _tab.IsFilterRegex))
         {
@@ -593,6 +597,7 @@ public sealed class DirectoryChangeReconciler
         targetItem.ThumbnailImage = null; // Invalidate thumbnail
 
         _tab.TriggerThumbnailViewportUpdate();
+        _tab.InvalidateSortedCache();
 
         bool wasInFiltered = _tab.FilteredItems.Contains(targetItem);
         bool nowMatches = MatchesFilter(targetItem, _tab.FilterText, _tab.IsFilterRegex);

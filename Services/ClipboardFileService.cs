@@ -46,6 +46,27 @@ public static class ClipboardFileService
         }
     }
 
+    /// <summary>
+    /// Gets a snapshot of currently cut file paths as a set, or null if not in cut mode or no paths stored.
+    /// Allows bulk checking (e.g. across 50,000 items) with a single lock acquisition and O(1) lookups.
+    /// </summary>
+    public static HashSet<string>? GetCutPathsSnapshot()
+    {
+        lock (_lock)
+        {
+            if (!_isCut || _storedPaths.Count == 0) return null;
+            var set = new HashSet<string>(PathComparer);
+            foreach (var p in _storedPaths)
+            {
+                if (!string.IsNullOrEmpty(p))
+                {
+                    set.Add(p.TrimEnd('\\', '/'));
+                }
+            }
+            return set;
+        }
+    }
+
     public static void Copy(IEnumerable<string> paths)
     {
         lock (_lock)

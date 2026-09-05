@@ -53,6 +53,12 @@ public sealed record SearchRequest(
     /// Optional maximum file size filter in bytes (reserved for future query syntax).
     /// </summary>
     public long? MaxSizeBytes { get; init; } = null;
+
+    /// <summary>
+    /// Maximum number of matching results to produce before stopping enumeration.
+    /// Defaults to 5,000 to prevent runaway crawling and high memory usage.
+    /// </summary>
+    public int MaxResults { get; init; } = 5000;
 }
 
 /// <summary>
@@ -61,4 +67,5 @@ public sealed record SearchRequest(
 public sealed record SearchProgressReport(
     int FoldersSkipped,
     int MatchesFound,
-    string? CurrentFolder = null);
+    string? CurrentFolder = null,
+    bool IsTruncated = false);

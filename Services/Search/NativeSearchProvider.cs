@@ -18,6 +18,14 @@ public sealed class NativeSearchProvider : ISearchProvider
     public string DisplayName => "Native Filesystem Search";
     public bool IsAvailable => true;
 
+    private static readonly EnumerationOptions SearchEnumerationOptions = new()
+    {
+        IgnoreInaccessible = true,
+        RecurseSubdirectories = false,
+        ReturnSpecialDirectories = false,
+        AttributesToSkip = FileAttributes.System
+    };
+
     public async IAsyncEnumerable<SearchResultItem> SearchAsync(
         SearchRequest request,
         IProgress<SearchProgressReport>? progress = null,
@@ -37,6 +45,7 @@ public sealed class NativeSearchProvider : ISearchProvider
             yield break;
         }
 
+        int maxResults = request.MaxResults > 0 ? request.MaxResults : 5000;
         bool isRecursive = request.Scope != SearchScope.CurrentFolder;
         var comparison = request.CaseSensitive
             ? StringComparison.Ordinal
@@ -101,7 +110,7 @@ public sealed class NativeSearchProvider : ISearchProvider
             IEnumerable<FileSystemInfo> entries;
             try
             {
-                entries = dirInfo.EnumerateFileSystemInfos();
+                entries = dirInfo.EnumerateFileSystemInfos("*", SearchEnumerationOptions);
             }
             catch (Exception)
             {
@@ -210,6 +219,12 @@ public sealed class NativeSearchProvider : ISearchProvider
                         {
                             matchesFound++;
                             yield return item;
+
+                            if (matchesFound >= maxResults)
+                            {
+                                progress?.Report(new SearchProgressReport(foldersSkipped, matchesFound, null, IsTruncated: true));
+                                yield break;
+                            }
                         }
                     }
 
@@ -230,7 +245,7 @@ public sealed class NativeSearchProvider : ISearchProvider
         }
 
         // Final progress report upon completion
-        progress?.Report(new SearchProgressReport(foldersSkipped, matchesFound, null));
+        progress?.Report(new SearchProgressReport(foldersSkipped, matchesFound, null, IsTruncated: false));
     }
 
     private static List<string> ResolveSearchRoots(SearchRequest request)
