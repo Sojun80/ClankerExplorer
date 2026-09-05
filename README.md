@@ -8,7 +8,7 @@ Compiles directly to a **single standalone Windows executable (`.exe`)** with ze
 
 ## 📸 Overview
 
-![ClankerExplorer Overview](docs/screenshots/main_overview.png)
+![ClankerExplorer Overview](docs/screenshots/clanker_overview.png)
 
 ---
 
