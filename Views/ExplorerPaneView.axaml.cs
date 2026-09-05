@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -81,10 +83,24 @@ public partial class ExplorerPaneView : UserControl
             {
                 vm.RequestSetClipboardText += async text =>
                 {
-                    var topLevel = TopLevel.GetTopLevel(this);
-                    if (topLevel?.Clipboard != null && !string.IsNullOrEmpty(text))
+                    try
                     {
-                        await topLevel.Clipboard.SetTextAsync(text);
+                        var topLevel = TopLevel.GetTopLevel(this);
+                        if (topLevel?.Clipboard != null && !string.IsNullOrEmpty(text))
+                        {
+                            await topLevel.Clipboard.SetTextAsync(text);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"SetClipboardText failed: {ex}");
+                        if (vm.SelectedTab != null)
+                        {
+                            vm.SelectedTab.StatusMessage = "Unable to access clipboard.";
+                        }
                     }
                 };
 
@@ -193,7 +209,9 @@ public partial class ExplorerPaneView : UserControl
         {
             _thumbnailDebounceTimer.Stop();
             _folderScrollSaveTimer.Stop();
-            _thumbnailViewportCts?.Cancel();
+            var cts = _thumbnailViewportCts;
+            _thumbnailViewportCts = null;
+            cts?.Cancel();
             ThumbnailService.Instance.CancelPendingRequests();
             _retainedThumbnailItems.Clear();
         };
@@ -558,13 +576,47 @@ public partial class ExplorerPaneView : UserControl
         }
         _retainedThumbnailItems = retained;
 
-        _thumbnailViewportCts?.Dispose();
-        _thumbnailViewportCts = new CancellationTokenSource();
-        _ = ThumbnailService.Instance.LoadViewportAsync(
+        var previous = _thumbnailViewportCts;
+        var current = new CancellationTokenSource();
+        _thumbnailViewportCts = current;
+        previous?.Cancel();
+
+        _ = LoadViewportSafelyAsync(
             visible,
             prefetch,
             (int)vm.ThumbnailSize,
-            _thumbnailViewportCts.Token);
+            current);
+    }
+
+    private async Task LoadViewportSafelyAsync(
+        IReadOnlyList<FileItem> visible,
+        IReadOnlyList<FileItem> prefetch,
+        int thumbnailSize,
+        CancellationTokenSource cts)
+    {
+        try
+        {
+            await ThumbnailService.Instance.LoadViewportAsync(
+                visible,
+                prefetch,
+                thumbnailSize,
+                cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Thumbnail viewport load failed: {ex}");
+        }
+        finally
+        {
+            if (ReferenceEquals(_thumbnailViewportCts, cts))
+            {
+                _thumbnailViewportCts = null;
+            }
+            cts.Dispose();
+        }
     }
 
     private void OnThumbnailItemPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -626,7 +678,21 @@ public partial class ExplorerPaneView : UserControl
         if (sender is Control { DataContext: FileItem item } && DataContext is ExplorerPaneViewModel vm)
         {
             e.Handled = true;
-            await vm.OpenItem(item);
+            try
+            {
+                await vm.OpenItem(item);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Open item failed: {ex}");
+                if (vm.SelectedTab != null)
+                {
+                    vm.SelectedTab.StatusMessage = "Unable to open item.";
+                }
+            }
         }
     }
 
@@ -1904,7 +1970,21 @@ public partial class ExplorerPaneView : UserControl
         if (isRow)
         {
             e.Handled = true;
-            await vm.OpenItem(vm.SelectedTab.SelectedItem);
+            try
+            {
+                await vm.OpenItem(vm.SelectedTab.SelectedItem);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Open item failed: {ex}");
+                if (vm.SelectedTab != null)
+                {
+                    vm.SelectedTab.StatusMessage = "Unable to open item.";
+                }
+            }
         }
     }
 
@@ -2016,11 +2096,25 @@ public partial class ExplorerPaneView : UserControl
     {
         if (DataContext is ExplorerPaneViewModel vm && vm.SelectedTab != null)
         {
-            var topLevel = TopLevel.GetTopLevel(this);
-            if (topLevel?.Clipboard != null)
+            try
             {
-                var path = vm.SelectedTab.SelectedItem?.FullPath ?? vm.SelectedTab.CurrentPath;
-                await topLevel.Clipboard.SetTextAsync(path);
+                var topLevel = TopLevel.GetTopLevel(this);
+                if (topLevel?.Clipboard != null)
+                {
+                    var path = vm.SelectedTab.SelectedItem?.FullPath ?? vm.SelectedTab.CurrentPath;
+                    await topLevel.Clipboard.SetTextAsync(path);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Copy path failed: {ex}");
+                if (vm.SelectedTab != null)
+                {
+                    vm.SelectedTab.StatusMessage = "Unable to copy path.";
+                }
             }
         }
     }
@@ -2032,73 +2126,83 @@ public partial class ExplorerPaneView : UserControl
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
         var tab = vm.SelectedTab;
 
-        List<string> dragPaths;
-        bool isAlreadySelected = (vm.IsThumbnailView && triggerItem.IsThumbnailSelected) ||
-                                 (!vm.IsThumbnailView && tab.SelectedItems.Contains(triggerItem));
+        try
+        {
+            List<string> dragPaths;
+            bool isAlreadySelected = (vm.IsThumbnailView && triggerItem.IsThumbnailSelected) ||
+                                     (!vm.IsThumbnailView && tab.SelectedItems.Contains(triggerItem));
 
-        if (isAlreadySelected)
-        {
-            dragPaths = tab.SelectedItems
-                .Where(i => !string.IsNullOrEmpty(i.FullPath))
-                .Select(i => i.FullPath)
-                .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
-                .ToList();
-        }
-        else
-        {
-            if (vm.IsThumbnailView)
+            if (isAlreadySelected)
             {
-                tab.SelectThumbnailItem(triggerItem, control: false, shift: false);
+                dragPaths = tab.SelectedItems
+                    .Where(i => !string.IsNullOrEmpty(i.FullPath))
+                    .Select(i => i.FullPath)
+                    .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+                    .ToList();
             }
             else
             {
-                tab.SelectedItems.Clear();
-                tab.SelectedItems.Add(triggerItem);
-                tab.SelectedItem = triggerItem;
-            }
-            dragPaths = new List<string> { triggerItem.FullPath };
-        }
-
-        if (dragPaths.Count == 0) return;
-
-        var dataObject = new DataObject();
-        var storageProvider = TopLevel.GetTopLevel(this)?.StorageProvider;
-        var storageItems = new List<Avalonia.Platform.Storage.IStorageItem>();
-
-        if (storageProvider != null)
-        {
-            foreach (var p in dragPaths)
-            {
-                try
+                if (vm.IsThumbnailView)
                 {
-                    var fileUri = new Uri(Path.GetFullPath(p));
-                    if (Directory.Exists(p))
-                    {
-                        var f = storageProvider.TryGetFolderFromPathAsync(fileUri).GetAwaiter().GetResult();
-                        if (f != null) storageItems.Add(f);
-                    }
-                    else if (File.Exists(p))
-                    {
-                        var f = storageProvider.TryGetFileFromPathAsync(fileUri).GetAwaiter().GetResult();
-                        if (f != null) storageItems.Add(f);
-                    }
+                    tab.SelectThumbnailItem(triggerItem, control: false, shift: false);
                 }
-                catch { }
+                else
+                {
+                    tab.SelectedItems.Clear();
+                    tab.SelectedItems.Add(triggerItem);
+                    tab.SelectedItem = triggerItem;
+                }
+                dragPaths = new List<string> { triggerItem.FullPath };
             }
-        }
 
-        if (storageItems.Count > 0)
-        {
-            dataObject.Set(DataFormats.Files, storageItems);
-        }
-        dataObject.Set(DataFormats.FileNames, dragPaths);
-        dataObject.Set(DataFormats.Text, string.Join(Environment.NewLine, dragPaths));
+            if (dragPaths.Count == 0) return;
 
-        try
-        {
+            var dataObject = new DataObject();
+            var storageProvider = TopLevel.GetTopLevel(this)?.StorageProvider;
+            var storageItems = new List<Avalonia.Platform.Storage.IStorageItem>();
+
+            if (storageProvider != null)
+            {
+                foreach (var p in dragPaths)
+                {
+                    try
+                    {
+                        var fileUri = new Uri(Path.GetFullPath(p));
+                        if (Directory.Exists(p))
+                        {
+                            var f = await storageProvider.TryGetFolderFromPathAsync(fileUri);
+                            if (f != null) storageItems.Add(f);
+                        }
+                        else if (File.Exists(p))
+                        {
+                            var f = await storageProvider.TryGetFileFromPathAsync(fileUri);
+                            if (f != null) storageItems.Add(f);
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            if (storageItems.Count > 0)
+            {
+                dataObject.Set(DataFormats.Files, storageItems);
+            }
+            dataObject.Set(DataFormats.FileNames, dragPaths);
+            dataObject.Set(DataFormats.Text, string.Join(Environment.NewLine, dragPaths));
+
             await DragDrop.DoDragDrop(triggerEvent, dataObject, DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link);
         }
-        catch { }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Drag failed: {ex}");
+            if (DataContext is ExplorerPaneViewModel paneVm && paneVm.SelectedTab != null)
+            {
+                paneVm.SelectedTab.StatusMessage = "Drag operation failed.";
+            }
+        }
         finally
         {
             _dragCandidateItem = null;
@@ -2185,17 +2289,31 @@ public partial class ExplorerPaneView : UserControl
 
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
 
-        var sourcePaths = FileDragDropService.ExtractPaths(e.Data);
-        if (sourcePaths.Count == 0) return;
+        try
+        {
+            var sourcePaths = FileDragDropService.ExtractPaths(e.Data);
+            if (sourcePaths.Count == 0) return;
 
-        string destDir = targetFolder?.FullPath ?? vm.SelectedTab.CurrentPath;
-        var effect = FileDragDropService.ResolveEffect(sourcePaths, destDir, e.KeyModifiers);
-        if (effect == DragDropEffects.None) return;
+            string destDir = targetFolder?.FullPath ?? vm.SelectedTab.CurrentPath;
+            var effect = FileDragDropService.ResolveEffect(sourcePaths, destDir, e.KeyModifiers);
+            if (effect == DragDropEffects.None) return;
 
-        bool isMove = effect.HasFlag(DragDropEffects.Move);
-        e.Handled = true;
+            bool isMove = effect.HasFlag(DragDropEffects.Move);
+            e.Handled = true;
 
-        await vm.ExecuteDropAsync(sourcePaths, destDir, isMove);
+            await vm.ExecuteDropAsync(sourcePaths, destDir, isMove);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Drop failed: {ex}");
+            if (vm.SelectedTab != null)
+            {
+                vm.SelectedTab.StatusMessage = "Drop operation failed.";
+            }
+        }
     }
 
     #endregion

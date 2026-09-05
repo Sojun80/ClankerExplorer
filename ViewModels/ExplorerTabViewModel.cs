@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -233,7 +234,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         CurrentPath = path;
         UpdateTitle(path);
         _watcher.Start(path);
-        _ = RefreshAsync();
+        _ = RefreshSafelyAsync();
 
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
@@ -249,7 +250,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         CurrentPath = History[HistoryIndex];
         UpdateTitle(CurrentPath);
         _watcher.Start(CurrentPath);
-        _ = RefreshAsync();
+        _ = RefreshSafelyAsync();
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
     }
@@ -262,7 +263,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         CurrentPath = History[HistoryIndex];
         UpdateTitle(CurrentPath);
         _watcher.Start(CurrentPath);
-        _ = RefreshAsync();
+        _ = RefreshSafelyAsync();
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
     }
@@ -287,7 +288,27 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
     public void Refresh()
     {
-        _ = RefreshAsync();
+        _ = RefreshSafelyAsync();
+    }
+
+    private async Task RefreshSafelyAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Refresh failed: {ex}");
+
+            if (!_isDisposed)
+            {
+                StatusMessage = "Unable to refresh folder.";
+            }
+        }
     }
 
     public async Task RefreshAsync()
@@ -296,9 +317,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
         _reconciler.Reset();
         long stagingToken = _reconciler.BeginStaging();
-        _loadCts?.Cancel();
-        _loadCts = new CancellationTokenSource();
-        var token = _loadCts.Token;
+
+        var previous = _loadCts;
+        var current = new CancellationTokenSource();
+        _loadCts = current;
+        previous?.Cancel();
+
+        var token = current.Token;
         long generation = Interlocked.Increment(ref _loadGeneration);
 
         IsLoading = true;
@@ -435,6 +460,13 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             {
                 IsLoading = false;
             }
+
+            if (ReferenceEquals(_loadCts, current))
+            {
+                _loadCts = null;
+            }
+
+            current.Dispose();
         }
     }
 
@@ -476,14 +508,17 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     }
 
     partial void OnFilterTextChanged(string value) => ScheduleDebouncedFilter();
-    partial void OnIsFilterRegexChanged(bool value) => _ = ApplyFilterAsync();
-    partial void OnIsFilterWildcardChanged(bool value) => _ = ApplyFilterAsync();
+    partial void OnIsFilterRegexChanged(bool value) => _ = ApplyFilterSafelyAsync();
+    partial void OnIsFilterWildcardChanged(bool value) => _ = ApplyFilterSafelyAsync();
 
     private void ScheduleDebouncedFilter()
     {
-        _filterDebounceCts?.Cancel();
-        _filterDebounceCts = new CancellationTokenSource();
-        var token = _filterDebounceCts.Token;
+        var previous = _filterDebounceCts;
+        var current = new CancellationTokenSource();
+        _filterDebounceCts = current;
+        previous?.Cancel();
+
+        var token = current.Token;
 
         Task.Run(async () =>
         {
@@ -496,13 +531,41 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
                     {
                         if (!token.IsCancellationRequested && !_isDisposed)
                         {
-                            _ = ApplyFilterAsync(token);
+                            _ = ApplyFilterSafelyAsync(token);
                         }
                     });
                 }
             }
             catch (OperationCanceledException) { }
+            finally
+            {
+                if (ReferenceEquals(_filterDebounceCts, current))
+                {
+                    _filterDebounceCts = null;
+                }
+                current.Dispose();
+            }
         }, token);
+    }
+
+    private async Task ApplyFilterSafelyAsync(CancellationToken token = default)
+    {
+        try
+        {
+            await ApplyFilterAsync(token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Apply filter failed: {ex}");
+
+            if (!_isDisposed)
+            {
+                StatusMessage = "Unable to apply filter.";
+            }
+        }
     }
 
     public void ApplyFilter()
@@ -553,16 +616,12 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
     {
         if (_isDisposed || Items == null) return;
 
-        // Cancel previous filter computation promptly
-        try
-        {
-            _filterExecutionCts?.Cancel();
-            _filterExecutionCts?.Dispose();
-        }
-        catch (ObjectDisposedException) { }
+        var previous = _filterExecutionCts;
+        var current = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _filterExecutionCts = current;
+        previous?.Cancel();
 
-        _filterExecutionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var executionToken = _filterExecutionCts.Token;
+        var executionToken = current.Token;
 
         long generation = Interlocked.Increment(ref _filterGeneration);
         var snapshot = Items.ToArray();
@@ -596,6 +655,14 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
         catch (OperationCanceledException)
         {
             return;
+        }
+        finally
+        {
+            if (ReferenceEquals(_filterExecutionCts, current))
+            {
+                _filterExecutionCts = null;
+            }
+            current.Dispose();
         }
 
         if (!_isDisposed && !executionToken.IsCancellationRequested && generation == _filterGeneration)
@@ -820,7 +887,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             SortColumn = column;
             SortAscending = true;
         }
-        _ = ApplyFilterAsync();
+        _ = ApplyFilterSafelyAsync();
     }
 
     public bool SetDirectoryReadOptions(DirectoryReadOptions options)
@@ -1022,22 +1089,25 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
         try
         {
-            _loadCts?.Cancel();
-            _loadCts?.Dispose();
+            var loadCts = _loadCts;
+            _loadCts = null;
+            loadCts?.Cancel();
         }
         catch { }
 
         try
         {
-            _filterDebounceCts?.Cancel();
-            _filterDebounceCts?.Dispose();
+            var debounceCts = _filterDebounceCts;
+            _filterDebounceCts = null;
+            debounceCts?.Cancel();
         }
         catch { }
 
         try
         {
-            _filterExecutionCts?.Cancel();
-            _filterExecutionCts?.Dispose();
+            var execCts = _filterExecutionCts;
+            _filterExecutionCts = null;
+            execCts?.Cancel();
         }
         catch { }
     }

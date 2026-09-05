@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -223,7 +224,7 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
         if (!string.IsNullOrEmpty(currentWatched))
         {
             // Trigger an overflow batch to request a safe full refresh and watcher recreation
-            BatchReady?.Invoke(this, new DirectoryChangeBatch(currentWatched, Array.Empty<FileChangeEvent>(), IsOverflow: true));
+            RaiseBatchReady(new DirectoryChangeBatch(currentWatched, Array.Empty<FileChangeEvent>(), IsOverflow: true));
         }
     }
 
@@ -390,7 +391,26 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
             _firstEventUtcTicks = 0;
         }
 
-        BatchReady?.Invoke(this, new DirectoryChangeBatch(dirPath, batchList));
+        RaiseBatchReady(new DirectoryChangeBatch(dirPath, batchList));
+    }
+
+    private void RaiseBatchReady(DirectoryChangeBatch batch)
+    {
+        var handlers = BatchReady;
+        if (handlers != null)
+        {
+            foreach (EventHandler<DirectoryChangeBatch> handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(this, batch);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"DirectoryWatcher subscriber error: {ex}");
+                }
+            }
+        }
     }
 
     public void Dispose()

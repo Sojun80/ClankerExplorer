@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -287,10 +288,14 @@ public partial class InspectorViewModel : ObservableObject, IPreviewService, IDi
     public void UnloadPreview()
     {
         _yieldedFilePath = null;
-        _previewCts?.Cancel();
+        var prevPreview = _previewCts;
         _previewCts = null;
-        _hashingCts?.Cancel();
+        prevPreview?.Cancel();
+
+        var prevHashing = _hashingCts;
         _hashingCts = null;
+        prevHashing?.Cancel();
+
         _currentFilePath = null;
 
         StopVideo();
@@ -361,12 +366,14 @@ public partial class InspectorViewModel : ObservableObject, IPreviewService, IDi
         if (!OwnsFile(filePath)) return;
 
         // Invalidate any in-flight preview loading or hash calculations for this file
-        _previewCts?.Cancel();
+        var prevPreview = _previewCts;
         _previewCts = null;
+        prevPreview?.Cancel();
         Interlocked.Increment(ref _previewGeneration);
 
-        _hashingCts?.Cancel();
+        var prevHashing = _hashingCts;
         _hashingCts = null;
+        prevHashing?.Cancel();
 
         // Record yielded path so automatic selection refreshes won't immediately reacquire this file
         _yieldedFilePath = filePath;
@@ -413,9 +420,12 @@ public partial class InspectorViewModel : ObservableObject, IPreviewService, IDi
         // Selection has moved to a different file (or cleared); clear yielded file guard
         _yieldedFilePath = null;
 
-        _previewCts?.Cancel();
-        _previewCts = new CancellationTokenSource();
-        var token = _previewCts.Token;
+        var previous = _previewCts;
+        var current = new CancellationTokenSource();
+        _previewCts = current;
+        previous?.Cancel();
+
+        var token = current.Token;
 
         long generation = Interlocked.Increment(ref _previewGeneration);
         _currentFilePath = filePath;
@@ -682,6 +692,13 @@ public partial class InspectorViewModel : ObservableObject, IPreviewService, IDi
             {
                 IsLoadingPreview = false;
             }
+
+            if (ReferenceEquals(_previewCts, current))
+            {
+                _previewCts = null;
+            }
+
+            current.Dispose();
         }
     }
 
@@ -1014,9 +1031,12 @@ public partial class InspectorViewModel : ObservableObject, IPreviewService, IDi
     {
         if (string.IsNullOrEmpty(_currentFilePath) || !File.Exists(_currentFilePath) || IsHashing) return;
 
-        _hashingCts?.Cancel();
-        _hashingCts = new CancellationTokenSource();
-        var token = _hashingCts.Token;
+        var previous = _hashingCts;
+        var current = new CancellationTokenSource();
+        _hashingCts = current;
+        previous?.Cancel();
+
+        var token = current.Token;
 
         IsHashing = true;
         HasHashes = false;
@@ -1066,6 +1086,13 @@ public partial class InspectorViewModel : ObservableObject, IPreviewService, IDi
         finally
         {
             IsHashing = false;
+
+            if (ReferenceEquals(_hashingCts, current))
+            {
+                _hashingCts = null;
+            }
+
+            current.Dispose();
         }
     }
 
@@ -1083,8 +1110,15 @@ public partial class InspectorViewModel : ObservableObject, IPreviewService, IDi
     {
         if (_isDisposed) return;
         _isDisposed = true;
-        _previewCts?.Cancel();
-        _hashingCts?.Cancel();
+
+        var prevPreview = _previewCts;
+        _previewCts = null;
+        prevPreview?.Cancel();
+
+        var prevHashing = _hashingCts;
+        _hashingCts = null;
+        prevHashing?.Cancel();
+
         _videoPlayer.Dispose();
     }
 }

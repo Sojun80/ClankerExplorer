@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -71,7 +72,7 @@ public sealed class DirectoryChangeReconciler
         {
             Dispatcher.UIThread.Post(() =>
             {
-                _ = _tab.RefreshAsync();
+                _ = RefreshTabSafelyAsync();
             }, DispatcherPriority.Background);
             return;
         }
@@ -180,7 +181,7 @@ public sealed class DirectoryChangeReconciler
             {
                 if (gen != Volatile.Read(ref _currentGeneration)) return;
                 if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
-                _ = _tab.RefreshAsync();
+                _ = RefreshTabSafelyAsync();
             }, DispatcherPriority.Background);
             return;
         }
@@ -188,6 +189,21 @@ public sealed class DirectoryChangeReconciler
         lock (_syncLock)
         {
             _processingChain = ProcessBatchSequentialAsync(_processingChain, batch, gen);
+        }
+    }
+
+    private async Task RefreshTabSafelyAsync()
+    {
+        try
+        {
+            await _tab.RefreshAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Reconciler refresh failed: {ex}");
         }
     }
 

@@ -137,8 +137,14 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
 
     private void CancelAndInvalidateCurrentSearch()
     {
-        _debounceCts?.Cancel();
-        _searchCts?.Cancel();
+        var debounce = _debounceCts;
+        _debounceCts = null;
+        debounce?.Cancel();
+
+        var search = _searchCts;
+        _searchCts = null;
+        search?.Cancel();
+
         Interlocked.Increment(ref _searchGeneration);
     }
 
@@ -155,9 +161,12 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
 
     public void ScheduleDebouncedSearch(int delayMs = 200)
     {
-        _debounceCts?.Cancel();
-        _debounceCts = new CancellationTokenSource();
-        var debounceToken = _debounceCts.Token;
+        var previous = _debounceCts;
+        var current = new CancellationTokenSource();
+        _debounceCts = current;
+        previous?.Cancel();
+
+        var debounceToken = current.Token;
 
         if (string.IsNullOrWhiteSpace(Query))
         {
@@ -194,13 +203,24 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
             {
                 // Debounce superseded
             }
+            finally
+            {
+                if (ReferenceEquals(_debounceCts, current))
+                {
+                    _debounceCts = null;
+                }
+                current.Dispose();
+            }
         });
     }
 
     [RelayCommand]
     public void SubmitSearch()
     {
-        _debounceCts?.Cancel();
+        var debounce = _debounceCts;
+        _debounceCts = null;
+        debounce?.Cancel();
+
         StartSearchInternal();
     }
 
@@ -219,9 +239,12 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
         }
 
         // 1. Immediately cancel any obsolete in-progress search
-        _searchCts?.Cancel();
-        _searchCts = new CancellationTokenSource();
-        var token = _searchCts.Token;
+        var previous = _searchCts;
+        var current = new CancellationTokenSource();
+        _searchCts = current;
+        previous?.Cancel();
+
+        var token = current.Token;
 
         // 2. Increment request generation to protect against stale results
         long generation = Interlocked.Increment(ref _searchGeneration);
@@ -382,6 +405,14 @@ public partial class SearchWorkspaceViewModel : ObservableObject, IDisposable
                     IsSearching = false;
                     StatusText = $"Search error: {ex.Message}";
                 });
+            }
+            finally
+            {
+                if (ReferenceEquals(_searchCts, current))
+                {
+                    _searchCts = null;
+                }
+                current.Dispose();
             }
         });
     }

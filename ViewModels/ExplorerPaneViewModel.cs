@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -407,7 +408,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
                 SelectedTab.SortAscending = true;
             }
         }
-        _ = SelectedTab.ApplyFilterAsync();
+        _ = ApplyTabFilterSafelyAsync(SelectedTab);
         NotifySortHeadersChanged();
         PersistCurrentFolderViewState();
     }
@@ -672,8 +673,8 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             state.ShowColumnDateAccessed,
             state.ShowColumnPermissions,
             state.ShowColumnOwnerGroup));
-        if (metadataChanged) _ = tab.RefreshAsync();
-        else _ = tab.ApplyFilterAsync();
+        if (metadataChanged) _ = RefreshTabSafelyAsync(tab);
+        else _ = ApplyTabFilterSafelyAsync(tab);
         FolderViewStateRestored?.Invoke();
     }
 
@@ -739,7 +740,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
                 ShowColumnPermissions,
                 ShowColumnOwnerGroup)))
         {
-            _ = SelectedTab.RefreshAsync();
+            _ = RefreshTabSafelyAsync(SelectedTab);
         }
     }
 
@@ -1073,7 +1074,26 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public void GoUp() => SelectedTab?.GoUp();
 
     [RelayCommand]
-    public void Refresh() => _ = RefreshAsync();
+    public void Refresh() => _ = RefreshSafelyAsync();
+
+    private async Task RefreshSafelyAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Pane refresh failed: {ex}");
+            if (!_isDisposed && SelectedTab != null)
+            {
+                SelectedTab.StatusMessage = "Unable to refresh folder.";
+            }
+        }
+    }
 
     public async Task RefreshAsync()
     {
@@ -1247,7 +1267,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             ClipboardFileService.Copy(paths);
             if (RequestCopyFiles != null)
             {
-                _ = RequestCopyFiles.Invoke(paths);
+                _ = InvokeClipboardTaskSafelyAsync(RequestCopyFiles, paths, "Copy files");
             }
             else
             {
@@ -1266,11 +1286,71 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
             ClipboardFileService.Cut(paths);
             if (RequestCutFiles != null)
             {
-                _ = RequestCutFiles.Invoke(paths);
+                _ = InvokeClipboardTaskSafelyAsync(RequestCutFiles, paths, "Cut files");
             }
             else
             {
                 RequestSetClipboardText?.Invoke(string.Join(Environment.NewLine, paths));
+            }
+        }
+    }
+
+    private async Task InvokeClipboardTaskSafelyAsync(Func<IReadOnlyList<string>, Task>? action, IReadOnlyList<string> paths, string actionName)
+    {
+        if (action == null) return;
+        try
+        {
+            await action(paths);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"{actionName} failed: {ex}");
+            if (!_isDisposed && SelectedTab != null)
+            {
+                SelectedTab.StatusMessage = "Unable to access clipboard.";
+            }
+        }
+    }
+
+    private async Task RefreshTabSafelyAsync(ExplorerTabViewModel? tab)
+    {
+        if (tab == null) return;
+        try
+        {
+            await tab.RefreshAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Tab refresh failed: {ex}");
+            if (!_isDisposed && tab != null)
+            {
+                tab.StatusMessage = "Unable to refresh folder.";
+            }
+        }
+    }
+
+    private async Task ApplyTabFilterSafelyAsync(ExplorerTabViewModel? tab)
+    {
+        if (tab == null) return;
+        try
+        {
+            await tab.ApplyFilterAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Tab apply filter failed: {ex}");
+            if (!_isDisposed && tab != null)
+            {
+                tab.StatusMessage = "Unable to apply filter.";
             }
         }
     }
