@@ -27,10 +27,24 @@ public class VideoThumbnailService : IDisposable
         ".nsv", ".f4v", ".f4p", ".f4a", ".f4b"
     };
 
-    // Depth ratios used when cycling "New Thumbnail": 15%, 30%, 45%, 60%, 75%, 90%
+    private sealed class VideoOperation
+    {
+        public long Id { get; }
+        public CancellationTokenSource Cts { get; }
+        public Task Task { get; }
+
+        public VideoOperation(long id, CancellationTokenSource cts, Task task)
+        {
+            Id = id;
+            Cts = cts;
+            Task = task;
+        }
+    }
+
     private static readonly double[] DepthRatios = new[] { 0.15, 0.30, 0.45, 0.60, 0.75, 0.90 };
     private readonly ConcurrentDictionary<string, int> _depthIndexByPath = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeExtractionsByPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<long, VideoOperation>> _activeExtractionsByPath = new(StringComparer.OrdinalIgnoreCase);
+    private long _nextVideoOperationId;
 
     // Throttle concurrent video decodes so disk/GPU are not overwhelmed
     private readonly SemaphoreSlim _decodeThrottle = new(3, 3);
@@ -50,21 +64,35 @@ public class VideoThumbnailService : IDisposable
     }
 
     /// <summary>
-    /// Cancels any active thumbnail extraction work currently running for the specified file.
+    /// Cancels any active thumbnail extraction work currently running for the specified file and awaits completion.
     /// </summary>
-    public Task CancelWorkForFileAsync(string filePath)
+    public async Task CancelWorkForFileAsync(string filePath)
     {
-        if (string.IsNullOrWhiteSpace(filePath)) return Task.CompletedTask;
-        try
+        if (string.IsNullOrWhiteSpace(filePath)) return;
+        string key = NormalizePath(filePath);
+        if (_activeExtractionsByPath.TryGetValue(key, out var opMap))
         {
-            string key = NormalizePath(filePath);
-            if (_activeExtractionsByPath.TryGetValue(key, out var cts))
+            var snapshot = opMap.Values.ToArray();
+            foreach (var op in snapshot)
             {
-                cts.Cancel();
+                try
+                {
+                    op.Cts.Cancel();
+                }
+                catch (ObjectDisposedException) { }
+                catch { }
+            }
+
+            var tasks = snapshot.Select(o => o.Task).ToArray();
+            if (tasks.Length > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                }
+                catch { }
             }
         }
-        catch { }
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -126,8 +154,12 @@ public class VideoThumbnailService : IDisposable
         if (!OperatingSystem.IsWindows() || !File.Exists(filePath)) return TimeSpan.Zero;
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        long opId = Interlocked.Increment(ref _nextVideoOperationId);
         string normalizedKey = NormalizePath(filePath);
-        _activeExtractionsByPath[normalizedKey] = linkedCts;
+        var opMap = _activeExtractionsByPath.GetOrAdd(normalizedKey, _ => new ConcurrentDictionary<long, VideoOperation>());
+        var op = new VideoOperation(opId, linkedCts, tcs.Task);
+        opMap[opId] = op;
         var token = linkedCts.Token;
 
         try
@@ -142,7 +174,15 @@ public class VideoThumbnailService : IDisposable
         }
         finally
         {
-            _activeExtractionsByPath.TryRemove(normalizedKey, out _);
+            if (_activeExtractionsByPath.TryGetValue(normalizedKey, out var currentMap))
+            {
+                currentMap.TryRemove(opId, out _);
+                if (currentMap.IsEmpty)
+                {
+                    _activeExtractionsByPath.TryRemove(new KeyValuePair<string, ConcurrentDictionary<long, VideoOperation>>(normalizedKey, currentMap));
+                }
+            }
+            tcs.TrySetResult(true);
         }
     }
 
@@ -176,8 +216,12 @@ public class VideoThumbnailService : IDisposable
         if (targetSize <= 0) targetSize = 256;
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        long opId = Interlocked.Increment(ref _nextVideoOperationId);
         string normalizedKey = NormalizePath(filePath);
-        _activeExtractionsByPath[normalizedKey] = linkedCts;
+        var opMap = _activeExtractionsByPath.GetOrAdd(normalizedKey, _ => new ConcurrentDictionary<long, VideoOperation>());
+        var op = new VideoOperation(opId, linkedCts, tcs.Task);
+        opMap[opId] = op;
         var token = linkedCts.Token;
 
         await _decodeThrottle.WaitAsync(token).ConfigureAwait(false);
@@ -238,7 +282,15 @@ public class VideoThumbnailService : IDisposable
         {
             imageStream?.Dispose();
             try { composition?.Clips.Clear(); } catch { }
-            _activeExtractionsByPath.TryRemove(normalizedKey, out _);
+            if (_activeExtractionsByPath.TryGetValue(normalizedKey, out var currentMap))
+            {
+                currentMap.TryRemove(opId, out _);
+                if (currentMap.IsEmpty)
+                {
+                    _activeExtractionsByPath.TryRemove(new KeyValuePair<string, ConcurrentDictionary<long, VideoOperation>>(normalizedKey, currentMap));
+                }
+            }
+            tcs.TrySetResult(true);
             _decodeThrottle.Release();
         }
     }
@@ -253,8 +305,12 @@ public class VideoThumbnailService : IDisposable
         if (targetWidth <= 0) targetWidth = 640;
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        long opId = Interlocked.Increment(ref _nextVideoOperationId);
         string normalizedKey = NormalizePath(filePath);
-        _activeExtractionsByPath[normalizedKey] = linkedCts;
+        var opMap = _activeExtractionsByPath.GetOrAdd(normalizedKey, _ => new ConcurrentDictionary<long, VideoOperation>());
+        var op = new VideoOperation(opId, linkedCts, tcs.Task);
+        opMap[opId] = op;
         var token = linkedCts.Token;
 
         await _decodeThrottle.WaitAsync(token).ConfigureAwait(false);
@@ -299,7 +355,15 @@ public class VideoThumbnailService : IDisposable
         {
             imageStream?.Dispose();
             try { composition?.Clips.Clear(); } catch { }
-            _activeExtractionsByPath.TryRemove(normalizedKey, out _);
+            if (_activeExtractionsByPath.TryGetValue(normalizedKey, out var currentMap))
+            {
+                currentMap.TryRemove(opId, out _);
+                if (currentMap.IsEmpty)
+                {
+                    _activeExtractionsByPath.TryRemove(new KeyValuePair<string, ConcurrentDictionary<long, VideoOperation>>(normalizedKey, currentMap));
+                }
+            }
+            tcs.TrySetResult(true);
             _decodeThrottle.Release();
         }
     }
@@ -391,6 +455,37 @@ public class VideoThumbnailService : IDisposable
         double detailReward = edgeDensity * 3.0;
 
         return contrastReward + detailReward - penalty - brightnessPenalty;
+    }
+
+    internal int GetActiveExtractionCount(string filePath)
+    {
+        string key = NormalizePath(filePath);
+        if (_activeExtractionsByPath.TryGetValue(key, out var map))
+        {
+            return map.Count;
+        }
+        return 0;
+    }
+
+    internal void RegisterExtractionForTest(string path, CancellationTokenSource cts, Task task, out long opId)
+    {
+        string key = NormalizePath(path);
+        opId = Interlocked.Increment(ref _nextVideoOperationId);
+        var opMap = _activeExtractionsByPath.GetOrAdd(key, _ => new ConcurrentDictionary<long, VideoOperation>());
+        opMap[opId] = new VideoOperation(opId, cts, task);
+    }
+
+    internal void UnregisterExtractionForTest(string path, long opId)
+    {
+        string key = NormalizePath(path);
+        if (_activeExtractionsByPath.TryGetValue(key, out var currentMap))
+        {
+            currentMap.TryRemove(opId, out _);
+            if (currentMap.IsEmpty)
+            {
+                _activeExtractionsByPath.TryRemove(new KeyValuePair<string, ConcurrentDictionary<long, VideoOperation>>(key, currentMap));
+            }
+        }
     }
 
     public void Dispose()

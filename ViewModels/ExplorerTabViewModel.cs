@@ -372,7 +372,7 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
             var deduplicatedList = list
                 .GroupBy(i => i.FullPath, comparer)
                 .Select(g => g.First())
-                .Where(i => !TransferEngine.IsActiveTempFile(i.FullPath))
+                .Where(i => !TransferEngine.IsInternalClankerTemp(i.FullPath) && !TransferEngine.IsActiveTempFile(i.FullPath))
                 .ToList();
 
             var cutSet = ClipboardFileService.GetCutPathsSnapshot();

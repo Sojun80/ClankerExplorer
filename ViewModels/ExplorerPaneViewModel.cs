@@ -87,12 +87,21 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public string? ThumbnailTopItemPath { get; private set; }
     public IReadOnlyList<string> CurrentColumnOrder { get; private set; } = Array.Empty<string>();
     public event Action? FolderViewStateRestored;
+    public event Action? BeforeThumbnailLayoutChanging;
+    public event Action? AfterThumbnailLayoutChanged;
 
     partial void OnViewModeChanged(string value)
     {
         if (value == "Thumbnails")
         {
-            RebuildThumbnailRows();
+            if (_thumbnailViewportWidth > 0)
+            {
+                RecalculateThumbnailLayout(forceRebuild: true);
+            }
+            else
+            {
+                RebuildThumbnailRows();
+            }
         }
         if (!_applyingFolderViewState) PersistCurrentFolderViewState();
     }
@@ -101,7 +110,14 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     {
         if (IsThumbnailView)
         {
-            RebuildThumbnailRows();
+            if (_thumbnailViewportWidth > 0)
+            {
+                RecalculateThumbnailLayout();
+            }
+            else
+            {
+                RebuildThumbnailRows();
+            }
         }
 
         if (double.IsFinite(value) && value >= 64 && value <= 320)
@@ -115,14 +131,49 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void RecalculateThumbnailLayout()
+    {
+        RecalculateThumbnailLayout(forceRebuild: false);
+    }
+
+    private bool RecalculateThumbnailLayout(bool forceRebuild)
+    {
+        if (!double.IsFinite(_thumbnailViewportWidth) || _thumbnailViewportWidth <= 0)
+        {
+            return false;
+        }
+
+        int columns = Math.Max(
+            1,
+            (int)Math.Floor(
+                Math.Max(1, _thumbnailViewportWidth - 8)
+                / (ThumbnailCellWidth + 8)));
+
+        if (columns != ThumbnailColumnCount)
+        {
+            BeforeThumbnailLayoutChanging?.Invoke();
+            ThumbnailColumnCount = columns;
+            RebuildThumbnailRows();
+            AfterThumbnailLayoutChanged?.Invoke();
+            return true;
+        }
+
+        if (forceRebuild)
+        {
+            RebuildThumbnailRows();
+            return true;
+        }
+
+        return false;
+    }
+
     public void UpdateThumbnailViewportWidth(double width)
     {
         if (!double.IsFinite(width) || width <= 0) return;
-        int columns = Math.Max(1, (int)Math.Floor(Math.Max(1, width - 8) / (ThumbnailCellWidth + 8)));
-        if (Math.Abs(_thumbnailViewportWidth - width) < 1 && columns == ThumbnailColumnCount) return;
+        bool firstMeasure = _thumbnailViewportWidth <= 0;
         _thumbnailViewportWidth = width;
-        ThumbnailColumnCount = columns;
-        RebuildThumbnailRows();
+
+        RecalculateThumbnailLayout(forceRebuild: firstMeasure && ThumbnailRows.Count == 0 && SelectedTab?.FilteredItems?.Count > 0);
     }
 
     public void RebuildThumbnailRows()

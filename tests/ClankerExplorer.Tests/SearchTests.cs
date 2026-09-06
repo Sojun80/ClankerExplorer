@@ -398,6 +398,11 @@ public sealed class SearchTests
         vm.SubmitSearch();
         Assert.True(vm.IsSearching);
 
+        for (int i = 0; i < 50 && fakeProvider.SearchCallCount == 0; i++)
+        {
+            await Task.Delay(10);
+        }
+
         // Hide workspace
         vm.OnWorkspaceHidden();
 

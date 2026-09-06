@@ -24,13 +24,31 @@ public class NativeVideoPlayer : IDisposable
         get
         {
             EnsurePlayer();
-            return _mediaPlayer;
+            lock (_lock) return _mediaPlayer;
         }
     }
 
-    public bool IsInitialized => _mediaPlayer != null;
-    public TimeSpan Duration { get; private set; } = TimeSpan.Zero;
-    public string? LastError { get; private set; }
+    public bool IsInitialized
+    {
+        get
+        {
+            lock (_lock) return _mediaPlayer != null;
+        }
+    }
+
+    private TimeSpan _duration = TimeSpan.Zero;
+    public TimeSpan Duration
+    {
+        get { lock (_lock) return _duration; }
+        private set { lock (_lock) _duration = value; }
+    }
+
+    private string? _lastError;
+    public string? LastError
+    {
+        get { lock (_lock) return _lastError; }
+        private set { lock (_lock) _lastError = value; }
+    }
 
     public event Action? MediaOpened;
     public event Action? MediaEnded;
@@ -38,7 +56,6 @@ public class NativeVideoPlayer : IDisposable
 
     private void EnsurePlayer()
     {
-        if (_mediaPlayer != null || _isDisposed) return;
         lock (_lock)
         {
             if (_mediaPlayer != null || _isDisposed) return;
@@ -57,17 +74,28 @@ public class NativeVideoPlayer : IDisposable
 
                 _mediaPlayer.LengthChanged += (s, e) =>
                 {
-                    if (_isDisposed) return;
-                    if (e.Length > 0)
+                    bool notify = false;
+                    lock (_lock)
                     {
-                        Duration = TimeSpan.FromMilliseconds(e.Length);
+                        if (_isDisposed) return;
+                        if (e.Length > 0)
+                        {
+                            _duration = TimeSpan.FromMilliseconds(e.Length);
+                            notify = true;
+                        }
+                    }
+                    if (notify)
+                    {
                         MediaOpened?.Invoke();
                     }
                 };
 
                 _mediaPlayer.TimeChanged += (s, e) =>
                 {
-                    if (_isDisposed) return;
+                    lock (_lock)
+                    {
+                        if (_isDisposed) return;
+                    }
                     if (e.Time >= 0)
                     {
                         TimeChanged?.Invoke(TimeSpan.FromMilliseconds(e.Time));
@@ -76,138 +104,210 @@ public class NativeVideoPlayer : IDisposable
 
                 _mediaPlayer.EndReached += (s, e) =>
                 {
-                    if (_isDisposed) return;
+                    lock (_lock)
+                    {
+                        if (_isDisposed) return;
+                    }
                     MediaEnded?.Invoke();
                 };
 
                 _mediaPlayer.EncounteredError += (s, e) =>
                 {
-                    if (_isDisposed) return;
-                    LastError = "Error occurred during video playback.";
+                    lock (_lock)
+                    {
+                        if (_isDisposed) return;
+                        _lastError = "Error occurred during video playback.";
+                    }
                 };
             }
             catch (Exception ex)
             {
-                LastError = ex.Message;
+                _lastError = ex.Message;
             }
         }
     }
 
     public bool Open(string filePath)
     {
-        if (_isDisposed) return false;
-        Close();
-
         if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
         {
-            LastError = "File not found.";
+            lock (_lock)
+            {
+                _lastError = "File not found.";
+            }
             return false;
+        }
+
+        EnsurePlayer();
+        var vlc = VlcVideoService.Instance.LibVLC;
+        if (vlc == null)
+        {
+            lock (_lock)
+            {
+                _lastError = "LibVLC engine unavailable.";
+            }
+            return false;
+        }
+
+        Media? newMedia = null;
+        try
+        {
+            newMedia = new Media(vlc, filePath, FromType.FromPath);
+        }
+        catch (Exception ex)
+        {
+            lock (_lock)
+            {
+                _lastError = ex.Message;
+            }
+            return false;
+        }
+
+        Media? oldMedia = null;
+        lock (_lock)
+        {
+            if (_isDisposed || _mediaPlayer == null)
+            {
+                newMedia.Dispose();
+                return false;
+            }
+
+            try
+            {
+                _mediaPlayer.Stop();
+                _mediaPlayer.Media = null;
+            }
+            catch { }
+
+            oldMedia = _currentMedia;
+            _currentMedia = newMedia;
+            _currentFilePath = filePath;
+            _duration = TimeSpan.Zero;
+
+            try
+            {
+                _mediaPlayer.Media = _currentMedia;
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex.Message;
+                try { _mediaPlayer.Media = null; } catch { }
+                _currentMedia = null;
+                _currentFilePath = null;
+                newMedia.Dispose();
+                oldMedia?.Dispose();
+                return false;
+            }
         }
 
         try
         {
-            EnsurePlayer();
-            var vlc = VlcVideoService.Instance.LibVLC;
-            if (_mediaPlayer == null || vlc == null)
-            {
-                LastError = "LibVLC engine unavailable.";
-                return false;
-            }
+            oldMedia?.Dispose();
+        }
+        catch { }
 
-            _currentFilePath = filePath;
-            _currentMedia = new Media(vlc, filePath, FromType.FromPath);
-            _mediaPlayer.Media = _currentMedia;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LastError = ex.Message;
-            Close();
-            return false;
-        }
+        return true;
     }
 
     public void Play()
     {
-        if (_isDisposed) return;
-        try
+        lock (_lock)
         {
-            if (_mediaPlayer != null)
+            if (_isDisposed) return;
+            try
             {
-                _mediaPlayer.Mute = _isMuted;
-                _mediaPlayer.Volume = _isMuted ? 0 : _volume;
-                _mediaPlayer.Play();
+                if (_mediaPlayer != null)
+                {
+                    _mediaPlayer.Mute = _isMuted;
+                    _mediaPlayer.Volume = _isMuted ? 0 : _volume;
+                    _mediaPlayer.Play();
+                }
             }
+            catch { }
         }
-        catch { }
     }
 
     public void Pause()
     {
-        if (_isDisposed) return;
-        try { _mediaPlayer?.Pause(); } catch { }
+        lock (_lock)
+        {
+            if (_isDisposed) return;
+            try { _mediaPlayer?.Pause(); } catch { }
+        }
     }
 
     public void Stop()
     {
-        if (_isDisposed) return;
-        try
+        lock (_lock)
         {
-            if (_mediaPlayer != null)
+            if (_isDisposed) return;
+            try
             {
-                _mediaPlayer.Stop();
+                _mediaPlayer?.Stop();
             }
+            catch { }
         }
-        catch { }
     }
 
     public void SetPosition(TimeSpan position)
     {
-        if (_isDisposed) return;
-        try
+        lock (_lock)
         {
-            if (_mediaPlayer != null && position >= TimeSpan.Zero)
+            if (_isDisposed) return;
+            try
             {
-                _mediaPlayer.Time = (long)position.TotalMilliseconds;
+                if (_mediaPlayer != null && position >= TimeSpan.Zero)
+                {
+                    _mediaPlayer.Time = (long)position.TotalMilliseconds;
+                }
             }
+            catch { }
         }
-        catch { }
     }
 
     public TimeSpan GetPosition()
     {
-        if (_isDisposed) return TimeSpan.Zero;
-        try
+        lock (_lock)
         {
-            long timeMs = _mediaPlayer?.Time ?? 0;
-            return timeMs > 0 ? TimeSpan.FromMilliseconds(timeMs) : TimeSpan.Zero;
-        }
-        catch
-        {
-            return TimeSpan.Zero;
+            if (_isDisposed) return TimeSpan.Zero;
+            try
+            {
+                long timeMs = _mediaPlayer?.Time ?? 0;
+                return timeMs > 0 ? TimeSpan.FromMilliseconds(timeMs) : TimeSpan.Zero;
+            }
+            catch
+            {
+                return TimeSpan.Zero;
+            }
         }
     }
 
     public void SetVolume(double volume)
     {
-        _volume = (int)Math.Clamp(volume * 100.0, 0, 100);
-        if (_mediaPlayer != null && !_isDisposed)
+        lock (_lock)
         {
-            try { _mediaPlayer.Volume = _isMuted ? 0 : _volume; } catch { }
+            _volume = (int)Math.Clamp(volume * 100.0, 0, 100);
+            if (_mediaPlayer != null && !_isDisposed)
+            {
+                try { _mediaPlayer.Volume = _isMuted ? 0 : _volume; } catch { }
+            }
         }
     }
 
     public void SetMute(bool isMuted)
     {
-        _isMuted = isMuted;
-        if (_mediaPlayer != null && !_isDisposed)
+        lock (_lock)
         {
-            try
+            _isMuted = isMuted;
+            if (_mediaPlayer != null && !_isDisposed)
             {
-                _mediaPlayer.Mute = isMuted;
-                _mediaPlayer.Volume = isMuted ? 0 : _volume;
+                try
+                {
+                    _mediaPlayer.Mute = isMuted;
+                    _mediaPlayer.Volume = isMuted ? 0 : _volume;
+                }
+                catch { }
             }
-            catch { }
         }
     }
 
@@ -215,6 +315,14 @@ public class NativeVideoPlayer : IDisposable
     /// Checks whether this player currently owns or is loaded with the specified file.
     /// </summary>
     public bool OwnsFile(string? filePath)
+    {
+        lock (_lock)
+        {
+            return OwnsFile_Locked(filePath);
+        }
+    }
+
+    private bool OwnsFile_Locked(string? filePath)
     {
         if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(_currentFilePath)) return false;
         try
@@ -233,112 +341,100 @@ public class NativeVideoPlayer : IDisposable
     /// </summary>
     public async Task YieldAsync(string filePath)
     {
-        if (_isDisposed) return;
-        if (!OwnsFile(filePath)) return;
+        Media? mediaToDispose = null;
+        lock (_lock)
+        {
+            if (_isDisposed) return;
+            if (!OwnsFile_Locked(filePath)) return;
+
+            if (_mediaPlayer != null)
+            {
+                try { _mediaPlayer.Stop(); } catch { }
+                try { _mediaPlayer.Media = null; } catch { }
+            }
+
+            mediaToDispose = _currentMedia;
+            _currentMedia = null;
+            _currentFilePath = null;
+            _duration = TimeSpan.Zero;
+        }
 
         try
         {
-            if (_mediaPlayer != null)
-            {
-                var state = _mediaPlayer.State;
-                if (state == VLCState.Playing || state == VLCState.Paused || state == VLCState.Buffering || state == VLCState.Opening)
-                {
-                    var stoppedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    void OnStopped(object? s, EventArgs e) => stoppedTcs.TrySetResult(true);
-                    void OnError(object? s, EventArgs e) => stoppedTcs.TrySetResult(false);
-
-                    _mediaPlayer.Stopped += OnStopped;
-                    _mediaPlayer.EncounteredError += OnError;
-                    try
-                    {
-                        _mediaPlayer.Stop();
-                        await Task.WhenAny(stoppedTcs.Task, Task.Delay(500)).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        _mediaPlayer.Stopped -= OnStopped;
-                        _mediaPlayer.EncounteredError -= OnError;
-                    }
-                }
-                else
-                {
-                    _mediaPlayer.Stop();
-                }
-
-                _mediaPlayer.Media = null;
-            }
-
-            _currentMedia?.Dispose();
-            _currentMedia = null;
+            mediaToDispose?.Dispose();
         }
         catch { }
-        finally
-        {
-            Duration = TimeSpan.Zero;
-            _currentFilePath = null;
-        }
 
-        // Verify the file handle is genuinely released by the OS before returning
-        if (File.Exists(filePath))
+        // Verify the file handle is genuinely released by the OS before returning.
+        // Runs off-thread to avoid blocking Avalonia UI thread.
+        await Task.Run(async () =>
         {
+            if (!File.Exists(filePath)) return;
+
             for (int i = 0; i < 20; i++)
             {
+                bool released = false;
                 try
                 {
                     using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.None);
-                    break;
+                    released = true;
                 }
                 catch (UnauthorizedAccessException)
                 {
-                    // Fall back to Read with FileShare.None if file is read-only
                     try
                     {
                         using var fsRead = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.None, 1, FileOptions.None);
-                        break;
+                        released = true;
                     }
-                    catch (IOException)
-                    {
-                        await Task.Delay(10).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        break;
-                    }
+                    catch (IOException) { }
+                    catch { released = true; }
                 }
-                catch (IOException)
+                catch (IOException) { }
+                catch { released = true; }
+
+                if (released) break;
+                if (i < 19)
                 {
                     await Task.Delay(10).ConfigureAwait(false);
                 }
-                catch
-                {
-                    break;
-                }
             }
-        }
+        }).ConfigureAwait(false);
     }
 
     public void Close()
     {
-        try
+        Media? oldMedia = null;
+        lock (_lock)
         {
             if (_mediaPlayer != null)
             {
-                _mediaPlayer.Stop();
-                _mediaPlayer.Media = null;
+                try
+                {
+                    _mediaPlayer.Stop();
+                    _mediaPlayer.Media = null;
+                }
+                catch { }
             }
-            _currentMedia?.Dispose();
+            oldMedia = _currentMedia;
             _currentMedia = null;
+            _currentFilePath = null;
+            _duration = TimeSpan.Zero;
+        }
+
+        try
+        {
+            oldMedia?.Dispose();
         }
         catch { }
-
-        Duration = TimeSpan.Zero;
-        _currentFilePath = null;
     }
 
     public void Dispose()
     {
-        if (_isDisposed) return;
-        _isDisposed = true;
+        lock (_lock)
+        {
+            if (_isDisposed) return;
+            _isDisposed = true;
+        }
         Close();
     }
 }

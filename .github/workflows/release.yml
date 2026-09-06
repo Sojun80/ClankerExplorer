@@ -6,27 +6,27 @@ on:
       - 'v*'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build-and-release:
     name: Build and Publish Release
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@87b7050bc53ea08284295505d98d2aa94301e852 # v4.2.0
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.204'
 
       - name: Restore Dependencies
-        run: dotnet restore ClankerExplorer.csproj
+        run: dotnet restore ClankerExplorer.csproj --locked-mode
 
       - name: Build and Publish Windows x64
         run: |
@@ -37,12 +37,20 @@ jobs:
         run: |
           Compress-Archive -Path "publish/win-x64/*" -DestinationPath "ClankerExplorer-Windows-x64.zip" -Force
 
+      - name: Generate SHA-256 Checksums
+        shell: pwsh
+        run: |
+          Get-FileHash -Path "ClankerExplorer-Windows-x64.zip", "publish/win-x64/ClankerExplorer.exe" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content -Path "sha256sums.txt" -Encoding utf8
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
         with:
           files: |
             ClankerExplorer-Windows-x64.zip
             publish/win-x64/ClankerExplorer.exe
+            sha256sums.txt
           name: ClankerExplorer ${{ github.ref_name }}
           draft: false
           prerelease: false

@@ -356,6 +356,10 @@ public sealed class OperationsEngineHardeningTests : IDisposable
         var copiedDirect = Path.Combine(fs.FolderB, "SourceWithLink", "direct.txt");
         Assert.True(File.Exists(copiedDirect));
 
+        // Delete original external directory: if files were recursively cloned, copiedSecret would remain;
+        // since it is a reparse point (not recursively cloned), deleting original externalDir leaves no copied file.
+        Directory.Delete(externalDir, true);
+
         // Crucial: external secret file was NOT recursively cloned into the destination tree
         var copiedSecret = Path.Combine(fs.FolderB, "SourceWithLink", "LinkToExternal", "secret.txt");
         Assert.False(File.Exists(copiedSecret));
@@ -561,8 +565,9 @@ public sealed class OperationsEngineHardeningTests : IDisposable
     [Fact]
     public void ScenarioT_ActiveTransferTempFiles_HiddenAndFiltered()
     {
-        var tempPath = @"C:\FakePath\.clanker-transfer-abc12345.tmp";
+        var tempPath = $@"C:\FakePath\.clanker-transfer-{Guid.NewGuid():N}.tmp";
         Assert.True(TransferEngine.IsInternalTransferTempFile(tempPath));
+        Assert.True(TransferEngine.IsInternalTransferScratch(tempPath));
 
         Assert.False(TransferEngine.IsActiveTempFile(tempPath));
 
@@ -909,6 +914,44 @@ public sealed class OperationsEngineHardeningTests : IDisposable
 
         // Disposing the overall view model disposes history job VMs as well
         vm.Dispose();
+    }
+
+    [Fact]
+    public async Task OperationJob_WaitIfPausedAsync_CancelWhilePaused_ThrowsOperationCanceledExceptionImmediately()
+    {
+        var job = new OperationJob(OperationType.Copy, new[] { @"C:\Fake\source.txt" }, @"C:\Fake\dest");
+        job.RequestPause();
+        Assert.Equal(OperationState.Paused, job.State);
+
+        var waitTask = job.WaitIfPausedAsync(CancellationToken.None);
+        Assert.False(waitTask.IsCompleted);
+
+        // Cancel job while paused
+        job.RequestCancel();
+        Assert.Equal(OperationState.Cancelled, job.State);
+
+        // WaitIfPausedAsync must throw OperationCanceledException immediately
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await waitTask);
+    }
+
+    [Fact]
+    public async Task OperationJob_PromptConflictAsync_DisposesCancellationRegistrationAfterResolution()
+    {
+        var job = new OperationJob(OperationType.Copy, new[] { @"C:\Fake\source.txt" }, @"C:\Fake\dest");
+        using var callerCts = new CancellationTokenSource();
+        var conflict = new OperationConflict(@"C:\Fake\source.txt", @"C:\Fake\dest\source.txt", @"C:\Fake\dest\source (Copy).txt", false);
+
+        var promptTask = job.PromptConflictAsync(conflict, callerCts.Token);
+        Assert.Equal(OperationState.NeedsAttention, job.State);
+        Assert.False(promptTask.IsCompleted);
+
+        job.ResolveConflict(new ConflictResolution(ConflictAction.Replace));
+        var resolution = await promptTask;
+        Assert.Equal(ConflictAction.Replace, resolution.Action);
+
+        // Cancelling caller token after resolution should not throw or affect completed task
+        callerCts.Cancel();
+        Assert.True(promptTask.IsCompletedSuccessfully);
     }
 }
 

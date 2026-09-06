@@ -45,10 +45,25 @@ public class ThumbnailService : IDisposable
     private readonly HashSet<string> _inProgressKeys = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _queueSignal = new(0);
     private readonly CancellationTokenSource _workerCts = new();
-    private readonly ConcurrentDictionary<string, Task<Bitmap?>> _inflight = new();
+    private sealed class InflightThumbnailGeneration
+    {
+        public long Id { get; }
+        public CancellationTokenSource Cts { get; }
+        public Task Task { get; }
+
+        public InflightThumbnailGeneration(long id, CancellationTokenSource cts, Task task)
+        {
+            Id = id;
+            Cts = cts;
+            Task = task;
+        }
+    }
+
+    private readonly ConcurrentDictionary<string, Lazy<Task<Bitmap?>>> _inflight = new();
     private readonly ConcurrentDictionary<string, byte> _failedSources = new();
     private readonly ConcurrentQueue<string> _failureLru = new();
-    private readonly ConcurrentDictionary<string, (CancellationTokenSource Cts, Task Task)> _inflightGenerationsByPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<long, InflightThumbnailGeneration>> _inflightGenerationsByPath = new(StringComparer.OrdinalIgnoreCase);
+    private long _nextGenerationOperationId;
     private readonly ConcurrentDictionary<string, long> _yieldedPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _diskCacheDirectory;
     private readonly int _workerCount;
@@ -464,21 +479,28 @@ public class ThumbnailService : IDisposable
         }
 
         // 3. In-flight thumbnail task cancellation & await completion
-        if (_inflightGenerationsByPath.TryGetValue(normalized, out var inflight))
+        if (_inflightGenerationsByPath.TryGetValue(normalized, out var opMap))
         {
-            try
+            var snapshot = opMap.Values.ToArray();
+            foreach (var op in snapshot)
             {
-                inflight.Cts.Cancel();
-                await inflight.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                try
+                {
+                    op.Cts.Cancel();
+                }
+                catch (ObjectDisposedException) { }
+                catch { }
             }
-            catch { }
-        }
 
-        // 4. Invalidate single-item in-flight cache task if present
-        var inflightKeys = _inflight.Keys.Where(k => k.Contains(normalized, StringComparison.OrdinalIgnoreCase)).ToList();
-        foreach (var k in inflightKeys)
-        {
-            _inflight.TryRemove(k, out _);
+            var tasks = snapshot.Select(o => o.Task).ToArray();
+            if (tasks.Length > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                }
+                catch { }
+            }
         }
 
         // 5. Cancel in-flight video thumbnail decode if VideoThumbnailService is decoding it
@@ -817,32 +839,37 @@ public class ThumbnailService : IDisposable
             return diskBitmap;
         }
 
-        var loadTask = _inflight.GetOrAdd(key, _ => Task.Run(async () =>
+        var lazyTask = _inflight.GetOrAdd(key, k =>
         {
-            Interlocked.Increment(ref _cacheMisses);
-            var generated = await LoadOrGenerateAsync(path, key, sizeBucket, cancellationToken);
-            if (generated != null)
+            Lazy<Task<Bitmap?>> self = null!;
+            self = new Lazy<Task<Bitmap?>>(() => Task.Run(async () =>
             {
-                Interlocked.Increment(ref _generatedCount);
-                AddMemoryEntry(key, generated);
-                SaveDiskEntry(diskPath, generated);
-            }
-            else
-            {
-                AddFailure(key);
-                Interlocked.Increment(ref _failedCount);
-            }
-            return generated;
-        }, CancellationToken.None));
+                try
+                {
+                    Interlocked.Increment(ref _cacheMisses);
+                    var generated = await LoadOrGenerateAsync(path, key, sizeBucket, _workerCts.Token).ConfigureAwait(false);
+                    if (generated != null)
+                    {
+                        Interlocked.Increment(ref _generatedCount);
+                        AddMemoryEntry(key, generated);
+                        SaveDiskEntry(diskPath, generated);
+                    }
+                    else
+                    {
+                        AddFailure(key);
+                        Interlocked.Increment(ref _failedCount);
+                    }
+                    return generated;
+                }
+                finally
+                {
+                    _inflight.TryRemove(new KeyValuePair<string, Lazy<Task<Bitmap?>>>(key, self));
+                }
+            }, _workerCts.Token), LazyThreadSafetyMode.ExecutionAndPublication);
+            return self;
+        });
 
-        try
-        {
-            return await loadTask.WaitAsync(cancellationToken);
-        }
-        finally
-        {
-            _inflight.TryRemove(new KeyValuePair<string, Task<Bitmap?>>(key, loadTask));
-        }
+        return await lazyTask.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public static int GetCanonicalSize(int size)
@@ -877,7 +904,10 @@ public class ThumbnailService : IDisposable
         string normalized = NormalizePath(path);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _inflightGenerationsByPath[normalized] = (linkedCts, tcs.Task);
+        long opId = Interlocked.Increment(ref _nextGenerationOperationId);
+        var opMap = _inflightGenerationsByPath.GetOrAdd(normalized, _ => new ConcurrentDictionary<long, InflightThumbnailGeneration>());
+        var op = new InflightThumbnailGeneration(opId, linkedCts, tcs.Task);
+        opMap[opId] = op;
 
         try
         {
@@ -930,7 +960,14 @@ public class ThumbnailService : IDisposable
         }
         finally
         {
-            _inflightGenerationsByPath.TryRemove(normalized, out _);
+            if (_inflightGenerationsByPath.TryGetValue(normalized, out var currentMap))
+            {
+                currentMap.TryRemove(opId, out _);
+                if (currentMap.IsEmpty)
+                {
+                    _inflightGenerationsByPath.TryRemove(new KeyValuePair<string, ConcurrentDictionary<long, InflightThumbnailGeneration>>(normalized, currentMap));
+                }
+            }
             tcs.TrySetResult(true);
         }
     }
@@ -1033,6 +1070,37 @@ public class ThumbnailService : IDisposable
     public long GeneratedCount => Interlocked.Read(ref _generatedCount);
     public long CancelledCount => Interlocked.Read(ref _cancelledCount);
     public long FailedCount => Interlocked.Read(ref _failedCount);
+
+    internal int GetInflightGenerationCount(string path)
+    {
+        string normalized = NormalizePath(path);
+        if (_inflightGenerationsByPath.TryGetValue(normalized, out var map))
+        {
+            return map.Count;
+        }
+        return 0;
+    }
+
+    internal void RegisterInflightGenerationForTest(string path, CancellationTokenSource cts, Task task, out long opId)
+    {
+        string normalized = NormalizePath(path);
+        opId = Interlocked.Increment(ref _nextGenerationOperationId);
+        var opMap = _inflightGenerationsByPath.GetOrAdd(normalized, _ => new ConcurrentDictionary<long, InflightThumbnailGeneration>());
+        opMap[opId] = new InflightThumbnailGeneration(opId, cts, task);
+    }
+
+    internal void UnregisterInflightGenerationForTest(string path, long opId)
+    {
+        string normalized = NormalizePath(path);
+        if (_inflightGenerationsByPath.TryGetValue(normalized, out var currentMap))
+        {
+            currentMap.TryRemove(opId, out _);
+            if (currentMap.IsEmpty)
+            {
+                _inflightGenerationsByPath.TryRemove(new KeyValuePair<string, ConcurrentDictionary<long, InflightThumbnailGeneration>>(normalized, currentMap));
+            }
+        }
+    }
 
     public Task ClearDiskCacheAsync(CancellationToken cancellationToken = default)
     {

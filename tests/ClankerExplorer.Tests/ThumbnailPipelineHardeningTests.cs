@@ -406,5 +406,111 @@ public sealed class ThumbnailPipelineHardeningTests : IDisposable
         service.CancelPendingRequests();
     }
 
+    [AvaloniaFact]
+    public async Task GetThumbnailAsync_SharedGeneration_CancelledWaiterDoesNotCancelSharedWork()
+    {
+        using var fs = new TemporaryFileSystem();
+        var imgPath = Path.Combine(fs.FolderA, "shared_test.png");
+        File.WriteAllBytes(imgPath, Convert.FromBase64String(OnePixelPng));
+        var fi = new FileInfo(imgPath);
+
+        using var service = new ThumbnailService(workerCount: 2);
+
+        using var ctsA = new CancellationTokenSource();
+        using var ctsB = new CancellationTokenSource();
+
+        // Caller A starts shared generation
+        var taskA = service.GetThumbnailAsync(imgPath, fi.LastWriteTimeUtc, 128, ctsA.Token);
+
+        // Caller B joins same generation
+        var taskB = service.GetThumbnailAsync(imgPath, fi.LastWriteTimeUtc, 128, ctsB.Token);
+
+        // Cancel caller A immediately
+        ctsA.Cancel();
+
+        // Task A throws OperationCanceledException for caller A
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await taskA);
+
+        // Task B completes successfully despite A being cancelled
+        var resultB = await taskB;
+        Assert.NotNull(resultB);
+        Assert.Equal(1, service.GeneratedCount);
+    }
+
+    [AvaloniaFact]
+    public async Task GetThumbnailAsync_MultipleSimultaneousCallers_ExecutesOnlyOneGeneration()
+    {
+        using var fs = new TemporaryFileSystem();
+        var imgPath = Path.Combine(fs.FolderA, "multi_caller.png");
+        File.WriteAllBytes(imgPath, Convert.FromBase64String(OnePixelPng));
+        var fi = new FileInfo(imgPath);
+
+        using var service = new ThumbnailService(workerCount: 2);
+
+        // 10 simultaneous callers
+        var tasks = Enumerable.Range(0, 10)
+            .Select(_ => service.GetThumbnailAsync(imgPath, fi.LastWriteTimeUtc, 128, CancellationToken.None))
+            .ToList();
+
+        var results = await Task.WhenAll(tasks);
+        Assert.All(results, Assert.NotNull);
+        Assert.Equal(1, service.GeneratedCount);
+    }
+
+    [Fact]
+    public async Task YieldFileAsync_MultipleTrackedOperations_CancelsAllAndPreventsOlderFinallyFromRemovingNewer()
+    {
+        using var fs = new TemporaryFileSystem();
+        var targetFile = Path.Combine(fs.FolderA, "video_multi.mp4");
+        File.WriteAllBytes(targetFile, new byte[] { 0, 1, 2, 3 });
+
+        using var service = new ThumbnailService(workerCount: 2);
+
+        // Start multiple tracked operations for the same pathname
+        using var cts1 = new CancellationTokenSource();
+        var tcs1 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.RegisterInflightGenerationForTest(targetFile, cts1, tcs1.Task, out long op1);
+
+        using var cts2 = new CancellationTokenSource();
+        var tcs2 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.RegisterInflightGenerationForTest(targetFile, cts2, tcs2.Task, out long op2);
+
+        Assert.Equal(2, service.GetInflightGenerationCount(targetFile));
+
+        // YieldFileAsync will cancel all snapshot operations and await their completion tasks
+        var yieldTask = service.YieldFileAsync(targetFile);
+
+        // Assert all snapshot operations were requested cancellation
+        Assert.True(cts1.IsCancellationRequested);
+        Assert.True(cts2.IsCancellationRequested);
+
+        // Simulate operations completing and unregistering in their finally
+        tcs1.SetResult(true);
+        service.UnregisterInflightGenerationForTest(targetFile, op1);
+        tcs2.SetResult(true);
+        service.UnregisterInflightGenerationForTest(targetFile, op2);
+
+        await yieldTask;
+
+        // No stale tracked entries remain
+        Assert.Equal(0, service.GetInflightGenerationCount(targetFile));
+
+        // Start a newer operation during/after yield
+        using var cts3 = new CancellationTokenSource();
+        var tcs3 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.RegisterInflightGenerationForTest(targetFile, cts3, tcs3.Task, out long op3);
+        Assert.Equal(1, service.GetInflightGenerationCount(targetFile));
+
+        // Prove an older operation's finally cannot remove the newer operation
+        service.UnregisterInflightGenerationForTest(targetFile, op1);
+        service.UnregisterInflightGenerationForTest(targetFile, op2);
+        Assert.Equal(1, service.GetInflightGenerationCount(targetFile));
+
+        // Newer operation unregisters cleanly
+        tcs3.SetResult(true);
+        service.UnregisterInflightGenerationForTest(targetFile, op3);
+        Assert.Equal(0, service.GetInflightGenerationCount(targetFile));
+    }
+
     public void Dispose() => TestEnvironment.ResetGlobalSettings(TestEnvironment.DefaultFolder);
 }

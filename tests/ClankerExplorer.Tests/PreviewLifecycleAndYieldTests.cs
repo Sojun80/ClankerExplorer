@@ -293,4 +293,124 @@ public class PreviewLifecycleAndYieldTests
             if (File.Exists(tempFile)) File.Delete(tempFile);
         }
     }
+
+    [Fact]
+    public async Task VideoThumbnailService_ConcurrentOperations_DoNotCancelEachOther_AndCancelWorkForFileAwaitsCompletion()
+    {
+        var service = ClankerExplorer.Services.VideoThumbnailService.Instance;
+        string testPath = Path.Combine(Path.GetTempPath(), $"vid_multi_{Guid.NewGuid():N}.mp4");
+
+        using var ctsDuration = new CancellationTokenSource();
+        var tcsDuration = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.RegisterExtractionForTest(testPath, ctsDuration, tcsDuration.Task, out long opDuration);
+
+        using var ctsFrame = new CancellationTokenSource();
+        var tcsFrame = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.RegisterExtractionForTest(testPath, ctsFrame, tcsFrame.Task, out long opFrame);
+
+        // Neither operation should cancel the other
+        Assert.False(ctsDuration.IsCancellationRequested);
+        Assert.False(ctsFrame.IsCancellationRequested);
+        Assert.Equal(2, service.GetActiveExtractionCount(testPath));
+
+        // Start CancelWorkForFileAsync
+        var cancelTask = service.CancelWorkForFileAsync(testPath);
+
+        // Both snapshot operations should have been cancelled
+        Assert.True(ctsDuration.IsCancellationRequested);
+        Assert.True(ctsFrame.IsCancellationRequested);
+
+        // CancelWorkForFileAsync must NOT return until the tracked operations finish
+        Assert.False(cancelTask.IsCompleted);
+
+        // Complete the first operation
+        tcsDuration.SetResult(true);
+        service.UnregisterExtractionForTest(testPath, opDuration);
+        await Task.Delay(20);
+        Assert.False(cancelTask.IsCompleted);
+
+        // Complete the second operation
+        tcsFrame.SetResult(true);
+        service.UnregisterExtractionForTest(testPath, opFrame);
+
+        // Now cancelTask should complete
+        await cancelTask;
+        Assert.True(cancelTask.IsCompletedSuccessfully);
+        Assert.Equal(0, service.GetActiveExtractionCount(testPath));
+    }
+
+    [Fact]
+    public async Task NativeVideoPlayer_YieldA_DoesNotClear_SubsequentOpenB()
+    {
+        using var player = new NativeVideoPlayer();
+        string tempFileA = Path.Combine(Path.GetTempPath(), $"vid_a_{Guid.NewGuid():N}.mp4");
+        string tempFileB = Path.Combine(Path.GetTempPath(), $"vid_b_{Guid.NewGuid():N}.mp4");
+        File.WriteAllBytes(tempFileA, VideoSmokeTests.MinimalMp4Fixture);
+        File.WriteAllBytes(tempFileB, VideoSmokeTests.MinimalMp4Fixture);
+
+        try
+        {
+            // 1. Open A
+            bool openA = player.Open(tempFileA);
+            Assert.True(openA);
+            Assert.True(player.OwnsFile(tempFileA));
+
+            // 2. Start Yield A (which will probe the file off-thread)
+            var yieldTaskA = player.YieldAsync(tempFileA);
+
+            // 3. Immediately Open B before Yield A finishes
+            bool openB = player.Open(tempFileB);
+            Assert.True(openB);
+            Assert.True(player.OwnsFile(tempFileB));
+
+            // 4. Await Yield A completion
+            await yieldTaskA;
+
+            // 5. Yield A completion must NOT clear B's ownership or media
+            Assert.True(player.OwnsFile(tempFileB));
+            Assert.False(player.OwnsFile(tempFileA));
+            Assert.NotNull(player.VlcMediaPlayer?.Media);
+
+            // Cleanup B
+            await player.YieldAsync(tempFileB);
+            Assert.False(player.OwnsFile(tempFileB));
+        }
+        finally
+        {
+            if (File.Exists(tempFileA)) File.Delete(tempFileA);
+            if (File.Exists(tempFileB)) File.Delete(tempFileB);
+        }
+    }
+
+    [Fact]
+    public async Task NativeVideoPlayer_RapidLifecycleInterleavings_NoCrashOrObjectDisposedException()
+    {
+        using var player = new NativeVideoPlayer();
+        string tempFileA = Path.Combine(Path.GetTempPath(), $"stress_a_{Guid.NewGuid():N}.mp4");
+        string tempFileB = Path.Combine(Path.GetTempPath(), $"stress_b_{Guid.NewGuid():N}.mp4");
+        File.WriteAllBytes(tempFileA, VideoSmokeTests.MinimalMp4Fixture);
+        File.WriteAllBytes(tempFileB, VideoSmokeTests.MinimalMp4Fixture);
+
+        try
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                player.Open(tempFileA);
+                player.Close();
+                player.Open(tempFileB);
+                var yTask = player.YieldAsync(tempFileB);
+                player.Open(tempFileA);
+                player.Play();
+                player.Stop();
+                await yTask;
+            }
+
+            player.Close();
+        }
+        finally
+        {
+            if (File.Exists(tempFileA)) File.Delete(tempFileA);
+            if (File.Exists(tempFileB)) File.Delete(tempFileB);
+        }
+    }
 }

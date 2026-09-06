@@ -30,6 +30,8 @@ public partial class ExplorerPaneView : UserControl
     private ScrollViewer? _detailsScrollViewer;
     private ScrollViewer? _thumbnailScrollViewer;
     private bool _restoringFolderViewState;
+    private bool _preservingThumbnailLayout;
+    private long _thumbnailResizeGeneration;
     private bool _detailsScrollSubscribed;
     private bool _thumbnailScrollSubscribed;
     private bool _isMouseDownForMarquee;
@@ -207,6 +209,11 @@ public partial class ExplorerPaneView : UserControl
 
         Unloaded += (_, _) =>
         {
+            if (DataContext is ExplorerPaneViewModel vm)
+            {
+                vm.BeforeThumbnailLayoutChanging -= OnBeforeThumbnailLayoutChanging;
+                vm.AfterThumbnailLayoutChanged -= OnAfterThumbnailLayoutChanged;
+            }
             _thumbnailDebounceTimer.Stop();
             _folderScrollSaveTimer.Stop();
             var cts = _thumbnailViewportCts;
@@ -271,7 +278,46 @@ public partial class ExplorerPaneView : UserControl
         vm.RequestScrollItemIntoView += OnRequestScrollItemIntoView;
         vm.RequestSyncSelection += OnRequestSyncSelection;
         vm.RequestThumbnailViewportUpdate += ScheduleThumbnailViewportUpdate;
+        vm.BeforeThumbnailLayoutChanging += OnBeforeThumbnailLayoutChanging;
+        vm.AfterThumbnailLayoutChanged += OnAfterThumbnailLayoutChanged;
         RestoreFolderViewState();
+    }
+
+    private void OnBeforeThumbnailLayoutChanging()
+    {
+        if (!_preservingThumbnailLayout)
+        {
+            CaptureFolderViewportAnchors();
+            _preservingThumbnailLayout = true;
+        }
+        _thumbnailResizeGeneration++;
+    }
+
+    private void OnAfterThumbnailLayoutChanged()
+    {
+        long currentGen = _thumbnailResizeGeneration;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (currentGen != _thumbnailResizeGeneration) return;
+            try
+            {
+                if (DataContext is ExplorerPaneViewModel vm && vm.IsThumbnailView)
+                {
+                    RestoreViewportAnchors(vm);
+                }
+            }
+            finally
+            {
+                if (currentGen == _thumbnailResizeGeneration)
+                {
+                    _preservingThumbnailLayout = false;
+                    if (DataContext is ExplorerPaneViewModel settledVm && settledVm.IsThumbnailView)
+                    {
+                        SaveFolderScrollState(persist: false);
+                    }
+                }
+            }
+        }, DispatcherPriority.Loaded);
     }
 
     private void EnsureFolderScrollViewers()
@@ -297,7 +343,7 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnFolderScrollChanged()
     {
-        if (_restoringFolderViewState) return;
+        if (_restoringFolderViewState || _preservingThumbnailLayout) return;
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
 
         // If the ScrollViewer is collapsing during a collection reload or transient layout update,
@@ -338,6 +384,7 @@ public partial class ExplorerPaneView : UserControl
     private void CaptureFolderViewportAnchors()
     {
         if (_restoringFolderViewState || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
+        EnsureFolderScrollViewers();
         string? detailsPath = FileDataGrid?.GetVisualDescendants()
             .OfType<DataGridRow>()
             .Select(row => new { Row = row, Point = row.TranslatePoint(new Point(0, 0), FileDataGrid) })
@@ -348,9 +395,23 @@ public partial class ExplorerPaneView : UserControl
 
         string? thumbnailPath = null;
         var panel = ThumbnailListBox?.FindDescendantOfType<VirtualizingStackPanel>();
+        int targetRowIndex = -1;
         if (panel != null && panel.FirstRealizedIndex >= 0)
         {
-            int itemIndex = panel.FirstRealizedIndex * Math.Max(1, vm.ThumbnailColumnCount);
+            targetRowIndex = panel.FirstRealizedIndex;
+        }
+        else if (_thumbnailScrollViewer != null && _thumbnailScrollViewer.Offset.Y > 0)
+        {
+            double rowHeight = vm.ThumbnailCellHeight + 8;
+            if (rowHeight > 0)
+            {
+                targetRowIndex = (int)Math.Floor(_thumbnailScrollViewer.Offset.Y / rowHeight);
+            }
+        }
+
+        if (targetRowIndex >= 0)
+        {
+            int itemIndex = targetRowIndex * Math.Max(1, vm.ThumbnailColumnCount);
             if (itemIndex < vm.SelectedTab.FilteredItems.Count)
                 thumbnailPath = vm.SelectedTab.FilteredItems[itemIndex].FullPath;
         }

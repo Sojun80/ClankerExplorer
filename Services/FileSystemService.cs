@@ -619,7 +619,9 @@ public class FileSystemService
         if (itemList.Count == 0) return (true, "No items to rename.", 0);
 
         var invalidChars = Path.GetInvalidFileNameChars().Concat(new[] { '/', '\\' }).Distinct().ToArray();
-        var seenTargetPaths = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var sourcePaths = new HashSet<string>(itemList.Select(i => i.OriginalPath), pathComparer);
+        var seenTargetPaths = new HashSet<string>(pathComparer);
 
         foreach (var item in itemList)
         {
@@ -631,6 +633,11 @@ public class FileSystemService
             if (!seenTargetPaths.Add(item.NewPath))
             {
                 return (false, $"Target conflict: multiple items in the batch are named '{item.NewName}'.", 0);
+            }
+
+            if ((File.Exists(item.NewPath) || Directory.Exists(item.NewPath)) && !sourcePaths.Contains(item.NewPath))
+            {
+                return (false, $"Target collision: destination '{item.NewPath}' already exists.", 0);
             }
         }
 

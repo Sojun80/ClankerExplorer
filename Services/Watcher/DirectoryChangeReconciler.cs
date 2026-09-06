@@ -117,14 +117,14 @@ public sealed class DirectoryChangeReconciler
         // Ignore events from other directories (e.g. previous directory before navigation)
         if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
 
-        // Filter active transfer temp files so they never flicker into UI
+        // Filter active transfer temp files and internal Clanker temp files so they never flicker into UI
         if (batch.Changes != null && batch.Changes.Count > 0)
         {
             var filteredChanges = new List<FileChangeEvent>(batch.Changes.Count);
             foreach (var c in batch.Changes)
             {
-                bool fullIsTemp = TransferEngine.IsActiveTempFile(c.FullPath);
-                bool oldIsTemp = !string.IsNullOrEmpty(c.OldFullPath) && TransferEngine.IsActiveTempFile(c.OldFullPath);
+                bool fullIsTemp = IsIgnoredTempPath(c.FullPath);
+                bool oldIsTemp = !string.IsNullOrEmpty(c.OldFullPath) && IsIgnoredTempPath(c.OldFullPath);
 
                 // Any event whose target is a temp file stays hidden
                 if (fullIsTemp)
@@ -242,34 +242,76 @@ public sealed class DirectoryChangeReconciler
         }, DispatcherPriority.Background);
     }
 
+    private static bool IsIgnoredTempPath(string? path) =>
+        TransferEngine.IsInternalClankerTemp(path) || TransferEngine.IsActiveTempFile(path);
+
     public void ReconcileCreatedOrChangedSync(string fullPath)
     {
-        if (string.IsNullOrWhiteSpace(fullPath) || TransferEngine.IsActiveTempFile(fullPath)) return;
+        if (string.IsNullOrWhiteSpace(fullPath) || IsIgnoredTempPath(fullPath)) return;
         var change = new FileChangeEvent(DirectoryChangeKind.Created, fullPath);
         var resolved = ResolveMetadata(new[] { change });
-        ApplyResolvedBatch(_tab.CurrentPath, resolved);
+
+        void Apply()
+        {
+            ApplyResolvedBatch(_tab.CurrentPath, resolved);
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            Apply();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(Apply);
+        }
     }
 
     public void ReconcileDeletedSync(string fullPath)
     {
-        if (string.IsNullOrWhiteSpace(fullPath) || TransferEngine.IsActiveTempFile(fullPath)) return;
-        if (ApplyDeleted(fullPath))
+        if (string.IsNullOrWhiteSpace(fullPath) || IsIgnoredTempPath(fullPath)) return;
+
+        void Apply()
         {
-            _tab.NotifyFilteredItemsChanged();
+            if (ApplyDeleted(fullPath))
+            {
+                _tab.NotifyFilteredItemsChanged();
+            }
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            Apply();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(Apply);
         }
     }
 
     public void ReconcileRenamedSync(string oldFullPath, string newFullPath)
     {
-        if (string.IsNullOrWhiteSpace(newFullPath) || TransferEngine.IsActiveTempFile(newFullPath)) return;
-        if (TransferEngine.IsActiveTempFile(oldFullPath))
+        if (string.IsNullOrWhiteSpace(newFullPath) || IsIgnoredTempPath(newFullPath)) return;
+        if (IsIgnoredTempPath(oldFullPath))
         {
             ReconcileCreatedOrChangedSync(newFullPath);
             return;
         }
         var change = new FileChangeEvent(DirectoryChangeKind.Renamed, newFullPath, oldFullPath);
         var resolved = ResolveMetadata(new[] { change });
-        ApplyResolvedBatch(_tab.CurrentPath, resolved);
+
+        void Apply()
+        {
+            ApplyResolvedBatch(_tab.CurrentPath, resolved);
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            Apply();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(Apply);
+        }
     }
 
     private sealed record ResolvedChange(

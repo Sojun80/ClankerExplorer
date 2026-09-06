@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using ClankerExplorer.Models;
 using ClankerExplorer.Services.Watcher;
@@ -619,5 +620,48 @@ public sealed class DirectoryWatcherTests
             tab.FilteredItems.Any(i => i.Name == "post_recovery.txt"), timeoutMs: 3000);
 
         Assert.True(detected, "Subsequent external file should appear after watcher recovery.");
+    }
+
+    [AvaloniaFact]
+    public async Task DirectoryChangeReconciler_SyncMethods_FromBackgroundThread_MutateOnUIThreadWithoutCrossThreadException()
+    {
+        using var fs = new TemporaryFileSystem();
+        var file1 = Path.Combine(fs.FolderA, "test_sync1.txt");
+        File.WriteAllText(file1, "content1");
+
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 30);
+        using var tab = new ExplorerTabViewModel(fs.FolderA, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        var reconciler = new DirectoryChangeReconciler(tab);
+
+        // 1. Create from worker thread
+        await Task.Run(() =>
+        {
+            reconciler.ReconcileCreatedOrChangedSync(file1);
+        });
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains(tab.Items, i => i.FullPath.Equals(file1, StringComparison.OrdinalIgnoreCase));
+
+        // 2. Rename from worker thread
+        var file2 = Path.Combine(fs.FolderA, "test_sync2.txt");
+        File.Move(file1, file2);
+        await Task.Run(() =>
+        {
+            reconciler.ReconcileRenamedSync(file1, file2);
+        });
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains(tab.Items, i => i.FullPath.Equals(file2, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(tab.Items, i => i.FullPath.Equals(file1, StringComparison.OrdinalIgnoreCase));
+
+        // 3. Delete from worker thread
+        File.Delete(file2);
+        await Task.Run(() =>
+        {
+            reconciler.ReconcileDeletedSync(file2);
+        });
+        Dispatcher.UIThread.RunJobs();
+        Assert.DoesNotContain(tab.Items, i => i.FullPath.Equals(file2, StringComparison.OrdinalIgnoreCase));
     }
 }

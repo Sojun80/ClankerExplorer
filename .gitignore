@@ -27,3 +27,13 @@ yarn-error.log*
 Thumbs.db
 *.tmp
 *.bak
+
+## Packaging, Testing, and Secrets
+*.nupkg
+*.snupkg
+TestResults/
+coverage*/
+*.pfx
+*.key
+.env
+*.sbom

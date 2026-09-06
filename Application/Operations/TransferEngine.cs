@@ -22,19 +22,76 @@ public sealed class TransferEngine
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _activeTempFiles = new(PathComparer);
 
-    public static bool IsInternalTransferTempFile(string? path)
+    public static bool IsInternalTransferScratch(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return false;
         var name = Path.GetFileName(path);
-        return name.StartsWith(".clanker-transfer-", PathComparison) &&
-               name.EndsWith(".tmp", PathComparison);
+        if (string.IsNullOrEmpty(name)) return false;
+
+        const string prefix = ".clanker-transfer-";
+        const string suffix = ".tmp";
+        if (name.Length <= prefix.Length + suffix.Length) return false;
+        if (!name.StartsWith(prefix, PathComparison) || !name.EndsWith(suffix, PathComparison)) return false;
+
+        var guidSpan = name.AsSpan(prefix.Length, name.Length - prefix.Length - suffix.Length);
+        return Guid.TryParse(guidSpan, out _);
+    }
+
+    public static bool IsInternalRecoveryTemp(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var name = Path.GetFileName(path);
+        if (string.IsNullOrEmpty(name)) return false;
+
+        // 1. exact .clanker-transfer-{GUID}.bak form
+        const string bakPrefix = ".clanker-transfer-";
+        const string bakSuffix = ".bak";
+        if (name.Length > bakPrefix.Length + bakSuffix.Length &&
+            name.StartsWith(bakPrefix, PathComparison) &&
+            name.EndsWith(bakSuffix, PathComparison))
+        {
+            var guidSpan = name.AsSpan(bakPrefix.Length, name.Length - bakPrefix.Length - bakSuffix.Length);
+            if (Guid.TryParse(guidSpan, out _))
+            {
+                return true;
+            }
+        }
+
+        // 2. valid Clanker batch-rename .c_tmp_... form: .c_tmp_{Guid}_{originalName}
+        const string renamePrefix = ".c_tmp_";
+        if (name.StartsWith(renamePrefix, PathComparison))
+        {
+            var rest = name.AsSpan(renamePrefix.Length);
+            int nextUnderscore = rest.IndexOf('_');
+            if (nextUnderscore > 0)
+            {
+                var guidSpan = rest.Slice(0, nextUnderscore);
+                var originalNameSpan = rest.Slice(nextUnderscore + 1);
+                if (originalNameSpan.Length > 0 && Guid.TryParse(guidSpan, out _))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public static bool IsInternalClankerTemp(string? path)
+    {
+        return IsInternalTransferScratch(path) || IsInternalRecoveryTemp(path);
+    }
+
+    public static bool IsInternalTransferTempFile(string? path)
+    {
+        return IsInternalTransferScratch(path);
     }
 
     public static bool IsActiveTempFile(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return false;
         if (_activeTempFiles.ContainsKey(path)) return true;
-        if (IsInternalTransferTempFile(path) && OperationManager.Instance.HasActiveOperations)
+        if (IsInternalClankerTemp(path) && OperationManager.Instance.HasActiveOperations)
         {
             return true;
         }
@@ -49,6 +106,78 @@ public sealed class TransferEngine
     public static void UnregisterActiveTempFile(string path)
     {
         _activeTempFiles.TryRemove(path, out _);
+    }
+
+    public static void DeleteLeftoverTransferScratchFiles(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory)) return;
+
+        try
+        {
+            if (!Directory.Exists(directory)) return;
+
+            int deletedCount = 0;
+            int failedCount = 0;
+
+            // Enumerate files
+            try
+            {
+                foreach (var filePath in Directory.EnumerateFiles(directory, ".clanker-transfer-*.tmp", SearchOption.TopDirectoryOnly))
+                {
+                    if (!IsInternalTransferScratch(filePath)) continue;
+                    if (_activeTempFiles.ContainsKey(filePath)) continue;
+
+                    try
+                    {
+                        File.Delete(filePath);
+                        deletedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCount++;
+                        Debug.WriteLine($"Failed to delete leftover scratch file '{filePath}': {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to enumerate files in '{directory}': {ex.Message}");
+            }
+
+            // Enumerate directories
+            try
+            {
+                foreach (var dirPath in Directory.EnumerateDirectories(directory, ".clanker-transfer-*.tmp", SearchOption.TopDirectoryOnly))
+                {
+                    if (!IsInternalTransferScratch(dirPath)) continue;
+                    if (_activeTempFiles.ContainsKey(dirPath)) continue;
+
+                    try
+                    {
+                        Directory.Delete(dirPath, recursive: true);
+                        deletedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCount++;
+                        Debug.WriteLine($"Failed to delete leftover scratch directory '{dirPath}': {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to enumerate directories in '{directory}': {ex.Message}");
+            }
+
+            if (deletedCount > 0 || failedCount > 0)
+            {
+                Debug.WriteLine($"DeleteLeftoverTransferScratchFiles in '{directory}': {deletedCount} deleted, {failedCount} failed.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"DeleteLeftoverTransferScratchFiles error for '{directory}': {ex.Message}");
+        }
     }
 
     public async Task<FileTransferResult> ExecuteTransferAsync(
@@ -110,6 +239,9 @@ public sealed class TransferEngine
             job.Complete(res, failSummary);
             return res;
         }
+
+        // Contextual sweep: clean abandoned disposable scratch in destination directory
+        DeleteLeftoverTransferScratchFiles(request.DestinationDirectory);
 
         // Calculate totals across all sources
         var (totalFiles, totalBytes) = await Task.Run(() => CalculateTotals(request.SourcePaths, ct), ct).ConfigureAwait(false);
@@ -670,6 +802,10 @@ public sealed class TransferEngine
                 if (!Directory.Exists(currentDst))
                 {
                     Directory.CreateDirectory(currentDst);
+                }
+                else
+                {
+                    DeleteLeftoverTransferScratchFiles(currentDst);
                 }
             }
             catch (Exception ex)

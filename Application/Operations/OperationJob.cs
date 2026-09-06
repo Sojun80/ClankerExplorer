@@ -182,11 +182,20 @@ public partial class OperationJob : ObservableObject
         }
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, CancellationToken);
-        var completed = await Task.WhenAny(pauseTask, Task.Delay(Timeout.Infinite, linkedCts.Token)).ConfigureAwait(false);
-        if (completed != pauseTask)
+        try
         {
-            linkedCts.Token.ThrowIfCancellationRequested();
+            await Task.WhenAny(
+                pauseTask,
+                Task.Delay(Timeout.Infinite, linkedCts.Token)).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        CancellationToken.ThrowIfCancellationRequested();
+
+        await pauseTask.ConfigureAwait(false);
     }
 
     public void RequestCancel()
@@ -203,8 +212,9 @@ public partial class OperationJob : ObservableObject
         }
     }
 
-    public Task<ConflictResolution> PromptConflictAsync(OperationConflict conflict, CancellationToken cancellationToken)
+    public async Task<ConflictResolution> PromptConflictAsync(OperationConflict conflict, CancellationToken cancellationToken)
     {
+        TaskCompletionSource<ConflictResolution> tcs;
         lock (_syncRoot)
         {
             _conflictCount++;
@@ -212,13 +222,13 @@ public partial class OperationJob : ObservableObject
             SetState(OperationState.NeedsAttention);
             AddLog($"Conflict detected: destination already contains '{System.IO.Path.GetFileName(conflict.DestinationPath)}'", OperationLogLevel.Warning);
 
-            _conflictTcs = new TaskCompletionSource<ConflictResolution>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tcs = new TaskCompletionSource<ConflictResolution>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _conflictTcs = tcs;
         }
 
-        var tcs = _conflictTcs;
-        cancellationToken.Register(() => tcs.TrySetCanceled());
-        CancellationToken.Register(() => tcs.TrySetCanceled());
-        return tcs.Task;
+        using var reg1 = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+        using var reg2 = CancellationToken.Register(() => tcs.TrySetCanceled(CancellationToken));
+        return await tcs.Task.ConfigureAwait(false);
     }
 
     public void ResolveConflict(ConflictResolution resolution)
