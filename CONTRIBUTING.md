@@ -38,6 +38,13 @@ dotnet build -c Release
 dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true
 ```
 
+### Build Output Location
+- Debug builds automatically synchronize to:
+  ```text
+  C:\ClankerExplorer\bin\Debug\net8.0\ClankerExplorer.exe
+  ```
+- **File Locking Note**: Always ensure `ClankerExplorer.exe` is closed before rebuilding; otherwise, Windows file locks will prevent updating the binaries in `bin\Debug\net8.0\`.
+
 ---
 
 ## 🔒 Code Review & Security Checklist
