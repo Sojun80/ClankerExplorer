@@ -40,6 +40,9 @@ public class AppSettings
     public double ThumbnailPrefetchViewports { get; set; } = 1.5;
     public bool StartInDualPane { get; set; } = false;
     public bool ShowInspectorOnStartup { get; set; } = true;
+    public bool AlwaysOnTop { get; set; } = false;
+    public bool ShowOperationsWorkspaceOnStartup { get; set; } = false;
+    public bool ShowSearchWorkspaceOnStartup { get; set; } = false;
     public bool ConfirmBeforeDelete { get; set; } = true;
 
     // Configurable Grid Columns (Cross-Platform Windows & Linux)

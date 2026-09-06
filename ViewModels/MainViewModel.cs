@@ -18,6 +18,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public OperationsViewModel Operations { get; }
     private bool _isDisposed;
 
+    private bool _isInitializingStartupState = true;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsExplorerVisible))]
     private bool _showOperationsWorkspace;
@@ -27,6 +29,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (value)
         {
             ShowSearchWorkspace = false;
+        }
+
+        if (!_isInitializingStartupState)
+        {
+            SettingsService.Instance.UpdateSettings(s => s.ShowOperationsWorkspaceOnStartup = value);
         }
     }
 
@@ -45,6 +52,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Search.OnWorkspaceHidden();
         }
+
+        if (!_isInitializingStartupState)
+        {
+            SettingsService.Instance.UpdateSettings(s => s.ShowSearchWorkspaceOnStartup = value);
+        }
     }
 
     public bool IsExplorerVisible => !ShowOperationsWorkspace && !ShowSearchWorkspace;
@@ -55,10 +67,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(LeftPaneColumnSpan))]
     private bool _isDualPane;
 
+    partial void OnIsDualPaneChanged(bool value)
+    {
+        if (!_isInitializingStartupState)
+        {
+            SettingsService.Instance.UpdateSettings(s => s.StartInDualPane = value);
+        }
+    }
+
     public int LeftPaneColumnSpan => IsDualPane ? 1 : 3;
 
     [ObservableProperty]
     private bool _isAlwaysOnTop;
+
+    partial void OnIsAlwaysOnTopChanged(bool value)
+    {
+        if (!_isInitializingStartupState)
+        {
+            SettingsService.Instance.UpdateSettings(s => s.AlwaysOnTop = value);
+        }
+    }
 
     [ObservableProperty]
     private bool _showInspector = true;
@@ -78,6 +106,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 _ = Inspector.LoadPreviewAsync(selectedItem.FullPath);
             }
+        }
+
+        if (!_isInitializingStartupState)
+        {
+            SettingsService.Instance.UpdateSettings(s => s.ShowInspectorOnStartup = value);
         }
     }
 
@@ -154,85 +187,99 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public MainViewModel(bool loadSidebarData = true, IFileOperationService? fileOperationService = null)
     {
-        FileOperations = fileOperationService ?? new FileOperationService();
-        Operations = new OperationsViewModel(FileOperations.Operations);
-        Operations.RequestClose += () => ShowOperationsWorkspace = false;
-
-        Search = new SearchWorkspaceViewModel(
-            getCurrentFolder: () => ActivePane?.SelectedTab?.CurrentPath ?? FileSystemService.DefaultRootPath);
-        Search.RequestClose += () => ShowSearchWorkspace = false;
-        Search.RequestNavigate += (folderPath, selectPath) =>
+        _isInitializingStartupState = true;
+        try
         {
-            ShowSearchWorkspace = false;
-            var targetPane = ActivePane ?? LeftPane;
-            var tab = targetPane?.SelectedTab;
-            if (tab != null)
+            FileOperations = fileOperationService ?? new FileOperationService();
+            Operations = new OperationsViewModel(FileOperations.Operations);
+            Operations.RequestClose += () => ShowOperationsWorkspace = false;
+
+            Search = new SearchWorkspaceViewModel(
+                getCurrentFolder: () => ActivePane?.SelectedTab?.CurrentPath ?? FileSystemService.DefaultRootPath);
+            Search.RequestClose += () => ShowSearchWorkspace = false;
+            Search.RequestNavigate += (folderPath, selectPath) =>
             {
-                var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-                if (string.Equals(tab.CurrentPath, folderPath, comparison))
+                ShowSearchWorkspace = false;
+                var targetPane = ActivePane ?? LeftPane;
+                var tab = targetPane?.SelectedTab;
+                if (tab != null)
                 {
-                    if (!string.IsNullOrEmpty(selectPath))
+                    var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                    if (string.Equals(tab.CurrentPath, folderPath, comparison))
                     {
-                        tab.SelectPaths(new[] { selectPath }, scrollIntoView: true);
+                        if (!string.IsNullOrEmpty(selectPath))
+                        {
+                            tab.SelectPaths(new[] { selectPath }, scrollIntoView: true);
+                        }
                     }
+                    else
+                    {
+                        if (!string.IsNullOrEmpty(selectPath))
+                        {
+                            tab.PendingSelectPath = selectPath;
+                        }
+                        tab.NavigateTo(folderPath);
+                    }
+                }
+            };
+            Search.RequestOpenFile += async (filePath) =>
+            {
+                if (ArchiveService.Instance.IsArchive(filePath))
+                {
+                    ArchiveService.Instance.OpenArchive(filePath);
                 }
                 else
                 {
-                    if (!string.IsNullOrEmpty(selectPath))
+                    if (Inspector != null)
                     {
-                        tab.PendingSelectPath = selectPath;
+                        await Inspector.YieldFileAsync(filePath);
                     }
-                    tab.NavigateTo(folderPath);
+                    await ThumbnailService.Instance.YieldFileAsync(filePath);
+                    FileSystemService.Instance.OpenItem(filePath);
                 }
-            }
-        };
-        Search.RequestOpenFile += async (filePath) =>
-        {
-            if (ArchiveService.Instance.IsArchive(filePath))
+            };
+
+            var settings = SettingsService.Instance.CurrentSettings;
+            var startPath = string.IsNullOrWhiteSpace(settings.DefaultPath) ? FileSystemService.DefaultRootPath : settings.DefaultPath;
+            if (!Directory.Exists(startPath)) startPath = FileSystemService.DefaultRootPath;
+
+            InitializePanesFromStartupSettings(settings, startPath);
+
+            _quickAccessChangedHandler = RefreshQuickAccess;
+            QuickAccessService.Instance.QuickAccessChanged += _quickAccessChangedHandler;
+
+            if (loadSidebarData)
             {
-                ArchiveService.Instance.OpenArchive(filePath);
+                LoadSidebarData();
             }
             else
             {
-                if (Inspector != null)
-                {
-                    await Inspector.YieldFileAsync(filePath);
-                }
-                await ThumbnailService.Instance.YieldFileAsync(filePath);
-                FileSystemService.Instance.OpenItem(filePath);
+                RefreshQuickAccess();
             }
-        };
-
-        var settings = SettingsService.Instance.CurrentSettings;
-        var startPath = string.IsNullOrWhiteSpace(settings.DefaultPath) ? FileSystemService.DefaultRootPath : settings.DefaultPath;
-        if (!Directory.Exists(startPath)) startPath = FileSystemService.DefaultRootPath;
-
-        InitializePanesFromStartupSettings(settings, startPath);
-
-        _quickAccessChangedHandler = RefreshQuickAccess;
-        QuickAccessService.Instance.QuickAccessChanged += _quickAccessChangedHandler;
-
-        if (loadSidebarData)
-        {
-            LoadSidebarData();
         }
-        else
+        finally
         {
-            RefreshQuickAccess();
+            _isInitializingStartupState = false;
         }
     }
 
     private void InitializePanesFromStartupSettings(AppSettings settings, string defaultPath)
     {
-        IsDualPane = settings.StartInDualPane;
-        ShowInspector = settings.ShowInspectorOnStartup;
-
         var session = SessionService.Instance.LoadSession();
+
+        IsDualPane = (settings.StartupBehavior == "RestoreSession" && session != null)
+            ? session.IsDualPane
+            : settings.StartInDualPane;
+
+        ShowInspector = session?.ShowInspector ?? settings.ShowInspectorOnStartup;
+        IsAlwaysOnTop = session?.IsAlwaysOnTop ?? settings.AlwaysOnTop;
+        ShowOperationsWorkspace = session?.ShowOperationsWorkspace ?? settings.ShowOperationsWorkspaceOnStartup;
+        ShowSearchWorkspace = session?.ShowSearchWorkspace ?? settings.ShowSearchWorkspaceOnStartup;
+
         InspectorWidth = session != null && session.InspectorWidth > 150 ? session.InspectorWidth : (settings.InspectorWidth > 150 ? settings.InspectorWidth : 320.0);
 
         if (settings.StartupBehavior == "RestoreSession" && session != null)
         {
-            IsDualPane = session.IsDualPane;
             var paneLeft = RestorePaneFromSession("left", session.LeftPane, defaultPath, "PANE 1");
             var paneRight = RestorePaneFromSession("right", session.RightPane, defaultPath, "PANE 2");
 

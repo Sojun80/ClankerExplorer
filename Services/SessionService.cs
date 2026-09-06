@@ -26,6 +26,10 @@ public class PaneSessionState
 public class AppSessionState
 {
     public bool IsDualPane { get; set; }
+    public bool? ShowInspector { get; set; }
+    public bool? IsAlwaysOnTop { get; set; }
+    public bool? ShowOperationsWorkspace { get; set; }
+    public bool? ShowSearchWorkspace { get; set; }
     public string ActivePaneId { get; set; } = "left";
     public double InspectorWidth { get; set; } = 320;
     public PaneSessionState LeftPane { get; set; } = new();
@@ -82,6 +86,10 @@ public class SessionService
             SaveSession(new AppSessionState
             {
                 IsDualPane = vm.IsDualPane,
+                ShowInspector = vm.ShowInspector,
+                IsAlwaysOnTop = vm.IsAlwaysOnTop,
+                ShowOperationsWorkspace = vm.ShowOperationsWorkspace,
+                ShowSearchWorkspace = vm.ShowSearchWorkspace,
                 ActivePaneId = vm.ActivePane == vm.RightPane ? "right" : "left",
                 InspectorWidth = vm.InspectorWidth,
                 LeftPane = BuildPaneSession(vm.LeftPane),

@@ -190,6 +190,15 @@ public partial class SettingsViewModel : ObservableObject
     private bool _showInspectorOnStartup = true;
 
     [ObservableProperty]
+    private bool _alwaysOnTop = false;
+
+    [ObservableProperty]
+    private bool _showOperationsWorkspaceOnStartup = false;
+
+    [ObservableProperty]
+    private bool _showSearchWorkspaceOnStartup = false;
+
+    [ObservableProperty]
     private bool _confirmBeforeDelete = true;
 
     // Configurable Grid Columns
@@ -294,6 +303,9 @@ public partial class SettingsViewModel : ObservableObject
         MaxTabsAllowed = s.MaxTabsAllowed > 0 ? s.MaxTabsAllowed : 30;
         StartInDualPane = s.StartInDualPane;
         ShowInspectorOnStartup = s.ShowInspectorOnStartup;
+        AlwaysOnTop = s.AlwaysOnTop;
+        ShowOperationsWorkspaceOnStartup = s.ShowOperationsWorkspaceOnStartup;
+        ShowSearchWorkspaceOnStartup = s.ShowSearchWorkspaceOnStartup;
         ConfirmBeforeDelete = s.ConfirmBeforeDelete;
         ShowColumnExt = s.ShowColumnExt;
         ShowColumnSize = s.ShowColumnSize;
@@ -370,6 +382,9 @@ public partial class SettingsViewModel : ObservableObject
             MaxTabsAllowed = MaxTabsAllowed,
             StartInDualPane = StartInDualPane,
             ShowInspectorOnStartup = ShowInspectorOnStartup,
+            AlwaysOnTop = AlwaysOnTop,
+            ShowOperationsWorkspaceOnStartup = ShowOperationsWorkspaceOnStartup,
+            ShowSearchWorkspaceOnStartup = ShowSearchWorkspaceOnStartup,
             ConfirmBeforeDelete = ConfirmBeforeDelete,
             ShowColumnExt = ShowColumnExt,
             ShowColumnSize = ShowColumnSize,

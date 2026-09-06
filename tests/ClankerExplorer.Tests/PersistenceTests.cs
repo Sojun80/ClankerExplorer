@@ -349,4 +349,128 @@ public sealed class PersistenceTests
         var resD = WindowGeometryHelper.ClampWindowBounds(50, -500, 1200, 800, screens);
         Assert.True(resD.Y >= 0);
     }
+
+    [Fact]
+    public void Session_RoundTripsToggleButtonStates()
+    {
+        using var fs = new TemporaryFileSystem();
+        var service = new SessionService(fs.Config);
+
+        var expected = new AppSessionState
+        {
+            IsDualPane = true,
+            ShowInspector = false,
+            IsAlwaysOnTop = true,
+            ShowOperationsWorkspace = true,
+            ShowSearchWorkspace = false,
+            ActivePaneId = "left",
+            InspectorWidth = 400,
+            LeftPane = new PaneSessionState
+            {
+                ActiveTabIndex = 0,
+                ActiveTabPath = fs.FolderA,
+                Tabs = new List<TabSessionItem> { new() { Path = fs.FolderA } }
+            },
+            RightPane = new PaneSessionState
+            {
+                ActiveTabIndex = 0,
+                ActiveTabPath = fs.FolderB,
+                Tabs = new List<TabSessionItem> { new() { Path = fs.FolderB } }
+            }
+        };
+
+        service.SaveSession(expected);
+        var actual = new SessionService(fs.Config).LoadSession();
+
+        Assert.NotNull(actual);
+        Assert.True(actual.IsDualPane);
+        Assert.Equal(false, actual.ShowInspector);
+        Assert.Equal(true, actual.IsAlwaysOnTop);
+        Assert.Equal(true, actual.ShowOperationsWorkspace);
+        Assert.Equal(false, actual.ShowSearchWorkspace);
+    }
+
+    [Fact]
+    public void MainViewModel_TogglingShowInspectorOff_PersiststoSettings()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+        // Ensure inspector starts on
+        SettingsService.Instance.UpdateSettings(s => s.ShowInspectorOnStartup = true);
+
+        using var main = new MainViewModel(loadSidebarData: false);
+        Assert.True(main.ShowInspector);
+
+        main.ShowInspector = false;
+
+        Assert.False(SettingsService.Instance.CurrentSettings.ShowInspectorOnStartup);
+    }
+
+    [Fact]
+    public void MainViewModel_TogglingIsDualPane_PersistsToSettings()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+        SettingsService.Instance.UpdateSettings(s => s.StartInDualPane = false);
+
+        using var main = new MainViewModel(loadSidebarData: false);
+        Assert.False(main.IsDualPane);
+
+        main.IsDualPane = true;
+
+        Assert.True(SettingsService.Instance.CurrentSettings.StartInDualPane);
+    }
+
+    [Fact]
+    public void MainViewModel_TogglingIsAlwaysOnTop_PersistsToSettings()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+        SettingsService.Instance.UpdateSettings(s => s.AlwaysOnTop = false);
+
+        using var main = new MainViewModel(loadSidebarData: false);
+        Assert.False(main.IsAlwaysOnTop);
+
+        main.IsAlwaysOnTop = true;
+
+        Assert.True(SettingsService.Instance.CurrentSettings.AlwaysOnTop);
+    }
+
+    [Fact]
+    public void MainViewModel_RestoresShowInspectorFalseFromSession()
+    {
+        using var fs = new TemporaryFileSystem();
+        TestEnvironment.ResetGlobalSettings(fs.FolderA);
+        SettingsService.Instance.UpdateSettings(s =>
+        {
+            s.StartupBehavior = "RestoreSession";
+            s.ShowInspectorOnStartup = true; // default on
+        });
+
+        // Save a session with ShowInspector = false
+        SessionService.Instance.SaveSession(new AppSessionState
+        {
+            ShowInspector = false,
+            IsDualPane = false,
+            ActivePaneId = "left",
+            InspectorWidth = 320,
+            LeftPane = new PaneSessionState
+            {
+                ActiveTabIndex = 0,
+                ActiveTabPath = fs.FolderA,
+                Tabs = new List<TabSessionItem> { new() { Path = fs.FolderA } }
+            },
+            RightPane = new PaneSessionState
+            {
+                ActiveTabIndex = 0,
+                ActiveTabPath = fs.FolderA,
+                Tabs = new List<TabSessionItem> { new() { Path = fs.FolderA } }
+            }
+        });
+
+        using var main = new MainViewModel(loadSidebarData: false);
+
+        // Even though ShowInspectorOnStartup = true, session says false → should be false
+        Assert.False(main.ShowInspector);
+    }
 }

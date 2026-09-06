@@ -394,6 +394,11 @@
                     <TextBlock Text="Open File Inspector panel on launch" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
                   </CheckBox>
 
+                  <!-- Always on Top Startup -->
+                  <CheckBox IsChecked="{Binding AlwaysOnTop, Mode=TwoWay}">
+                    <TextBlock Text="Keep window always on top" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>
+                  </CheckBox>
+
                   <!-- Confirm Delete -->
                   <CheckBox IsChecked="{Binding ConfirmBeforeDelete, Mode=TwoWay}">
                     <TextBlock Text="Confirm before deleting files" Foreground="{DynamicResource AppTextBrush}" FontSize="12"/>

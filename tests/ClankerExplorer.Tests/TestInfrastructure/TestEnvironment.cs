@@ -46,7 +46,10 @@ public static class TestEnvironment
             DefaultPath = defaultPath,
             StartupBehavior = "OpenDefaultPath",
             StartInDualPane = false,
-            ShowInspectorOnStartup = true
+            ShowInspectorOnStartup = true,
+            AlwaysOnTop = false,
+            ShowOperationsWorkspaceOnStartup = false,
+            ShowSearchWorkspaceOnStartup = false
         });
 
         var sessionPath = SessionService.Instance.SessionFilePath;
