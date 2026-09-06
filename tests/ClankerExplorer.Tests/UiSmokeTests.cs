@@ -956,6 +956,104 @@ public sealed class UiSmokeTests
     }
 
     [Fact]
+    public async Task CopyFileName_SingleAndMultiSelection_CopiesLeafNames()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "clanker_copy_filename_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        var subDir = Path.Combine(tempDir, "Stuff");
+        Directory.CreateDirectory(subDir);
+        var file1 = Path.Combine(tempDir, "movie.mkv");
+        File.WriteAllText(file1, "video");
+
+        try
+        {
+            var pane = new ExplorerPaneViewModel("pane1", tempDir);
+            var tab = pane.SelectedTab!;
+            await tab.RefreshAsync();
+
+            var itemFile = tab.FilteredItems.First(i => i.Name == "movie.mkv");
+            var itemFolder = tab.FilteredItems.First(i => i.Name == "Stuff");
+
+            string? clipboardResult = null;
+            pane.RequestSetClipboardText += text => clipboardResult = text;
+
+            // Single file
+            tab.SelectedItem = itemFile;
+            tab.SelectedItems.Clear();
+            tab.SelectedItems.Add(itemFile);
+            pane.CopyFileName();
+            Assert.Equal("movie.mkv", clipboardResult);
+
+            // Single folder
+            tab.SelectedItem = itemFolder;
+            tab.SelectedItems.Clear();
+            tab.SelectedItems.Add(itemFolder);
+            pane.CopyFileName();
+            Assert.Equal("Stuff", clipboardResult);
+
+            // Multi-selection
+            tab.SelectedItems.Clear();
+            tab.SelectedItems.Add(itemFile);
+            tab.SelectedItems.Add(itemFolder);
+            pane.CopyFileName();
+            Assert.Equal($"movie.mkv{Environment.NewLine}Stuff", clipboardResult);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task CopyFileLocation_SingleAndMultiSelection_CopiesContainingDirectories()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "clanker_copy_fileloc_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        var subDir = Path.Combine(tempDir, "Stuff");
+        Directory.CreateDirectory(subDir);
+        var file1 = Path.Combine(tempDir, "movie.mkv");
+        File.WriteAllText(file1, "video");
+
+        try
+        {
+            var pane = new ExplorerPaneViewModel("pane1", tempDir);
+            var tab = pane.SelectedTab!;
+            await tab.RefreshAsync();
+
+            var itemFile = tab.FilteredItems.First(i => i.Name == "movie.mkv");
+            var itemFolder = tab.FilteredItems.First(i => i.Name == "Stuff");
+
+            string? clipboardResult = null;
+            pane.RequestSetClipboardText += text => clipboardResult = text;
+
+            // Single file
+            tab.SelectedItem = itemFile;
+            tab.SelectedItems.Clear();
+            tab.SelectedItems.Add(itemFile);
+            pane.CopyFileLocation();
+            Assert.Equal(tempDir, clipboardResult);
+
+            // Single folder
+            tab.SelectedItem = itemFolder;
+            tab.SelectedItems.Clear();
+            tab.SelectedItems.Add(itemFolder);
+            pane.CopyFileLocation();
+            Assert.Equal(tempDir, clipboardResult);
+
+            // Multi-selection
+            tab.SelectedItems.Clear();
+            tab.SelectedItems.Add(itemFile);
+            tab.SelectedItems.Add(itemFolder);
+            pane.CopyFileLocation();
+            Assert.Equal($"{tempDir}{Environment.NewLine}{tempDir}", clipboardResult);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
     public void FileDragDropService_DeterminesCorrectEffect_SameVsDifferentVolume()
     {
         var sameVolSources = new[] { @"C:\Folder1\file.txt", @"C:\Folder1\image.png" };

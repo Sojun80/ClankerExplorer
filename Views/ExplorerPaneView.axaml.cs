@@ -682,6 +682,8 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnThumbnailItemPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (IsFromActiveRenameTextBox(e)) return;
+
         if (sender is not Control { DataContext: FileItem item } ||
             DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null)
         {
@@ -736,6 +738,12 @@ public partial class ExplorerPaneView : UserControl
 
     private async void OnThumbnailItemDoubleTapped(object? sender, TappedEventArgs e)
     {
+        if (IsFromActiveRenameTextBox(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (sender is Control { DataContext: FileItem item } && DataContext is ExplorerPaneViewModel vm)
         {
             e.Handled = true;
@@ -880,6 +888,7 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnDataGridPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
     {
+        if (IsFromActiveRenameTextBox(e)) return;
         if (FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null) return;
         var tab = vm.SelectedTab;
 
@@ -995,6 +1004,7 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnThumbnailListBoxPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
     {
+        if (IsFromActiveRenameTextBox(e)) return;
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab == null || ThumbnailListBox == null) return;
 
         var rawSource = e.Source as Visual;
@@ -1145,6 +1155,7 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnPointerReleasedTunnel(object? sender, PointerReleasedEventArgs e)
     {
+        if (IsFromActiveRenameTextBox(e)) return;
         bool dragOccurred = _dragOccurredForCurrentPress;
         var pendingPlainClickItem = _pendingPlainClickItem;
 
@@ -1345,6 +1356,8 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnFileGridPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
     {
+        if (IsFromActiveRenameTextBox(e)) return;
+
         if (_isMiddleAutoScrolling)
         {
             StopMiddleAutoScroll();
@@ -1478,6 +1491,7 @@ public partial class ExplorerPaneView : UserControl
 
     private void OnFileGridPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (IsFromActiveRenameTextBox(e)) return;
         if (FileGridContainer == null || FileDataGrid == null || DataContext is not ExplorerPaneViewModel vm) return;
 
         var props = e.GetCurrentPoint(FileGridContainer).Properties;
@@ -1905,6 +1919,21 @@ public partial class ExplorerPaneView : UserControl
         }
     }
 
+    private static bool IsFromActiveRenameTextBox(RoutedEventArgs? e)
+    {
+        if (e?.Source is not Visual visual) return false;
+        var current = visual;
+        while (current != null)
+        {
+            if (current is TextBox tb && tb.DataContext is FileItem { IsRenaming: true })
+            {
+                return true;
+            }
+            current = current.GetVisualParent();
+        }
+        return false;
+    }
+
     private void OnRenameTextBoxAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
         if (sender is TextBox tb && tb.DataContext is FileItem item)
@@ -2008,6 +2037,12 @@ public partial class ExplorerPaneView : UserControl
 
     private async void OnRowDoubleTapped(object? sender, TappedEventArgs e)
     {
+        if (IsFromActiveRenameTextBox(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (DataContext is not ExplorerPaneViewModel vm || vm.SelectedTab?.SelectedItem == null) return;
 
         // Ensure double-tap actually occurred on a row/cell, and NOT on the ScrollBar, ColumnHeader, or empty area

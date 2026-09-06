@@ -1509,6 +1509,35 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    public void CopyFileName()
+    {
+        var targets = GetSelectedFileItems();
+        if (targets.Count == 0) return;
+
+        RequestSetClipboardText?.Invoke(
+            string.Join(Environment.NewLine, targets.Select(t => t.Name)));
+    }
+
+    [RelayCommand]
+    public void CopyFileLocation()
+    {
+        var targets = GetSelectedFileItems();
+        if (targets.Count == 0) return;
+
+        var locations = targets
+            .Select(t =>
+            {
+                var trimmed = t.FullPath?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var dir = !string.IsNullOrWhiteSpace(trimmed) ? Path.GetDirectoryName(trimmed) : null;
+                return !string.IsNullOrWhiteSpace(dir) ? dir : Path.GetDirectoryName(t.FullPath);
+            })
+            .Where(p => !string.IsNullOrWhiteSpace(p));
+
+        RequestSetClipboardText?.Invoke(
+            string.Join(Environment.NewLine, locations));
+    }
+
+    [RelayCommand]
     public void CopyCurrentPath()
     {
         if (SelectedTab != null)

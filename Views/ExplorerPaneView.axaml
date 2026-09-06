@@ -423,6 +423,8 @@
           <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
           <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
           <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="Copy File Name" Command="{Binding CopyFileNameCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+          <MenuItem Header="Copy File Location" Command="{Binding CopyFileLocationCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
           <MenuItem Header="Rename" Command="{Binding TriggerRenameCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
           <MenuItem Header="Delete" Command="{Binding DeleteSelectedCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
           <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsNormalFileSelected}"/>
@@ -440,6 +442,8 @@
           <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsArchiveSelected}"/>
           <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsArchiveSelected}"/>
           <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="Copy File Name" Command="{Binding CopyFileNameCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+          <MenuItem Header="Copy File Location" Command="{Binding CopyFileLocationCommand}" IsVisible="{Binding IsArchiveSelected}"/>
           <MenuItem Header="Rename" Command="{Binding TriggerRenameCommand}" IsVisible="{Binding IsArchiveSelected}"/>
           <MenuItem Header="Delete" Command="{Binding DeleteSelectedCommand}" IsVisible="{Binding IsArchiveSelected}"/>
           <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsArchiveSelected}"/>
@@ -455,6 +459,8 @@
           <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsFolderSelected}"/>
           <MenuItem Header="Paste" Command="{Binding PasteFilesCommand}" IsVisible="{Binding IsFolderSelected}"/>
           <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Copy File Name" Command="{Binding CopyFileNameCommand}" IsVisible="{Binding IsFolderSelected}"/>
+          <MenuItem Header="Copy File Location" Command="{Binding CopyFileLocationCommand}" IsVisible="{Binding IsFolderSelected}"/>
           <MenuItem Header="Rename" Command="{Binding TriggerRenameCommand}" IsVisible="{Binding IsFolderSelected}"/>
           <MenuItem Header="Delete" Command="{Binding DeleteSelectedCommand}" IsVisible="{Binding IsFolderSelected}"/>
           <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsFolderSelected}"/>
@@ -739,6 +745,8 @@
             <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+            <MenuItem Header="Copy File Name" Command="{Binding CopyFileNameCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
+            <MenuItem Header="Copy File Location" Command="{Binding CopyFileLocationCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <MenuItem Header="Rename" Command="{Binding TriggerRenameCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <MenuItem Header="Delete" Command="{Binding DeleteSelectedCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsNormalFileSelected}"/>
@@ -756,6 +764,8 @@
             <MenuItem Header="Copy" Command="{Binding CopyFilesCommand}" IsVisible="{Binding IsArchiveSelected}"/>
             <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsArchiveSelected}"/>
             <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+            <MenuItem Header="Copy File Name" Command="{Binding CopyFileNameCommand}" IsVisible="{Binding IsArchiveSelected}"/>
+            <MenuItem Header="Copy File Location" Command="{Binding CopyFileLocationCommand}" IsVisible="{Binding IsArchiveSelected}"/>
             <MenuItem Header="Rename" Command="{Binding TriggerRenameCommand}" IsVisible="{Binding IsArchiveSelected}"/>
             <MenuItem Header="Delete" Command="{Binding DeleteSelectedCommand}" IsVisible="{Binding IsArchiveSelected}"/>
             <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsArchiveSelected}"/>
@@ -771,6 +781,8 @@
             <MenuItem Header="Cut" Command="{Binding CutFilesCommand}" IsVisible="{Binding IsFolderSelected}"/>
             <MenuItem Header="Paste" Command="{Binding PasteFilesCommand}" IsVisible="{Binding IsFolderSelected}"/>
             <MenuItem Header="Copy Path" Command="{Binding CopyPathCommand}" IsVisible="{Binding IsFolderSelected}"/>
+            <MenuItem Header="Copy File Name" Command="{Binding CopyFileNameCommand}" IsVisible="{Binding IsFolderSelected}"/>
+            <MenuItem Header="Copy File Location" Command="{Binding CopyFileLocationCommand}" IsVisible="{Binding IsFolderSelected}"/>
             <MenuItem Header="Rename" Command="{Binding TriggerRenameCommand}" IsVisible="{Binding IsFolderSelected}"/>
             <MenuItem Header="Delete" Command="{Binding DeleteSelectedCommand}" IsVisible="{Binding IsFolderSelected}"/>
             <Separator Background="{DynamicResource AppBorderBrush}" IsVisible="{Binding IsFolderSelected}"/>
