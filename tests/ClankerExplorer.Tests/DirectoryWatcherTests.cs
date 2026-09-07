@@ -664,4 +664,77 @@ public sealed class DirectoryWatcherTests
         Dispatcher.UIThread.RunJobs();
         Assert.DoesNotContain(tab.Items, i => i.FullPath.Equals(file2, StringComparison.OrdinalIgnoreCase));
     }
+
+    [Theory]
+    [InlineData(@"\\wsl$\Ubuntu\home\user")]
+    [InlineData(@"\\wsl.localhost\Ubuntu\home\user")]
+    [InlineData(@"\\wsl$\Ubuntu")]
+    [InlineData(@"\\wsl.localhost\Debian")]
+    [InlineData(@"//wsl$/Ubuntu/var")]
+    [InlineData(@"//wsl.localhost/Ubuntu/var")]
+    public void DirectoryWatcher_WslPath_GracefullyBypassesLiveWatcher(string wslPath)
+    {
+        using var watcher = new DirectoryWatcher();
+        bool errorRaised = false;
+        watcher.ErrorOccurred += (s, e) => errorRaised = true;
+
+        watcher.Start(wslPath);
+
+        Assert.False(watcher.IsRunning, "Watcher should not be running for WSL path.");
+        Assert.False(errorRaised, "No error should be raised when starting watcher on WSL path.");
+        Assert.NotNull(watcher.WatchedPath);
+    }
+
+    [Fact]
+    public void DirectoryWatcher_CircuitBreaker_TripsAfterRepeatedFailures()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var watcher = new DirectoryWatcher();
+        watcher.Start(fs.FolderA);
+        Assert.True(watcher.IsRunning);
+
+        int overflowCount = 0;
+        watcher.BatchReady += (s, batch) =>
+        {
+            if (batch.IsOverflow)
+            {
+                overflowCount++;
+            }
+        };
+
+        // First failure: should emit overflow for recovery attempt
+        watcher.RaiseErrorForTesting(new IOException("Simulated fault 1"));
+        Assert.Equal(1, overflowCount);
+
+        // Second failure without any successful file events: trips circuit breaker
+        watcher.RaiseErrorForTesting(new IOException("Simulated fault 2"));
+        // Overflow count should NOT increase; storm is prevented!
+        Assert.Equal(1, overflowCount);
+
+        // Attempting to restart on the tripped path stays dormant
+        watcher.Start(fs.FolderA);
+        Assert.False(watcher.IsRunning, "Path should be tripped in circuit breaker and not run.");
+
+        // Resetting the circuit breaker allows restarting
+        watcher.ResetCircuitBreaker(fs.FolderA);
+        watcher.Start(fs.FolderA);
+        Assert.True(watcher.IsRunning, "After resetting circuit breaker, watcher can start again.");
+    }
+
+    [Fact]
+    public void Reconciler_OverflowRateLimiter_SuppressesRapidBurst()
+    {
+        using var fs = new TemporaryFileSystem();
+        using var tab = new ExplorerTabViewModel(fs.FolderA);
+        var reconciler = new DirectoryChangeReconciler(tab);
+
+        // Dispatch rapid burst of 10 overflow batches within milliseconds
+        for (int i = 0; i < 10; i++)
+        {
+            reconciler.HandleBatch(new DirectoryChangeBatch(tab.CurrentPath, Array.Empty<FileChangeEvent>(), IsOverflow: true));
+        }
+
+        Dispatcher.UIThread.RunJobs();
+    }
 }
+

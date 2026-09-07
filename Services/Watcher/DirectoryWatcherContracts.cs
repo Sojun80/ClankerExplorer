@@ -37,4 +37,6 @@ public interface IDirectoryWatcher : IDisposable
 
     void Start(string directoryPath);
     void Stop();
+    void ResetCircuitBreaker(string? path = null);
 }
+

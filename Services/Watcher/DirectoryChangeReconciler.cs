@@ -31,6 +31,8 @@ public sealed class DirectoryChangeReconciler
     private readonly List<DirectoryChangeBatch> _stagedBatches = new();
     private bool _isStaging;
     private bool _stagedHasOverflow;
+    private long _lastOverflowRefreshTicks;
+    private const long MinOverflowIntervalTicks = 2 * TimeSpan.TicksPerSecond;
 
     public DirectoryChangeReconciler(ExplorerTabViewModel tab)
     {
@@ -70,10 +72,16 @@ public sealed class DirectoryChangeReconciler
 
         if (hadOverflow)
         {
-            Dispatcher.UIThread.Post(() =>
+            long now = DateTime.UtcNow.Ticks;
+            long last = Interlocked.Read(ref _lastOverflowRefreshTicks);
+            if (now - last >= MinOverflowIntervalTicks)
             {
-                _ = RefreshTabSafelyAsync();
-            }, DispatcherPriority.Background);
+                Interlocked.Exchange(ref _lastOverflowRefreshTicks, now);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    _ = RefreshTabSafelyAsync();
+                }, DispatcherPriority.Background);
+            }
             return;
         }
 
@@ -177,6 +185,18 @@ public sealed class DirectoryChangeReconciler
         // Fallback to state-preserving full refresh if overflow or large burst
         if (batch.IsOverflow || (batch.Changes?.Count ?? 0) >= FallbackThreshold)
         {
+            if (batch.IsOverflow)
+            {
+                long now = DateTime.UtcNow.Ticks;
+                long last = Interlocked.Read(ref _lastOverflowRefreshTicks);
+                if (now - last < MinOverflowIntervalTicks)
+                {
+                    // Rate-limit overflow refreshes to prevent UI refresh storms
+                    return;
+                }
+                Interlocked.Exchange(ref _lastOverflowRefreshTicks, now);
+            }
+
             Dispatcher.UIThread.Post(() =>
             {
                 if (gen != Volatile.Read(ref _currentGeneration)) return;

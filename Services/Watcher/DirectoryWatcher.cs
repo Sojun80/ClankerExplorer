@@ -16,12 +16,15 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
     private const int DefaultDebounceMs = 100;
     private const int MaxDebounceMs = 400;
     private const int BufferSize = 65536; // 64 KB
+    private const int MaxConsecutiveFailures = 2;
 
     private readonly object _gate = new();
     private readonly StringComparer _pathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
         : StringComparer.Ordinal;
     private readonly Dictionary<string, FileChangeEvent> _pendingChanges;
+    private readonly Dictionary<string, int> _failureCountPerPath;
+    private readonly HashSet<string> _trippedPaths;
 
     private FileSystemWatcher? _watcher;
     private Timer? _debounceTimer;
@@ -39,7 +42,48 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
     {
         DebounceMilliseconds = Math.Max(10, debounceMilliseconds);
         _pendingChanges = new Dictionary<string, FileChangeEvent>(_pathComparer);
+        _failureCountPerPath = new Dictionary<string, int>(_pathComparer);
+        _trippedPaths = new HashSet<string>(_pathComparer);
         _debounceTimer = new Timer(OnDebounceTimerElapsed, null, Timeout.Infinite, Timeout.Infinite);
+    }
+
+    public static bool IsWslPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        string p = path.Trim();
+        return p.StartsWith(@"\\wsl$\", StringComparison.OrdinalIgnoreCase) ||
+               p.StartsWith(@"\\wsl.localhost\", StringComparison.OrdinalIgnoreCase) ||
+               p.Equals(@"\\wsl$", StringComparison.OrdinalIgnoreCase) ||
+               p.Equals(@"\\wsl.localhost", StringComparison.OrdinalIgnoreCase) ||
+               p.StartsWith("//wsl$/", StringComparison.OrdinalIgnoreCase) ||
+               p.StartsWith("//wsl.localhost/", StringComparison.OrdinalIgnoreCase) ||
+               p.Equals("//wsl$", StringComparison.OrdinalIgnoreCase) ||
+               p.Equals("//wsl.localhost", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void ResetCircuitBreaker(string? path = null)
+    {
+        lock (_gate)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                _trippedPaths.Clear();
+                _failureCountPerPath.Clear();
+            }
+            else
+            {
+                string cleanPath = path.Trim();
+                _trippedPaths.Remove(cleanPath);
+                _failureCountPerPath.Remove(cleanPath);
+                try
+                {
+                    string fullPath = Path.GetFullPath(cleanPath);
+                    _trippedPaths.Remove(fullPath);
+                    _failureCountPerPath.Remove(fullPath);
+                }
+                catch { }
+            }
+        }
     }
 
     public void Start(string directoryPath)
@@ -62,8 +106,31 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
             return;
         }
 
+        // WSL filesystems do not reliably support Win32 FileSystemWatcher notifications
+        // and frequently throw or cause rapid error/restart loops. WSL paths are browsed
+        // without live watchers (refreshed via manual F5 or after Clanker operations).
+        if (IsWslPath(directoryPath) || IsWslPath(fullPath))
+        {
+            Stop();
+            lock (_gate)
+            {
+                WatchedPath = fullPath;
+                IsRunning = false;
+            }
+            return;
+        }
+
         lock (_gate)
         {
+            // If this path has tripped the circuit breaker due to repeated errors, do not start
+            if (_trippedPaths.Contains(fullPath))
+            {
+                Stop();
+                WatchedPath = fullPath;
+                IsRunning = false;
+                return;
+            }
+
             if (IsRunning && _watcher != null && _watcher.EnableRaisingEvents && _pathComparer.Equals(WatchedPath, fullPath))
             {
                 return;
@@ -126,6 +193,13 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
                         _watcher = null;
                         IsRunning = false;
                     }
+                    _failureCountPerPath.TryGetValue(fullPath, out int count);
+                    count++;
+                    _failureCountPerPath[fullPath] = count;
+                    if (count >= MaxConsecutiveFailures)
+                    {
+                        _trippedPaths.Add(fullPath);
+                    }
                 }
                 watcher.Dispose();
                 ErrorOccurred?.Invoke(this, ex);
@@ -138,6 +212,13 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
                 _watcher?.Dispose();
                 _watcher = null;
                 IsRunning = false;
+                _failureCountPerPath.TryGetValue(fullPath, out int count);
+                count++;
+                _failureCountPerPath[fullPath] = count;
+                if (count >= MaxConsecutiveFailures)
+                {
+                    _trippedPaths.Add(fullPath);
+                }
             }
             ErrorOccurred?.Invoke(this, ex);
         }
@@ -194,6 +275,8 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
 
         FileSystemWatcher? failedWatcher;
         string currentWatched;
+        bool shouldEmitOverflow = false;
+
         lock (_gate)
         {
             currentWatched = WatchedPath ?? string.Empty;
@@ -202,6 +285,22 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
             IsRunning = false;
             _pendingChanges.Clear();
             _firstEventUtcTicks = 0;
+
+            if (!string.IsNullOrEmpty(currentWatched))
+            {
+                _failureCountPerPath.TryGetValue(currentWatched, out int count);
+                count++;
+                _failureCountPerPath[currentWatched] = count;
+                if (count >= MaxConsecutiveFailures)
+                {
+                    _trippedPaths.Add(currentWatched);
+                    shouldEmitOverflow = false;
+                }
+                else
+                {
+                    shouldEmitOverflow = true;
+                }
+            }
         }
 
         _debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
@@ -221,7 +320,7 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
             catch { }
         }
 
-        if (!string.IsNullOrEmpty(currentWatched))
+        if (shouldEmitOverflow && !string.IsNullOrEmpty(currentWatched))
         {
             // Trigger an overflow batch to request a safe full refresh and watcher recreation
             RaiseBatchReady(new DirectoryChangeBatch(currentWatched, Array.Empty<FileChangeEvent>(), IsOverflow: true));
@@ -240,6 +339,11 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
         lock (_gate)
         {
             if (!IsRunning || WatchedPath == null) return;
+
+            if (_failureCountPerPath.ContainsKey(WatchedPath))
+            {
+                _failureCountPerPath.Remove(WatchedPath);
+            }
 
             CoalesceLocked(change);
 

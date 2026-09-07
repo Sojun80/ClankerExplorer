@@ -1150,6 +1150,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     {
         if (SelectedTab != null)
         {
+            SelectedTab.Watcher.ResetCircuitBreaker(SelectedTab.CurrentPath);
             await SelectedTab.RefreshAsync();
         }
     }
