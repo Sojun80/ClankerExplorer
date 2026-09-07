@@ -2261,8 +2261,10 @@ public partial class ExplorerPaneView : UserControl
             {
                 dataObject.Set(DataFormats.Files, storageItems);
             }
-            dataObject.Set(DataFormats.FileNames, dragPaths);
-            dataObject.Set(DataFormats.Text, string.Join(Environment.NewLine, dragPaths));
+            else
+            {
+                dataObject.Set(DataFormats.FileNames, dragPaths);
+            }
 
             await DragDrop.DoDragDrop(triggerEvent, dataObject, DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link);
         }

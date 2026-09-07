@@ -956,6 +956,60 @@ public sealed class UiSmokeTests
     }
 
     [Fact]
+    public void FileDragDrop_OutboundPayload_ExposesOnlyFilesFormatWithoutText()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), "clanker_drag_payload_test_" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(tempFile, "sample content");
+
+        try
+        {
+            var bclFileType = typeof(Avalonia.Platform.Storage.StorageProviderExtensions).Assembly.GetType("Avalonia.Platform.Storage.FileIO.BclStorageFile");
+            var fileCtor = bclFileType?.GetConstructors(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).FirstOrDefault();
+            var fileInstance = (Avalonia.Platform.Storage.IStorageItem)fileCtor?.Invoke(new object[] { new FileInfo(tempFile) })!;
+
+            var dataObject = new Avalonia.Input.DataObject();
+            var storageItems = new List<Avalonia.Platform.Storage.IStorageItem> { fileInstance };
+
+            // Outbound drag payload must ONLY advertise DataFormats.Files
+            dataObject.Set(Avalonia.Input.DataFormats.Files, storageItems);
+
+            Assert.True(dataObject.Contains(Avalonia.Input.DataFormats.Files));
+            Assert.False(dataObject.Contains(Avalonia.Input.DataFormats.Text), "Outbound file drag MUST NOT set DataFormats.Text, or Chromium/Discord will treat it as a text drag and reject file drop.");
+            Assert.False(dataObject.Contains(Avalonia.Input.DataFormats.FileNames), "Outbound file drag MUST NOT set duplicate FileNames format, avoiding duplicate CF_HDROP descriptors.");
+
+            if (OperatingSystem.IsWindows())
+            {
+                var asm = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "Avalonia.Win32")
+                          ?? System.Reflection.Assembly.Load("Avalonia.Win32");
+                var dataObjType = asm.GetType("Avalonia.Win32.DataObject");
+                var ctor = dataObjType?.GetConstructors().FirstOrDefault();
+                var win32DataObj = ctor?.Invoke(new object[] { dataObject });
+
+                var enumMethod = dataObjType?.GetMethod("Avalonia.Win32.Win32Com.IDataObject.EnumFormatEtc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var enumerator = enumMethod?.Invoke(win32DataObj, new object[] { 1 });
+                var feType = asm.GetTypes().FirstOrDefault(t => t.Name.Contains("FormatEnumerator"));
+                var formatsField = feType?.GetField("_formats", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var formatsArray = (Array)formatsField?.GetValue(enumerator)!;
+
+                var cfList = new List<ushort>();
+                foreach (var f in formatsArray)
+                {
+                    var cfField = f.GetType().GetField("cfFormat");
+                    cfList.Add((ushort)cfField?.GetValue(f)!);
+                }
+
+                // Exactly one CF_HDROP (15) format and zero CF_UNICODETEXT (13) formats
+                Assert.Single(cfList);
+                Assert.Equal(15, cfList[0]);
+            }
+        }
+        finally
+        {
+            try { File.Delete(tempFile); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task CopyFileName_SingleAndMultiSelection_CopiesLeafNames()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "clanker_copy_filename_test_" + Guid.NewGuid().ToString("N"));
