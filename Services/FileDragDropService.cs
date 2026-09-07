@@ -177,4 +177,36 @@ public static class FileDragDropService
 
         return false;
     }
+
+    /// <summary>
+    /// Synchronously resolves local filesystem paths into Avalonia storage items
+    /// so the OLE drag gesture can enter DragDrop.DoDragDrop immediately without
+    /// yielding the thread and losing the mouse input message frame.
+    /// </summary>
+    public static List<IStorageItem> ResolveStorageItems(IStorageProvider? storageProvider, IEnumerable<string> paths)
+    {
+        var items = new List<IStorageItem>();
+        if (storageProvider == null || paths == null) return items;
+
+        foreach (var p in paths)
+        {
+            try
+            {
+                var fileUri = new Uri(Path.GetFullPath(p));
+                if (Directory.Exists(p))
+                {
+                    var f = storageProvider.TryGetFolderFromPathAsync(fileUri).GetAwaiter().GetResult();
+                    if (f != null) items.Add(f);
+                }
+                else if (File.Exists(p))
+                {
+                    var f = storageProvider.TryGetFileFromPathAsync(fileUri).GetAwaiter().GetResult();
+                    if (f != null) items.Add(f);
+                }
+            }
+            catch { }
+        }
+
+        return items;
+    }
 }

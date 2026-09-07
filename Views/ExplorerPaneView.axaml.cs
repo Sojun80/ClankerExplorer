@@ -2255,29 +2255,7 @@ public partial class ExplorerPaneView : UserControl
 
             var dataObject = new DataObject();
             var storageProvider = TopLevel.GetTopLevel(this)?.StorageProvider;
-            var storageItems = new List<Avalonia.Platform.Storage.IStorageItem>();
-
-            if (storageProvider != null)
-            {
-                foreach (var p in dragPaths)
-                {
-                    try
-                    {
-                        var fileUri = new Uri(Path.GetFullPath(p));
-                        if (Directory.Exists(p))
-                        {
-                            var f = storageProvider.TryGetFolderFromPathAsync(fileUri).GetAwaiter().GetResult();
-                            if (f != null) storageItems.Add(f);
-                        }
-                        else if (File.Exists(p))
-                        {
-                            var f = storageProvider.TryGetFileFromPathAsync(fileUri).GetAwaiter().GetResult();
-                            if (f != null) storageItems.Add(f);
-                        }
-                    }
-                    catch { }
-                }
-            }
+            var storageItems = FileDragDropService.ResolveStorageItems(storageProvider, dragPaths);
 
             if (storageItems.Count > 0)
             {
