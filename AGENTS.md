@@ -28,3 +28,5 @@
   1. Always ensure any running `ClankerExplorer.exe` process is terminated before building.
   2. Inspect build output for `MSB3021: Unable to copy file`.
   3. Verify that `bin\Debug\net8.0\ClankerExplorer.dll` FileVersion matches the expected version before handing off to the user.
+  4. **ALWAYS BUMP THE VERSION EVERY SINGLE TIME**: Never deliver changes without incrementing the version in `ClankerExplorer.csproj` (`<Version>`, `<AssemblyVersion>`, `<FileVersion>`) and `Services/BuildInfoService.cs`. The user strictly requires a version bump for every iteration.
+
