@@ -395,6 +395,7 @@ public sealed class OperationsEngineHardeningTests : IDisposable
         var job = _manager.EnqueueTransfer(req);
 
         await job.CompletionTask;
+        Dispatcher.UIThread.RunJobs();
 
         Assert.True(File.Exists(Path.Combine(fs.FolderB, "background_job.txt")));
         Assert.Contains(job, _manager.HistoryJobs);
