@@ -138,3 +138,16 @@ dotnet publish -c Release -r linux-x64 --self-contained -p:PublishSingleFile=tru
 ## 📋 Recommended Integrations (Optional)
 - **7-Zip** (Installed at standard paths for high-speed archive extraction and compression dialogs)
 - **Notepad++** / **VS Code** (Auto-detected for 1-click code, markdown, and config editing)
+
+---
+
+## 🌐 Repository & Remote Topology
+
+The project syncs across three tiers:
+
+| Tier | Remote Name | URL / Location | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Local Git** | *(local)* | `C:\ClankerExplorer` | Primary local development workspace |
+| **Local Network Git** | `gitea` | `ssh://git@wilkinsnas.local:30009/sojun/ClankerExplorer.git`<br>Web: `http://wilkinsnas.local:30008/sojun/ClankerExplorer` | On-premises NAS backup & local team synchronization |
+| **GitHub** | `origin` | `https://github.com/Sojun80/ClankerExplorer.git` | Public upstream repository |
+| **Companion App** | `museviewer` | `https://github.com/Sojun80/MuseImageViewer.git` | Companion image viewer integration |
