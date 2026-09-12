@@ -158,5 +158,48 @@ public sealed class ClipboardFileServiceTests : IDisposable
         Assert.Contains(Path.Combine(fs.FolderB, "FolderC"), result.createdDestinationPaths);
     }
 
+    [Fact]
+    public async Task CopyAndPasteInSameDirectory_AutoRenamesWithoutHanging()
+    {
+        using var fs = new TemporaryFileSystem();
+        var file = Path.Combine(fs.FolderA, "alpha.txt");
+        ClipboardFileService.Copy(new[] { file });
+
+        // First duplicate paste in the same directory where alpha.txt lives
+        var job1 = await ClipboardFileService.EnqueuePasteFromSystemClipboardAsync(null, fs.FolderA);
+        Assert.NotNull(job1);
+        var result1 = await job1.CompletionTask;
+        Assert.True(result1.Succeeded);
+        var copy1 = Path.Combine(fs.FolderA, "alpha (Copy).txt");
+        Assert.True(File.Exists(copy1));
+        Assert.Equal("alpha", File.ReadAllText(copy1));
+
+        // Second duplicate paste in the same directory
+        var job2 = await ClipboardFileService.EnqueuePasteFromSystemClipboardAsync(null, fs.FolderA);
+        Assert.NotNull(job2);
+        var result2 = await job2.CompletionTask;
+        Assert.True(result2.Succeeded);
+        var copy2 = Path.Combine(fs.FolderA, "alpha (Copy 2).txt");
+        Assert.True(File.Exists(copy2));
+        Assert.Equal("alpha", File.ReadAllText(copy2));
+    }
+
+    [Fact]
+    public async Task CopyDirectoryAndPasteInSameParent_AutoRenamesWithoutHanging()
+    {
+        using var fs = new TemporaryFileSystem();
+        ClipboardFileService.Copy(new[] { fs.FolderC });
+
+        // Duplicate paste into fs.Root (where FolderC already resides)
+        var job = await ClipboardFileService.EnqueuePasteFromSystemClipboardAsync(null, fs.Root);
+        Assert.NotNull(job);
+        var result = await job.CompletionTask;
+        Assert.True(result.Succeeded);
+
+        var copyDir = Path.Combine(fs.Root, "FolderC (Copy)");
+        Assert.True(Directory.Exists(copyDir));
+        Assert.True(File.Exists(Path.Combine(copyDir, "Nested", "nested.txt")));
+    }
+
     public void Dispose() => ClipboardFileService.Copy(Array.Empty<string>());
 }

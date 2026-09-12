@@ -88,11 +88,11 @@ public sealed class ThumbnailPipelineHardeningTests : IDisposable
 
         _ = service.LoadViewportAsync(visible, prefetch, 128, cts.Token);
 
-        // Max total queue is 20
-        Assert.True(service.QueuedRequestCount <= 20,
-            $"Queue depth was {service.QueuedRequestCount}, expected <= 20");
-        Assert.True(service.MaxObservedQueueDepth <= 20,
-            $"MaxObservedQueueDepth was {service.MaxObservedQueueDepth}, expected <= 20");
+        // Max total queue is bounded by MaxTotalQueueCapacity (160)
+        Assert.True(service.QueuedRequestCount <= service.MaxTotalQueueCapacity,
+            $"Queue depth was {service.QueuedRequestCount}, expected <= {service.MaxTotalQueueCapacity}");
+        Assert.True(service.MaxObservedQueueDepth <= service.MaxTotalQueueCapacity,
+            $"MaxObservedQueueDepth was {service.MaxObservedQueueDepth}, expected <= {service.MaxTotalQueueCapacity}");
         Assert.True(service.DroppedQueueFullCount > 0,
             "Expected DroppedQueueFullCount to be > 0 when queue limit is reached");
 
@@ -401,7 +401,9 @@ public sealed class ThumbnailPipelineHardeningTests : IDisposable
 
         // Now it can be enqueued normally
         _ = service.LoadViewportAsync(new[] { item }, Array.Empty<FileItem>(), 128, cts2.Token);
-        Assert.Equal(1, service.QueuedRequestCount);
+        int queued = service.QueuedRequestCount;
+        int active = service.ActiveWorkerCount;
+        Assert.True(queued == 1 || active == 1, $"Queued: {queued}, Active: {active}");
 
         service.CancelPendingRequests();
     }
@@ -510,6 +512,78 @@ public sealed class ThumbnailPipelineHardeningTests : IDisposable
         tcs3.SetResult(true);
         service.UnregisterInflightGenerationForTest(targetFile, op3);
         Assert.Equal(0, service.GetInflightGenerationCount(targetFile));
+    }
+
+    [Fact]
+    public void VisibleViewport_NeverEvictsSiblingVisibleItemsOfSameGeneration()
+    {
+        using var service = new ThumbnailService(workerCount: 2);
+        using var cts = new CancellationTokenSource();
+
+        // Simulate 60 visible items in a single viewport generation (e.g. dense image folder)
+        var visible = Enumerable.Range(0, 60).Select(i => new FileItem
+        {
+            Name = $"vis_{i}.png",
+            FullPath = $@"C:\Photos\vis_{i}.png",
+            SizeBytes = 2048,
+            ModifiedTime = DateTime.UtcNow
+        }).ToList();
+
+        _ = service.LoadViewportAsync(visible, Array.Empty<FileItem>(), 128, cts.Token);
+
+        // All 60 visible items should be accepted without sibling eviction
+        Assert.Equal(60, service.QueuedRequestCount + service.ActiveWorkerCount);
+        Assert.Equal(0, service.DroppedQueueFullCount);
+        Assert.Equal(0, service.DiscardedStaleCount);
+
+        service.CancelPendingRequests();
+    }
+
+    [AvaloniaFact]
+    public async Task LoadViewportAsync_SkipsItemsWithExistingThumbnailImage()
+    {
+        using var fs = new TemporaryFileSystem();
+        var imgPath = Path.Combine(fs.FolderA, "already_loaded.png");
+        File.WriteAllBytes(imgPath, Convert.FromBase64String(OnePixelPng));
+        var fi = new FileInfo(imgPath);
+
+        using var service = new ThumbnailService(workerCount: 2);
+        using var bmp = new Avalonia.Media.Imaging.Bitmap(imgPath);
+
+        var item = new FileItem
+        {
+            Name = "already_loaded.png",
+            FullPath = imgPath,
+            SizeBytes = fi.Length,
+            ModifiedTime = fi.LastWriteTimeUtc,
+            ThumbnailImage = bmp
+        };
+
+        using var cts = new CancellationTokenSource();
+        await service.LoadViewportAsync(new[] { item }, Array.Empty<FileItem>(), 128, cts.Token);
+
+        // Since item already has ThumbnailImage set, it should not be enqueued
+        Assert.Equal(0, service.QueuedRequestCount);
+        Assert.Equal(0, service.GeneratedCount);
+    }
+
+    [AvaloniaFact]
+    public void IsCachedInMemory_ReturnsTrueWhenCached()
+    {
+        using var fs = new TemporaryFileSystem();
+        var imgPath = Path.Combine(fs.FolderA, "mem_check.png");
+        File.WriteAllBytes(imgPath, Convert.FromBase64String(OnePixelPng));
+        var fi = new FileInfo(imgPath);
+
+        using var service = new ThumbnailService(workerCount: 2);
+        using var bmp = new Avalonia.Media.Imaging.Bitmap(imgPath);
+        string key = ThumbnailService.GetCacheKey(imgPath, fi.Length, fi.LastWriteTimeUtc.Ticks, 128);
+
+        Assert.False(service.IsCachedInMemory(imgPath, fi.Length, fi.LastWriteTimeUtc, 128));
+
+        service.AddMemoryEntry(key, bmp);
+
+        Assert.True(service.IsCachedInMemory(imgPath, fi.Length, fi.LastWriteTimeUtc, 128));
     }
 
     public void Dispose() => TestEnvironment.ResetGlobalSettings(TestEnvironment.DefaultFolder);

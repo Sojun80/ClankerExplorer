@@ -338,7 +338,13 @@ public sealed class TransferEngine
                 bool wasRenamed = false;
                 if (File.Exists(target))
                 {
-                    if (request.ConflictPolicy == FileConflictPolicy.Fail)
+                    if (request.Mode == FileTransferMode.Copy && PathsEqual(source, target))
+                    {
+                        // Copying a file into its own directory: ALWAYS auto-rename to create a duplicate without corrupting or prompting
+                        finalTarget = GetUniqueAutoRenamePath(target);
+                        wasRenamed = true;
+                    }
+                    else if (request.ConflictPolicy == FileConflictPolicy.Fail)
                     {
                         failedFiles++;
                         processedFiles++;
@@ -476,6 +482,11 @@ public sealed class TransferEngine
                     continue;
                 }
 
+                if (request.Mode == FileTransferMode.Copy && PathsEqual(source, targetDir))
+                {
+                    targetDir = GetUniqueAutoRenamePath(targetDir);
+                }
+
                 if (IsDescendantOf(targetDir, source))
                 {
                     results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Failed, "A directory cannot be transferred into one of its own descendants."));
@@ -502,7 +513,12 @@ public sealed class TransferEngine
 
                     if (Directory.Exists(targetDir) || File.Exists(targetDir))
                     {
-                        if (request.ConflictPolicy == FileConflictPolicy.Fail)
+                        if (request.Mode == FileTransferMode.Copy && PathsEqual(source, targetDir))
+                        {
+                            finalTargetDir = GetUniqueAutoRenamePath(targetDir);
+                            linkWasRenamed = true;
+                        }
+                        else if (request.ConflictPolicy == FileConflictPolicy.Fail)
                         {
                             failedFiles++;
                             processedFiles++;

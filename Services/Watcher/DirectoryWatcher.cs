@@ -18,10 +18,12 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
     private const int BufferSize = 65536; // 64 KB
     private const int MaxConsecutiveFailures = 2;
 
-    private readonly object _gate = new();
-    private readonly StringComparer _pathComparer = OperatingSystem.IsWindows()
+    public static StringComparer PathComparer => OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
         : StringComparer.Ordinal;
+
+    private readonly object _gate = new();
+    private readonly StringComparer _pathComparer = PathComparer;
     private readonly Dictionary<string, FileChangeEvent> _pendingChanges;
     private readonly Dictionary<string, int> _failureCountPerPath;
     private readonly HashSet<string> _trippedPaths;
@@ -45,6 +47,53 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
         _failureCountPerPath = new Dictionary<string, int>(_pathComparer);
         _trippedPaths = new HashSet<string>(_pathComparer);
         _debounceTimer = new Timer(OnDebounceTimerElapsed, null, Timeout.Infinite, Timeout.Infinite);
+    }
+
+    public static string NormalizeDirectoryPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        try
+        {
+            string full = Path.GetFullPath(path.Trim());
+            string root = Path.GetPathRoot(full) ?? string.Empty;
+            if (PathComparer.Equals(full, root))
+            {
+                return root.TrimEnd('\\', '/');
+            }
+            return full.TrimEnd('\\', '/');
+        }
+        catch
+        {
+            return (path ?? string.Empty).Trim().TrimEnd('\\', '/');
+        }
+    }
+
+    public static bool PathEquals(string? pathA, string? pathB)
+    {
+        if (pathA == null && pathB == null) return true;
+        if (pathA == null || pathB == null) return false;
+        return PathComparer.Equals(
+            NormalizeDirectoryPath(pathA),
+            NormalizeDirectoryPath(pathB));
+    }
+
+    public static bool IsDirectChild(string? parentDirectory, string? childPath)
+    {
+        if (string.IsNullOrWhiteSpace(parentDirectory) || string.IsNullOrWhiteSpace(childPath))
+            return false;
+
+        try
+        {
+            string cleanChild = childPath.Trim().TrimEnd('\\', '/');
+            string? childDir = Path.GetDirectoryName(cleanChild);
+            if (string.IsNullOrEmpty(childDir)) return false;
+
+            return PathEquals(parentDirectory, childDir);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static bool IsWslPath(string? path)
@@ -255,17 +304,37 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
         }
     }
 
-    private void OnWatcherCreated(object sender, FileSystemEventArgs e) =>
+    private bool IsWatcherCurrent(object? sender)
+    {
+        lock (_gate)
+        {
+            return IsRunning && _watcher != null && ReferenceEquals(sender, _watcher);
+        }
+    }
+
+    private void OnWatcherCreated(object sender, FileSystemEventArgs e)
+    {
+        if (!IsWatcherCurrent(sender)) return;
         EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Created, e.FullPath));
+    }
 
-    private void OnWatcherDeleted(object sender, FileSystemEventArgs e) =>
+    private void OnWatcherDeleted(object sender, FileSystemEventArgs e)
+    {
+        if (!IsWatcherCurrent(sender)) return;
         EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Deleted, e.FullPath));
+    }
 
-    private void OnWatcherChanged(object sender, FileSystemEventArgs e) =>
+    private void OnWatcherChanged(object sender, FileSystemEventArgs e)
+    {
+        if (!IsWatcherCurrent(sender)) return;
         EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Changed, e.FullPath));
+    }
 
-    private void OnWatcherRenamed(object sender, RenamedEventArgs e) =>
+    private void OnWatcherRenamed(object sender, RenamedEventArgs e)
+    {
+        if (!IsWatcherCurrent(sender)) return;
         EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Renamed, e.FullPath, e.OldFullPath));
+    }
 
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
@@ -279,6 +348,11 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
 
         lock (_gate)
         {
+            if (_watcher != null && !ReferenceEquals(sender, _watcher) && !ReferenceEquals(sender, this))
+            {
+                return;
+            }
+
             currentWatched = WatchedPath ?? string.Empty;
             failedWatcher = _watcher;
             _watcher = null;
@@ -339,6 +413,42 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
         lock (_gate)
         {
             if (!IsRunning || WatchedPath == null) return;
+
+            // Strict child filtering: DirectoryWatcher monitors ONLY immediate children of WatchedPath.
+            // On network shares (SMB/CIFS), Win32 FileSystemWatcher can receive notifications for files
+            // in subdirectories. Those must be discarded so subfolder files never bleed into the parent directory.
+            if (change.Kind == DirectoryChangeKind.Renamed)
+            {
+                bool newIsDirect = IsDirectChild(WatchedPath, change.FullPath);
+                bool oldIsDirect = !string.IsNullOrEmpty(change.OldFullPath) && IsDirectChild(WatchedPath, change.OldFullPath);
+
+                if (newIsDirect && oldIsDirect)
+                {
+                    // Regular rename within the watched directory
+                }
+                else if (newIsDirect)
+                {
+                    // Moved from outside into the watched directory -> Created
+                    change = new FileChangeEvent(DirectoryChangeKind.Created, change.FullPath);
+                }
+                else if (oldIsDirect)
+                {
+                    // Moved out of the watched directory -> Deleted
+                    change = new FileChangeEvent(DirectoryChangeKind.Deleted, change.OldFullPath!);
+                }
+                else
+                {
+                    // Neither path is an immediate child of WatchedPath -> ignore
+                    return;
+                }
+            }
+            else
+            {
+                if (!IsDirectChild(WatchedPath, change.FullPath))
+                {
+                    return;
+                }
+            }
 
             if (_failureCountPerPath.ContainsKey(WatchedPath))
             {
@@ -487,7 +597,7 @@ public sealed class DirectoryWatcher : IDirectoryWatcher
 
         lock (_gate)
         {
-            if (_pendingChanges.Count == 0 || WatchedPath == null) return;
+            if (!IsRunning || _pendingChanges.Count == 0 || WatchedPath == null) return;
 
             batchList = _pendingChanges.Values.ToList();
             dirPath = WatchedPath;

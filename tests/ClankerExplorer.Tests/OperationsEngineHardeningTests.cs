@@ -954,5 +954,40 @@ public sealed class OperationsEngineHardeningTests : IDisposable
         callerCts.Cancel();
         Assert.True(promptTask.IsCompletedSuccessfully);
     }
+
+    [Fact]
+    public async Task ScenarioAJ_SameFolderDuplicateCopy_AndSequentialPastes_DoNotBlockQueue()
+    {
+        using var fs = new TemporaryFileSystem();
+        var fileA = Path.Combine(fs.FolderA, "fileA.txt");
+        var fileB = Path.Combine(fs.FolderA, "fileB.txt");
+        File.WriteAllText(fileA, "A");
+        File.WriteAllText(fileB, "B");
+
+        // 1. Copy fileA in FolderA (duplicate copy)
+        ClipboardFileService.Copy(new[] { fileA });
+        var job1 = await ClipboardFileService.EnqueuePasteFromSystemClipboardAsync(null, fs.FolderA);
+        Assert.NotNull(job1);
+        await job1.CompletionTask;
+        Assert.True(File.Exists(Path.Combine(fs.FolderA, "fileA (Copy).txt")));
+
+        // 2. Immediately paste fileA again in FolderA
+        var job2 = await ClipboardFileService.EnqueuePasteFromSystemClipboardAsync(null, fs.FolderA);
+        Assert.NotNull(job2);
+        await job2.CompletionTask;
+        Assert.True(File.Exists(Path.Combine(fs.FolderA, "fileA (Copy 2).txt")));
+
+        // 3. Copy fileB and paste into FolderB
+        ClipboardFileService.Copy(new[] { fileB });
+        var job3 = await ClipboardFileService.EnqueuePasteFromSystemClipboardAsync(null, fs.FolderB);
+        Assert.NotNull(job3);
+        await job3.CompletionTask;
+        Assert.True(File.Exists(Path.Combine(fs.FolderB, "fileB.txt")));
+
+        // All completed without hanging
+        Assert.Equal(OperationState.Completed, job1.State);
+        Assert.Equal(OperationState.Completed, job2.State);
+        Assert.Equal(OperationState.Completed, job3.State);
+    }
 }
 

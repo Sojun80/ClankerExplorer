@@ -736,5 +736,154 @@ public sealed class DirectoryWatcherTests
 
         Dispatcher.UIThread.RunJobs();
     }
+
+    [Fact]
+    public void DirectoryWatcher_IsDirectChild_ValidatesImmediateContainment()
+    {
+        string parent = @"C:\AI-Images\lumi";
+        string subfolder = @"C:\AI-Images\lumi\realistic";
+        string fileInSub = @"C:\AI-Images\lumi\realistic\image01.png";
+        string fileInParent = @"C:\AI-Images\lumi\image02.png";
+        string deeplyNested = @"C:\AI-Images\lumi\realistic\meta\data.json";
+        string otherParent = @"C:\AI-Images\anime\image03.png";
+
+        Assert.True(DirectoryWatcher.IsDirectChild(parent, fileInParent));
+        Assert.True(DirectoryWatcher.IsDirectChild(parent, subfolder));
+        Assert.True(DirectoryWatcher.IsDirectChild(parent + @"\", fileInParent)); // Trailing slash on parent
+        Assert.True(DirectoryWatcher.IsDirectChild(parent, subfolder + @"\")); // Trailing slash on child
+
+        Assert.False(DirectoryWatcher.IsDirectChild(parent, fileInSub));
+        Assert.False(DirectoryWatcher.IsDirectChild(parent, deeplyNested));
+        Assert.False(DirectoryWatcher.IsDirectChild(parent, otherParent));
+        Assert.False(DirectoryWatcher.IsDirectChild(parent, parent)); // Not child of itself
+        Assert.False(DirectoryWatcher.IsDirectChild(parent, null));
+        Assert.False(DirectoryWatcher.IsDirectChild(null, fileInParent));
+    }
+
+    [Fact]
+    public async Task DirectoryWatcher_DropsEventsFromSubdirectories()
+    {
+        using var fs = new TemporaryFileSystem();
+        var subDir = Path.Combine(fs.FolderA, "sub");
+        Directory.CreateDirectory(subDir);
+
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 40);
+        var batches = new List<DirectoryChangeBatch>();
+        watcher.BatchReady += (s, batch) =>
+        {
+            lock (batches)
+            {
+                batches.Add(batch);
+            }
+        };
+
+        watcher.Start(fs.FolderA);
+
+        // Enqueue event for file in subfolder (should be dropped)
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Created, Path.Combine(subDir, "nested.png")));
+
+        // Enqueue event for immediate child file (should be accepted)
+        var directFile = Path.Combine(fs.FolderA, "direct.png");
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Created, directFile));
+
+        await Task.Delay(150);
+
+        lock (batches)
+        {
+            Assert.Single(batches);
+            var batch = batches[0];
+            Assert.Single(batch.Changes);
+            Assert.Equal(directFile, batch.Changes[0].FullPath);
+            Assert.DoesNotContain(batch.Changes, c => c.FullPath.Contains("nested.png"));
+        }
+    }
+
+    [Fact]
+    public async Task DirectoryChangeReconciler_RejectsBatchChangesInSubdirectories()
+    {
+        using var fs = new TemporaryFileSystem();
+        var subDir = Path.Combine(fs.FolderA, "realistic");
+        Directory.CreateDirectory(subDir);
+
+        var fileInSub = Path.Combine(subDir, "sub_image.png");
+        File.WriteAllText(fileInSub, "sub content");
+
+        var directFile = Path.Combine(fs.FolderA, "root_image.png");
+        File.WriteAllText(directFile, "root content");
+
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 30);
+        using var tab = new ExplorerTabViewModel(fs.FolderA, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        // Send batch that maliciously includes both direct and subfolder changes under the parent DirectoryPath
+        var batch = new DirectoryChangeBatch(
+            fs.FolderA,
+            new[]
+            {
+                new FileChangeEvent(DirectoryChangeKind.Created, directFile),
+                new FileChangeEvent(DirectoryChangeKind.Created, fileInSub)
+            });
+
+        tab.Reconciler.HandleBatch(batch);
+        await Task.Delay(150);
+        Dispatcher.UIThread.RunJobs();
+
+        // Direct file must be accepted, subfolder file must be rejected
+        Assert.Contains(tab.Items, i => i.FullPath.Equals(directFile, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(tab.Items, i => i.FullPath.Equals(fileInSub, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(tab.FilteredItems, i => i.FullPath.Equals(fileInSub, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Navigation_BackToParentWhileSubfolderFilesBeingCreated_DoesNotBleedSubfolderFiles()
+    {
+        using var fs = new TemporaryFileSystem();
+        var parentDir = Path.Combine(fs.Root, "lumi");
+        var subDir = Path.Combine(parentDir, "realistic");
+        Directory.CreateDirectory(subDir);
+
+        using var watcher = new DirectoryWatcher(debounceMilliseconds: 30);
+        using var tab = new ExplorerTabViewModel(parentDir, watcher);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(Path.GetFullPath(parentDir), tab.CurrentPath);
+        Assert.Single(tab.FilteredItems);
+        Assert.Equal("realistic", tab.FilteredItems[0].Name);
+
+        // Navigate into subfolder
+        tab.NavigateTo(subDir);
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(Path.GetFullPath(subDir), tab.CurrentPath);
+
+        // Create files in subfolder (simulating copy into realistic)
+        var copiedFile1 = Path.Combine(subDir, "lumi_illreal_01.png");
+        var copiedFile2 = Path.Combine(subDir, "lumi_fetish_02.png");
+        File.WriteAllText(copiedFile1, "image 1");
+        File.WriteAllText(copiedFile2, "image 2");
+
+        // Navigate BACK to parent folder
+        tab.GoBack();
+        await tab.RefreshAsync();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(Path.GetFullPath(parentDir), tab.CurrentPath);
+
+        // Simulate incoming watcher events for the files copied into subfolder
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Created, copiedFile1));
+        watcher.EnqueueChange(new FileChangeEvent(DirectoryChangeKind.Created, copiedFile2));
+
+        await Task.Delay(150);
+        Dispatcher.UIThread.RunJobs();
+
+        // The parent folder (lumi) must ONLY contain the subfolder "realistic", and NOT the files copied inside realistic
+        Assert.Single(tab.FilteredItems);
+        Assert.Equal("realistic", tab.FilteredItems[0].Name);
+        Assert.DoesNotContain(tab.Items, i => i.Name.StartsWith("lumi_"));
+        Assert.DoesNotContain(tab.FilteredItems, i => i.Name.StartsWith("lumi_"));
+    }
 }
 

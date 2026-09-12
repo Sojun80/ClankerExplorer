@@ -186,6 +186,8 @@ public partial class ExplorerPaneView : UserControl
             {
                 GridContextMenu.Opening += (sender, args) =>
                 {
+                    var topLevel = TopLevel.GetTopLevel(this);
+                    _ = ClipboardFileService.UpdateFromSystemClipboardAsync(topLevel?.Clipboard);
                     if (DataContext is ExplorerPaneViewModel vm)
                     {
                         vm.NotifyContextMenuProperties();
@@ -197,6 +199,8 @@ public partial class ExplorerPaneView : UserControl
             {
                 ThumbnailContextMenu.Opening += (sender, args) =>
                 {
+                    var topLevel = TopLevel.GetTopLevel(this);
+                    _ = ClipboardFileService.UpdateFromSystemClipboardAsync(topLevel?.Clipboard);
                     if (DataContext is ExplorerPaneViewModel vm)
                     {
                         vm.NotifyContextMenuProperties();
@@ -587,7 +591,7 @@ public partial class ExplorerPaneView : UserControl
         }
 
         int configuredDelay = SettingsService.Instance.CurrentSettings.ThumbnailScrollDebounceMilliseconds;
-        int delay = Math.Clamp(Math.Max(300, configuredDelay), 280, 350);
+        int delay = Math.Clamp(configuredDelay, 60, 250);
         _thumbnailDebounceTimer.Interval = TimeSpan.FromMilliseconds(delay);
         _thumbnailDebounceTimer.Stop();
         _thumbnailDebounceTimer.Start();
@@ -602,14 +606,35 @@ public partial class ExplorerPaneView : UserControl
     private void LoadRealizedThumbnailWindow()
     {
         if (ThumbnailListBox == null || DataContext is not ExplorerPaneViewModel vm ||
-            !vm.IsThumbnailView || vm.SelectedTab == null)
+            !vm.IsThumbnailView || vm.SelectedTab == null || vm.ThumbnailRows.Count == 0)
         {
             return;
         }
 
         var panel = ThumbnailListBox.FindDescendantOfType<VirtualizingStackPanel>();
-        int firstRow = panel?.FirstRealizedIndex ?? 0;
-        int lastRow = panel?.LastRealizedIndex ?? Math.Min(vm.ThumbnailRows.Count - 1, 3);
+        int firstRow;
+        int lastRow;
+        bool panelRealized = panel != null && panel.FirstRealizedIndex >= 0 && panel.LastRealizedIndex >= panel.FirstRealizedIndex;
+
+        if (panelRealized)
+        {
+            firstRow = panel!.FirstRealizedIndex;
+            lastRow = panel.LastRealizedIndex;
+        }
+        else
+        {
+            _thumbnailScrollViewer ??= ThumbnailListBox.FindDescendantOfType<ScrollViewer>();
+            double cellHeight = Math.Max(50.0, vm.ThumbnailCellHeight);
+            double offset = _thumbnailScrollViewer?.Offset.Y ?? 0;
+            double viewportHeight = (_thumbnailScrollViewer != null && _thumbnailScrollViewer.Viewport.Height > 0)
+                ? _thumbnailScrollViewer.Viewport.Height
+                : (ThumbnailListBox.Bounds.Height > 0 ? ThumbnailListBox.Bounds.Height : 600.0);
+
+            firstRow = Math.Max(0, (int)Math.Floor(offset / cellHeight));
+            int visibleRowCount = Math.Max(1, (int)Math.Ceiling(viewportHeight / cellHeight) + 1);
+            lastRow = Math.Min(vm.ThumbnailRows.Count - 1, firstRow + visibleRowCount);
+        }
+
         if (firstRow < 0 || lastRow < firstRow) return;
 
         var items = vm.SelectedTab.FilteredItems;
@@ -633,7 +658,11 @@ public partial class ExplorerPaneView : UserControl
 
         foreach (var oldItem in _retainedThumbnailItems)
         {
-            if (!retained.Contains(oldItem)) oldItem.ThumbnailImage = null;
+            if (!retained.Contains(oldItem) &&
+                !ThumbnailService.Instance.IsCachedInMemory(oldItem.FullPath, oldItem.SizeBytes, oldItem.ModifiedTime, (int)vm.ThumbnailSize))
+            {
+                oldItem.ThumbnailImage = null;
+            }
         }
         _retainedThumbnailItems = retained;
 

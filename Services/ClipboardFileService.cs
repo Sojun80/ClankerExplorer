@@ -118,12 +118,12 @@ public static class ClipboardFileService
                         var fileUri = new Uri(Path.GetFullPath(p));
                         if (Directory.Exists(p))
                         {
-                            var f = storageProvider.TryGetFolderFromPathAsync(fileUri).GetAwaiter().GetResult();
+                            var f = await storageProvider.TryGetFolderFromPathAsync(fileUri);
                             if (f != null) storageItems.Add(f);
                         }
                         else if (File.Exists(p))
                         {
-                            var f = storageProvider.TryGetFileFromPathAsync(fileUri).GetAwaiter().GetResult();
+                            var f = await storageProvider.TryGetFileFromPathAsync(fileUri);
                             if (f != null) storageItems.Add(f);
                         }
                     }
@@ -173,12 +173,12 @@ public static class ClipboardFileService
                         var fileUri = new Uri(Path.GetFullPath(p));
                         if (Directory.Exists(p))
                         {
-                            var f = storageProvider.TryGetFolderFromPathAsync(fileUri).GetAwaiter().GetResult();
+                            var f = await storageProvider.TryGetFolderFromPathAsync(fileUri);
                             if (f != null) storageItems.Add(f);
                         }
                         else if (File.Exists(p))
                         {
-                            var f = storageProvider.TryGetFileFromPathAsync(fileUri).GetAwaiter().GetResult();
+                            var f = await storageProvider.TryGetFileFromPathAsync(fileUri);
                             if (f != null) storageItems.Add(f);
                         }
                     }
@@ -281,6 +281,33 @@ public static class ClipboardFileService
         catch { }
 
         return paths.ToList();
+    }
+
+    /// <summary>
+    /// Checks the system clipboard for files (e.g. copied from Windows Explorer or external applications)
+    /// and synchronizes them with internal state if found.
+    /// </summary>
+    public static async Task UpdateFromSystemClipboardAsync(IClipboard? clipboard)
+    {
+        if (clipboard == null) return;
+        try
+        {
+            var paths = await ExtractPathsFromClipboardAsync(clipboard);
+            if (paths.Count > 0)
+            {
+                lock (_lock)
+                {
+                    if (_storedPaths.Count == 0 || !_storedPaths.SequenceEqual(paths, PathComparer))
+                    {
+                        _storedPaths.Clear();
+                        _storedPaths.AddRange(paths);
+                        _isCut = false;
+                    }
+                }
+                ClipboardChanged?.Invoke();
+            }
+        }
+        catch { }
     }
 
     public static async Task<OperationJob?> EnqueuePasteFromSystemClipboardAsync(

@@ -348,10 +348,12 @@ public partial class ExplorerTabViewModel : ObservableObject, IDisposable
 
         string? previousFocusedPath = SelectedItem?.FullPath;
 
+        string pathToLoad = CurrentPath;
+
         try
         {
-            var (list, error) = await FileSystemService.Instance.ReadDirectoryAsync(CurrentPath, token, _directoryReadOptions);
-            if (token.IsCancellationRequested || generation != _loadGeneration || _isDisposed)
+            var (list, error) = await FileSystemService.Instance.ReadDirectoryAsync(pathToLoad, token, _directoryReadOptions);
+            if (token.IsCancellationRequested || generation != _loadGeneration || _isDisposed || !DirectoryWatcher.PathEquals(pathToLoad, CurrentPath))
             {
                 _reconciler.CancelStaging(stagingToken);
                 return;

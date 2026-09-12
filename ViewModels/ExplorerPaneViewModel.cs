@@ -1004,6 +1004,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
     public void NotifyContextMenuProperties()
     {
+        OnPropertyChanged(nameof(CanPaste));
         OnPropertyChanged(nameof(IsItemSelected));
         OnPropertyChanged(nameof(IsFolderSelected));
         OnPropertyChanged(nameof(IsArchiveSelected));
@@ -1427,22 +1428,34 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
 
             if (job != null)
             {
-                var result = await job.CompletionTask.ConfigureAwait(true);
-                if (result != null)
+                try
                 {
-                    var created = result.CreatedDestinationPaths;
-                    if (SelectedTab == currentTab &&
-                        string.Equals(SelectedTab?.CurrentPath?.TrimEnd('\\', '/'), destDir?.TrimEnd('\\', '/'),
-                            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
-                        if (created != null && created.Count > 0 && currentTab != null)
+                    var result = await job.CompletionTask.ConfigureAwait(true);
+                    if (result != null)
+                    {
+                        var created = result.CreatedDestinationPaths;
+                        if (SelectedTab == currentTab &&
+                            string.Equals(SelectedTab?.CurrentPath?.TrimEnd('\\', '/'), destDir?.TrimEnd('\\', '/'),
+                                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                         {
-                            currentTab.PendingSelectPaths = created.ToList();
-                            currentTab.SelectPaths(created, scrollIntoView: false);
-                            if (currentTab.SelectedItems.Count == 0)
+                            if (created != null && created.Count > 0 && currentTab != null)
                             {
-                                await currentTab.RefreshAsync();
+                                currentTab.PendingSelectPaths = created.ToList();
+                                currentTab.SelectPaths(created, scrollIntoView: false);
+                                if (currentTab.SelectedItems.Count == 0)
+                                {
+                                    await currentTab.RefreshAsync();
+                                }
                             }
                         }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"PasteFilesAsync failed: {ex}");
                 }
             }
 

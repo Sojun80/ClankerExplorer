@@ -42,6 +42,13 @@ public sealed class DirectoryChangeReconciler
     public void Reset()
     {
         Interlocked.Increment(ref _currentGeneration);
+        lock (_syncLock)
+        {
+            _isStaging = false;
+            _stagedHasOverflow = false;
+            _stagedBatches.Clear();
+            _stagingToken++;
+        }
     }
 
     public long BeginStaging()
@@ -123,9 +130,9 @@ public sealed class DirectoryChangeReconciler
         if (batch == null || string.IsNullOrWhiteSpace(batch.DirectoryPath)) return;
 
         // Ignore events from other directories (e.g. previous directory before navigation)
-        if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
+        if (!DirectoryWatcher.PathEquals(batch.DirectoryPath, _tab.CurrentPath)) return;
 
-        // Filter active transfer temp files and internal Clanker temp files so they never flicker into UI
+        // Filter active transfer temp files, internal Clanker temp files, and non-immediate child paths
         if (batch.Changes != null && batch.Changes.Count > 0)
         {
             var filteredChanges = new List<FileChangeEvent>(batch.Changes.Count);
@@ -144,7 +151,10 @@ public sealed class DirectoryChangeReconciler
                 // transform it into Created(finalUserFile) so it appears immediately!
                 if (c.Kind == DirectoryChangeKind.Renamed && oldIsTemp)
                 {
-                    filteredChanges.Add(new FileChangeEvent(DirectoryChangeKind.Created, c.FullPath));
+                    if (DirectoryWatcher.IsDirectChild(_tab.CurrentPath, c.FullPath))
+                    {
+                        filteredChanges.Add(new FileChangeEvent(DirectoryChangeKind.Created, c.FullPath));
+                    }
                     continue;
                 }
 
@@ -153,7 +163,30 @@ public sealed class DirectoryChangeReconciler
                     continue;
                 }
 
-                filteredChanges.Add(c);
+                if (c.Kind == DirectoryChangeKind.Renamed)
+                {
+                    bool newIsDirect = DirectoryWatcher.IsDirectChild(_tab.CurrentPath, c.FullPath);
+                    bool oldIsDirect = !string.IsNullOrEmpty(c.OldFullPath) && DirectoryWatcher.IsDirectChild(_tab.CurrentPath, c.OldFullPath);
+
+                    if (newIsDirect && oldIsDirect)
+                    {
+                        filteredChanges.Add(c);
+                    }
+                    else if (newIsDirect)
+                    {
+                        filteredChanges.Add(new FileChangeEvent(DirectoryChangeKind.Created, c.FullPath));
+                    }
+                    else if (oldIsDirect)
+                    {
+                        filteredChanges.Add(new FileChangeEvent(DirectoryChangeKind.Deleted, c.OldFullPath!));
+                    }
+                    continue;
+                }
+
+                if (DirectoryWatcher.IsDirectChild(_tab.CurrentPath, c.FullPath))
+                {
+                    filteredChanges.Add(c);
+                }
             }
 
             if (filteredChanges.Count == 0 && !batch.IsOverflow)
@@ -200,7 +233,7 @@ public sealed class DirectoryChangeReconciler
             Dispatcher.UIThread.Post(() =>
             {
                 if (gen != Volatile.Read(ref _currentGeneration)) return;
-                if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
+                if (!DirectoryWatcher.PathEquals(batch.DirectoryPath, _tab.CurrentPath)) return;
                 _ = RefreshTabSafelyAsync();
             }, DispatcherPriority.Background);
             return;
@@ -239,7 +272,7 @@ public sealed class DirectoryChangeReconciler
         }
 
         if (gen != Volatile.Read(ref _currentGeneration)) return;
-        if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
+        if (!DirectoryWatcher.PathEquals(batch.DirectoryPath, _tab.CurrentPath)) return;
 
         List<ResolvedChange> resolved;
         try
@@ -252,12 +285,12 @@ public sealed class DirectoryChangeReconciler
         }
 
         if (gen != Volatile.Read(ref _currentGeneration)) return;
-        if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
+        if (!DirectoryWatcher.PathEquals(batch.DirectoryPath, _tab.CurrentPath)) return;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             if (gen != Volatile.Read(ref _currentGeneration)) return;
-            if (!PathComparer.Equals(batch.DirectoryPath, _tab.CurrentPath)) return;
+            if (!DirectoryWatcher.PathEquals(batch.DirectoryPath, _tab.CurrentPath)) return;
             ApplyResolvedBatch(batch.DirectoryPath, resolved);
         }, DispatcherPriority.Background);
     }
@@ -267,7 +300,7 @@ public sealed class DirectoryChangeReconciler
 
     public void ReconcileCreatedOrChangedSync(string fullPath)
     {
-        if (string.IsNullOrWhiteSpace(fullPath) || IsIgnoredTempPath(fullPath)) return;
+        if (string.IsNullOrWhiteSpace(fullPath) || IsIgnoredTempPath(fullPath) || !DirectoryWatcher.IsDirectChild(_tab.CurrentPath, fullPath)) return;
         var change = new FileChangeEvent(DirectoryChangeKind.Created, fullPath);
         var resolved = ResolveMetadata(new[] { change });
 
@@ -288,7 +321,7 @@ public sealed class DirectoryChangeReconciler
 
     public void ReconcileDeletedSync(string fullPath)
     {
-        if (string.IsNullOrWhiteSpace(fullPath) || IsIgnoredTempPath(fullPath)) return;
+        if (string.IsNullOrWhiteSpace(fullPath) || IsIgnoredTempPath(fullPath) || !DirectoryWatcher.IsDirectChild(_tab.CurrentPath, fullPath)) return;
 
         void Apply()
         {
@@ -316,21 +349,36 @@ public sealed class DirectoryChangeReconciler
             ReconcileCreatedOrChangedSync(newFullPath);
             return;
         }
-        var change = new FileChangeEvent(DirectoryChangeKind.Renamed, newFullPath, oldFullPath);
-        var resolved = ResolveMetadata(new[] { change });
 
-        void Apply()
-        {
-            ApplyResolvedBatch(_tab.CurrentPath, resolved);
-        }
+        bool newIsDirect = DirectoryWatcher.IsDirectChild(_tab.CurrentPath, newFullPath);
+        bool oldIsDirect = !string.IsNullOrEmpty(oldFullPath) && DirectoryWatcher.IsDirectChild(_tab.CurrentPath, oldFullPath);
 
-        if (Dispatcher.UIThread.CheckAccess())
+        if (newIsDirect && oldIsDirect)
         {
-            Apply();
+            var change = new FileChangeEvent(DirectoryChangeKind.Renamed, newFullPath, oldFullPath);
+            var resolved = ResolveMetadata(new[] { change });
+
+            void Apply()
+            {
+                ApplyResolvedBatch(_tab.CurrentPath, resolved);
+            }
+
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                Apply();
+            }
+            else
+            {
+                Dispatcher.UIThread.Post(Apply);
+            }
         }
-        else
+        else if (newIsDirect)
         {
-            Dispatcher.UIThread.Post(Apply);
+            ReconcileCreatedOrChangedSync(newFullPath);
+        }
+        else if (oldIsDirect)
+        {
+            ReconcileDeletedSync(oldFullPath);
         }
     }
 
@@ -440,7 +488,7 @@ public sealed class DirectoryChangeReconciler
 
     private void ApplyResolvedBatch(string directoryPath, List<ResolvedChange> resolvedChanges)
     {
-        if (!PathComparer.Equals(directoryPath, _tab.CurrentPath) || _tab.Items == null) return;
+        if (!DirectoryWatcher.PathEquals(directoryPath, _tab.CurrentPath) || _tab.Items == null) return;
 
         bool filteredChanged = false;
         var comparer = CreateItemComparer(_tab.SortColumn, _tab.SortAscending);
@@ -565,10 +613,17 @@ public sealed class DirectoryChangeReconciler
     {
         if (_tab.Items == null) return false;
 
+        // Ensure this item strictly belongs to the current tab directory
+        if (!DirectoryWatcher.IsDirectChild(_tab.CurrentPath, change.Event.FullPath))
+        {
+            return false;
+        }
+
         var existing = _tab.Items.FirstOrDefault(i => PathComparer.Equals(i.FullPath, change.Event.FullPath));
         if (existing != null)
         {
             _tab.InvalidateSortedCache();
+            bool contentChanged = existing.SizeBytes != change.SizeBytes || existing.ModifiedTime != change.ModifiedTime;
             // Existing item changed
             existing.Extension = change.Extension;
             existing.SizeBytes = change.SizeBytes;
@@ -577,9 +632,11 @@ public sealed class DirectoryChangeReconciler
             existing.CreatedTime = change.CreatedTime;
             existing.AccessedTime = change.AccessedTime;
             existing.AttributesString = change.AttributesString;
-            existing.ThumbnailImage = null; // Invalidate thumbnail for re-fetch
-
-            _tab.TriggerThumbnailViewportUpdate();
+            if (contentChanged)
+            {
+                existing.ThumbnailImage = null; // Invalidate thumbnail for re-fetch
+                _tab.TriggerThumbnailViewportUpdate();
+            }
 
             // If sort affects this field, reposition in FilteredItems if needed
             if (_tab.FilteredItems.Contains(existing))
@@ -634,6 +691,17 @@ public sealed class DirectoryChangeReconciler
     private bool ApplyRenamed(ResolvedChange change, IComparer<FileItem> comparer)
     {
         if (_tab.Items == null) return false;
+
+        bool targetIsDirect = DirectoryWatcher.IsDirectChild(_tab.CurrentPath, change.Event.FullPath);
+        if (!targetIsDirect)
+        {
+            // If the item was renamed/moved out of this directory, remove it from this tab
+            if (!string.IsNullOrEmpty(change.Event.OldFullPath) && DirectoryWatcher.IsDirectChild(_tab.CurrentPath, change.Event.OldFullPath))
+            {
+                return ApplyDeleted(change.Event.OldFullPath);
+            }
+            return false;
+        }
 
         string? oldPath = change.Event.OldFullPath;
         FileItem? targetItem = null;

@@ -24,11 +24,14 @@ namespace ClankerExplorer.Services;
 public class ThumbnailService : IDisposable
 {
     private const int CacheFormatVersion = 2;
-    private const int MaxTotalQueue = 20;
-    private const int MaxVisibleQueue = 16;
-    private const int MaxPrefetchQueue = 4;
-    private const int MaxSettledExpensiveGenerationWorkers = 2;
+    private const int MaxTotalQueue = 160;
+    private const int MaxVisibleQueue = 128;
+    private const int MaxPrefetchQueue = 32;
     private static readonly TimeSpan YieldOwnershipWindow = TimeSpan.FromSeconds(5);
+
+    public int MaxTotalQueueCapacity => MaxTotalQueue;
+    public int MaxVisibleQueueCapacity => MaxVisibleQueue;
+    public int MaxPrefetchQueueCapacity => MaxPrefetchQueue;
 
     private static readonly Lazy<ThumbnailService> _instance = new(() => new ThumbnailService());
     public static ThumbnailService Instance => _instance.Value;
@@ -67,6 +70,7 @@ public class ThumbnailService : IDisposable
     private readonly ConcurrentDictionary<string, long> _yieldedPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _diskCacheDirectory;
     private readonly int _workerCount;
+    private readonly int _maxExpensiveGenerationWorkers;
 
     private int _cleanupScheduled;
     private int _workersStarted;
@@ -104,6 +108,7 @@ public class ThumbnailService : IDisposable
 
         int configuredWorkers = SettingsService.Instance.CurrentSettings.ThumbnailWorkerCount;
         _workerCount = Math.Clamp(workerCount ?? configuredWorkers, 2, 3);
+        _maxExpensiveGenerationWorkers = 2;
     }
 
     /// <summary>
@@ -205,12 +210,12 @@ public class ThumbnailService : IDisposable
             if (TryGetMemoryEntry(key, out var memBitmap))
             {
                 Interlocked.Increment(ref _memoryCacheHits);
-                if (item.ThumbnailImage == null)
+                if (item.ThumbnailImage != memBitmap)
                 {
                     item.ThumbnailImage = memBitmap;
                 }
             }
-            else
+            else if (item.ThumbnailImage == null)
             {
                 unassignedVisible.Add(item);
             }
@@ -231,7 +236,7 @@ public class ThumbnailService : IDisposable
         {
             foreach (var item in prefetchItems)
             {
-                if (!item.IsDirectory && item.SizeBytes > 0 && !cancellationToken.IsCancellationRequested && !IsYielded(item.FullPath))
+                if (!item.IsDirectory && item.SizeBytes > 0 && item.ThumbnailImage == null && !cancellationToken.IsCancellationRequested && !IsYielded(item.FullPath))
                 {
                     completions.Add(EnqueueAsync(item, targetSize, ThumbnailPriority.Prefetch, generation, cancellationToken));
                 }
@@ -317,7 +322,10 @@ public class ThumbnailService : IDisposable
         {
             Interlocked.Increment(ref _memoryCacheHits);
             Interlocked.Increment(ref _suppressedDuplicateCount);
-            PublishToUi(new ThumbnailPublication(item, item.FullPath, item.ModifiedTime, cached));
+            if (item.ThumbnailImage != cached)
+            {
+                PublishToUi(new ThumbnailPublication(item, item.FullPath, item.ModifiedTime, cached));
+            }
             return Task.FromResult<Bitmap?>(cached);
         }
 
@@ -356,11 +364,20 @@ public class ThumbnailService : IDisposable
                     Interlocked.Increment(ref _droppedQueueFullCount);
                     evictedAny = true;
                 }
-                // If no prefetch, evict the oldest visible request to make room
-                else if (_visibleQueue.TryDequeue(out var evictedVisible))
+                // If no prefetch, prefer evicting older generation visible items
+                else if (_visibleQueue.TryPeek(out var oldestVisible) && oldestVisible.Generation < generation)
                 {
-                    _queuedKeys.Remove(evictedVisible.Key);
-                    evictedVisible.Completion.TrySetCanceled();
+                    _visibleQueue.Dequeue();
+                    _queuedKeys.Remove(oldestVisible.Key);
+                    oldestVisible.Completion.TrySetCanceled();
+                    Interlocked.Increment(ref _droppedQueueFullCount);
+                    evictedAny = true;
+                }
+                // If all visible are current generation and queue is completely full, evict oldest
+                else if (_visibleQueue.TryDequeue(out var evictedOldest))
+                {
+                    _queuedKeys.Remove(evictedOldest.Key);
+                    evictedOldest.Completion.TrySetCanceled();
                     Interlocked.Increment(ref _droppedQueueFullCount);
                     evictedAny = true;
                 }
@@ -375,10 +392,18 @@ public class ThumbnailService : IDisposable
             }
             else if (priority == ThumbnailPriority.Visible && _visibleQueue.Count >= MaxVisibleQueue)
             {
-                if (_visibleQueue.TryDequeue(out var oldestVisible))
+                if (_visibleQueue.TryPeek(out var oldestVisible) && oldestVisible.Generation < generation)
                 {
+                    _visibleQueue.Dequeue();
                     _queuedKeys.Remove(oldestVisible.Key);
                     oldestVisible.Completion.TrySetCanceled();
+                    Interlocked.Increment(ref _droppedQueueFullCount);
+                    evictedAny = true;
+                }
+                else if (_visibleQueue.TryDequeue(out var oldest))
+                {
+                    _queuedKeys.Remove(oldest.Key);
+                    oldest.Completion.TrySetCanceled();
                     Interlocked.Increment(ref _droppedQueueFullCount);
                     evictedAny = true;
                 }
@@ -732,8 +757,8 @@ public class ThumbnailService : IDisposable
             ct.ThrowIfCancellationRequested();
         }
 
-        // When scrolling settles, at most 2 workers perform new expensive generation concurrently
-        while (Volatile.Read(ref _activeGenerationWorkers) >= MaxSettledExpensiveGenerationWorkers)
+        // When scrolling settles, at most _maxExpensiveGenerationWorkers perform new expensive generation concurrently
+        while (Volatile.Read(ref _activeGenerationWorkers) >= _maxExpensiveGenerationWorkers)
         {
             await Task.Delay(50, ct);
             ct.ThrowIfCancellationRequested();
@@ -745,7 +770,14 @@ public class ThumbnailService : IDisposable
         try
         {
             Interlocked.Increment(ref _cacheMisses);
-            bitmap = await LoadOrGenerateAsync(path, key, sizeBucket, ct);
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            bitmap = await LoadOrGenerateAsync(path, key, sizeBucket, linkedCts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ThumbnailService] Extraction timed out for {path}");
+            bitmap = null;
         }
         finally
         {
@@ -773,7 +805,7 @@ public class ThumbnailService : IDisposable
         _publicationQueue.Enqueue(pub);
         if (Interlocked.CompareExchange(ref _publicationScheduled, 1, 0) == 0)
         {
-            Dispatcher.UIThread.Post(DrainPublications, DispatcherPriority.Normal);
+            Dispatcher.UIThread.Post(DrainPublications, DispatcherPriority.Background);
         }
     }
 
@@ -798,14 +830,17 @@ public class ThumbnailService : IDisposable
                 continue;
             }
 
-            item.ThumbnailImage = pub.Bitmap;
+            if (item.ThumbnailImage != pub.Bitmap)
+            {
+                item.ThumbnailImage = pub.Bitmap;
+            }
         }
 
         if (!_publicationQueue.IsEmpty)
         {
             if (Interlocked.CompareExchange(ref _publicationScheduled, 1, 0) == 0)
             {
-                Dispatcher.UIThread.Post(DrainPublications, DispatcherPriority.Normal);
+                Dispatcher.UIThread.Post(DrainPublications, DispatcherPriority.Background);
             }
         }
     }
@@ -1016,6 +1051,17 @@ public class ThumbnailService : IDisposable
                     _memoryBytes -= removed.ApproximateBytes;
                 }
             }
+        }
+    }
+
+    public bool IsCachedInMemory(string path, long fileSize, DateTime modifiedTime, int targetSize)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        int sizeBucket = GetCanonicalSize(targetSize);
+        string key = GetCacheKey(path, fileSize, modifiedTime.Ticks, sizeBucket);
+        lock (_memoryGate)
+        {
+            return _memoryCache.ContainsKey(key);
         }
     }
 
@@ -1301,63 +1347,70 @@ public class ThumbnailService : IDisposable
     private static readonly Guid BHID_ThumbnailHandler = new("7b2e650a-8e20-4f4a-b09e-6597afc72fb0");
     private static readonly Guid IID_IThumbnailProvider = new("e357fccd-a995-4576-b01f-234630154e96");
 
+    private static readonly object _shellLock = new();
+
     internal static Bitmap? ExtractWindowsShellThumbnail(string filePath, int targetSize, CancellationToken cancellationToken = default)
     {
         if (cancellationToken.IsCancellationRequested) return null;
 
-        IntPtr hBitmap = IntPtr.Zero;
-        IShellItem? shellItem = null;
-        IThumbnailProvider? provider = null;
-        IntPtr pProvider = IntPtr.Zero;
-
-        try
+        lock (_shellLock)
         {
-            int hr = SHCreateItemFromParsingName(filePath, IntPtr.Zero, IShellItemGuid, out shellItem);
-            if (hr != 0 || shellItem == null) return null;
-
             if (cancellationToken.IsCancellationRequested) return null;
 
-            int hrBind = shellItem.BindToHandler(IntPtr.Zero, BHID_ThumbnailHandler, IID_IThumbnailProvider, out pProvider);
-            if (hrBind == 0 && pProvider != IntPtr.Zero)
-            {
-                try
-                {
-                    if (cancellationToken.IsCancellationRequested) return null;
-                    provider = (IThumbnailProvider)Marshal.GetObjectForIUnknown(pProvider);
-                    hr = provider.GetThumbnail((uint)targetSize, out hBitmap, out _);
-                }
-                finally
-                {
-                    Marshal.Release(pProvider);
-                    pProvider = IntPtr.Zero;
-                }
-            }
+            IntPtr hBitmap = IntPtr.Zero;
+            IShellItem? shellItem = null;
+            IThumbnailProvider? provider = null;
+            IntPtr pProvider = IntPtr.Zero;
 
-            if (hr == 0 && hBitmap != IntPtr.Zero && !cancellationToken.IsCancellationRequested)
+            try
             {
-                return ConvertHBitmapToAvaloniaBitmap(hBitmap);
+                int hr = SHCreateItemFromParsingName(filePath, IntPtr.Zero, IShellItemGuid, out shellItem);
+                if (hr != 0 || shellItem == null) return null;
+
+                if (cancellationToken.IsCancellationRequested) return null;
+
+                int hrBind = shellItem.BindToHandler(IntPtr.Zero, BHID_ThumbnailHandler, IID_IThumbnailProvider, out pProvider);
+                if (hrBind == 0 && pProvider != IntPtr.Zero)
+                {
+                    try
+                    {
+                        if (cancellationToken.IsCancellationRequested) return null;
+                        provider = (IThumbnailProvider)Marshal.GetObjectForIUnknown(pProvider);
+                        hr = provider.GetThumbnail((uint)targetSize, out hBitmap, out _);
+                    }
+                    finally
+                    {
+                        Marshal.Release(pProvider);
+                        pProvider = IntPtr.Zero;
+                    }
+                }
+
+                if (hr == 0 && hBitmap != IntPtr.Zero && !cancellationToken.IsCancellationRequested)
+                {
+                    return ConvertHBitmapToAvaloniaBitmap(hBitmap);
+                }
             }
+            catch
+            {
+                // Fall back gracefully if COM extraction fails
+            }
+            finally
+            {
+                if (provider != null)
+                {
+                    try { Marshal.FinalReleaseComObject(provider); } catch { }
+                }
+                if (shellItem != null)
+                {
+                    try { Marshal.FinalReleaseComObject(shellItem); } catch { }
+                }
+                if (hBitmap != IntPtr.Zero)
+                {
+                    DeleteObject(hBitmap);
+                }
+            }
+            return null;
         }
-        catch
-        {
-            // Fall back gracefully if COM extraction fails
-        }
-        finally
-        {
-            if (provider != null)
-            {
-                try { Marshal.FinalReleaseComObject(provider); } catch { }
-            }
-            if (shellItem != null)
-            {
-                try { Marshal.FinalReleaseComObject(shellItem); } catch { }
-            }
-            if (hBitmap != IntPtr.Zero)
-            {
-                DeleteObject(hBitmap);
-            }
-        }
-        return null;
     }
 
     private static Bitmap? ConvertHBitmapToAvaloniaBitmap(IntPtr hBitmap)

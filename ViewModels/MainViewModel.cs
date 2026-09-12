@@ -14,6 +14,7 @@ namespace ClankerExplorer.ViewModels;
 public partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly Action _quickAccessChangedHandler;
+    private readonly Action _operationsChangedHandler;
     public IFileOperationService FileOperations { get; }
     public OperationsViewModel Operations { get; }
     private bool _isDisposed;
@@ -193,6 +194,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             FileOperations = fileOperationService ?? new FileOperationService();
             Operations = new OperationsViewModel(FileOperations.Operations);
             Operations.RequestClose += () => ShowOperationsWorkspace = false;
+
+            _operationsChangedHandler = () =>
+            {
+                if (FileOperations.Operations.NeedsAttentionCount > 0)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        if (!_isDisposed && !ShowOperationsWorkspace)
+                        {
+                            ShowOperationsWorkspace = true;
+                        }
+                    });
+                }
+            };
+            FileOperations.Operations.OperationsChanged += _operationsChangedHandler;
 
             Search = new SearchWorkspaceViewModel(
                 getCurrentFolder: () => ActivePane?.SelectedTab?.CurrentPath ?? FileSystemService.DefaultRootPath);
@@ -717,6 +733,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_isDisposed) return;
         _isDisposed = true;
         QuickAccessService.Instance.QuickAccessChanged -= _quickAccessChangedHandler;
+        FileOperations.Operations.OperationsChanged -= _operationsChangedHandler;
         Operations.Dispose();
         Search.Dispose();
         LeftPane.Dispose();
