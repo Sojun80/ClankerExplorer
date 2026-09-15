@@ -17,6 +17,23 @@ public static class FileDragDropService
     private static StringComparison PathComparison =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
+    private static string NormalizePath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+        try
+        {
+            string full = Path.GetFullPath(path);
+            string root = Path.GetPathRoot(full) ?? string.Empty;
+            if (string.Equals(full, root, PathComparison))
+                return full;
+            return full.TrimEnd('\\', '/');
+        }
+        catch
+        {
+            return path.TrimEnd('\\', '/');
+        }
+    }
+
     /// <summary>
     /// Extracts filesystem paths from an IDataObject, supporting DataFormats.Files,
     /// DataFormats.FileNames, and newline-delimited text representations.
@@ -38,7 +55,7 @@ public static class FileDragDropService
                     string localPath = item.Path.LocalPath;
                     if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
                     {
-                        paths.Add(localPath);
+                        paths.Add(NormalizePath(localPath));
                     }
                 }
             }
@@ -54,7 +71,7 @@ public static class FileDragDropService
                 {
                     if (!string.IsNullOrEmpty(p) && (File.Exists(p) || Directory.Exists(p)))
                     {
-                        paths.Add(p);
+                        paths.Add(NormalizePath(p));
                     }
                 }
             }
@@ -77,7 +94,7 @@ public static class FileDragDropService
 
                     if (!string.IsNullOrEmpty(clean) && (File.Exists(clean) || Directory.Exists(clean)))
                     {
-                        paths.Add(clean);
+                        paths.Add(NormalizePath(clean));
                     }
                 }
             }
@@ -178,6 +195,18 @@ public static class FileDragDropService
         return false;
     }
 
+    private static readonly System.Reflection.ConstructorInfo? BclStorageFileCtor =
+        typeof(StorageProviderExtensions).Assembly
+            .GetType("Avalonia.Platform.Storage.FileIO.BclStorageFile")?
+            .GetConstructors(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .FirstOrDefault();
+
+    private static readonly System.Reflection.ConstructorInfo? BclStorageFolderCtor =
+        typeof(StorageProviderExtensions).Assembly
+            .GetType("Avalonia.Platform.Storage.FileIO.BclStorageFolder")?
+            .GetConstructors(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .FirstOrDefault();
+
     /// <summary>
     /// Synchronously resolves local filesystem paths into Avalonia storage items
     /// so the OLE drag gesture can enter DragDrop.DoDragDrop immediately without
@@ -186,22 +215,45 @@ public static class FileDragDropService
     public static List<IStorageItem> ResolveStorageItems(IStorageProvider? storageProvider, IEnumerable<string> paths)
     {
         var items = new List<IStorageItem>();
-        if (storageProvider == null || paths == null) return items;
+        if (paths == null) return items;
 
         foreach (var p in paths)
         {
+            if (string.IsNullOrEmpty(p)) continue;
+
             try
             {
+                IStorageItem? item = null;
                 var fileUri = new Uri(Path.GetFullPath(p));
-                if (Directory.Exists(p))
+
+                if (storageProvider != null)
                 {
-                    var f = storageProvider.TryGetFolderFromPathAsync(fileUri).GetAwaiter().GetResult();
-                    if (f != null) items.Add(f);
+                    if (Directory.Exists(p))
+                    {
+                        item = storageProvider.TryGetFolderFromPathAsync(fileUri).GetAwaiter().GetResult();
+                    }
+                    else if (File.Exists(p))
+                    {
+                        item = storageProvider.TryGetFileFromPathAsync(fileUri).GetAwaiter().GetResult();
+                    }
                 }
-                else if (File.Exists(p))
+
+                // Fallback to direct BclStorageItem instantiation if storageProvider is null or returned null
+                if (item == null)
                 {
-                    var f = storageProvider.TryGetFileFromPathAsync(fileUri).GetAwaiter().GetResult();
-                    if (f != null) items.Add(f);
+                    if (Directory.Exists(p) && BclStorageFolderCtor != null)
+                    {
+                        item = BclStorageFolderCtor.Invoke(new object[] { new DirectoryInfo(p) }) as IStorageItem;
+                    }
+                    else if (File.Exists(p) && BclStorageFileCtor != null)
+                    {
+                        item = BclStorageFileCtor.Invoke(new object[] { new FileInfo(p) }) as IStorageItem;
+                    }
+                }
+
+                if (item != null)
+                {
+                    items.Add(item);
                 }
             }
             catch { }

@@ -956,7 +956,7 @@ public sealed class UiSmokeTests
     }
 
     [Fact]
-    public void FileDragDrop_OutboundPayload_ExposesOnlyFilesFormatWithoutText()
+    public void FileDragDrop_OutboundPayload_ExposesFilesAndFileNamesAndText()
     {
         var tempFile = Path.Combine(Path.GetTempPath(), "clanker_drag_payload_test_" + Guid.NewGuid().ToString("N") + ".txt");
         File.WriteAllText(tempFile, "sample content");
@@ -969,13 +969,16 @@ public sealed class UiSmokeTests
 
             var dataObject = new Avalonia.Input.DataObject();
             var storageItems = new List<Avalonia.Platform.Storage.IStorageItem> { fileInstance };
+            var paths = new List<string> { tempFile };
 
-            // Outbound drag payload must ONLY advertise DataFormats.Files
+            // Outbound drag payload advertises Files, FileNames, and Text for maximum compatibility
             dataObject.Set(Avalonia.Input.DataFormats.Files, storageItems);
+            dataObject.Set(Avalonia.Input.DataFormats.FileNames, paths);
+            dataObject.Set(Avalonia.Input.DataFormats.Text, string.Join(Environment.NewLine, paths));
 
             Assert.True(dataObject.Contains(Avalonia.Input.DataFormats.Files));
-            Assert.False(dataObject.Contains(Avalonia.Input.DataFormats.Text), "Outbound file drag MUST NOT set DataFormats.Text, or Chromium/Discord will treat it as a text drag and reject file drop.");
-            Assert.False(dataObject.Contains(Avalonia.Input.DataFormats.FileNames), "Outbound file drag MUST NOT set duplicate FileNames format, avoiding duplicate CF_HDROP descriptors.");
+            Assert.True(dataObject.Contains(Avalonia.Input.DataFormats.FileNames));
+            Assert.True(dataObject.Contains(Avalonia.Input.DataFormats.Text));
 
             if (OperatingSystem.IsWindows())
             {
@@ -998,15 +1001,84 @@ public sealed class UiSmokeTests
                     cfList.Add((ushort)cfField?.GetValue(f)!);
                 }
 
-                // Exactly one CF_HDROP (15) format and zero CF_UNICODETEXT (13) formats
-                Assert.Single(cfList);
-                Assert.Equal(15, cfList[0]);
+                // Both CF_HDROP (15) and CF_UNICODETEXT (13) must be present in Win32 OLE descriptors
+                Assert.Contains((ushort)15, cfList);
+                Assert.Contains((ushort)13, cfList);
             }
         }
         finally
         {
             try { File.Delete(tempFile); } catch { }
         }
+    }
+
+    [Fact]
+    public void FileDragDrop_ResolveStorageItems_ResolvesFilesAndFoldersAndProducesValidHGlobal()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), "clanker_drag_test_" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(tempFile, "sample content");
+        var tempDir = Path.Combine(Path.GetTempPath(), "clanker_drag_dir_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var paths = new List<string> { tempFile, tempDir };
+
+            // 1. Resolve storage items (with null storageProvider to exercise fallback resolution)
+            var resolvedItems = FileDragDropService.ResolveStorageItems(null, paths);
+            Assert.Equal(2, resolvedItems.Count);
+
+            // 2. Extract paths through FileDragDropService
+            var dataObject = new Avalonia.Input.DataObject();
+            dataObject.Set(Avalonia.Input.DataFormats.Files, resolvedItems);
+            dataObject.Set(Avalonia.Input.DataFormats.FileNames, paths);
+            dataObject.Set(Avalonia.Input.DataFormats.Text, string.Join(Environment.NewLine, paths));
+
+            var extracted = FileDragDropService.ExtractPaths(dataObject);
+            Assert.Equal(2, extracted.Count);
+            Assert.Contains(tempFile, extracted);
+
+            // 3. Test Win32 HGLOBAL DROPFILES generation and DragQueryFile parsing
+            if (OperatingSystem.IsWindows())
+            {
+                var asm = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "Avalonia.Win32")
+                          ?? System.Reflection.Assembly.Load("Avalonia.Win32");
+                var dataObjType = asm.GetType("Avalonia.Win32.DataObject")!;
+                var ctor = dataObjType.GetConstructors().FirstOrDefault()!;
+                var win32Data = ctor.Invoke(new object[] { dataObject });
+
+                var writeMethod = dataObjType.GetMethod("WriteDataToHGlobal", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+                object[] args = new object[] { Avalonia.Input.DataFormats.Files, IntPtr.Zero };
+                var res = writeMethod.Invoke(win32Data, args);
+                var hGlobal = (IntPtr)args[1];
+
+                Assert.NotEqual(IntPtr.Zero, hGlobal);
+                int count = Shell32TestMethods.DragQueryFile(hGlobal, 0xFFFFFFFF, null, 0);
+                Assert.Equal(2, count);
+
+                var retrievedPaths = new List<string>();
+                for (uint i = 0; i < (uint)count; i++)
+                {
+                    var pathBuf = new System.Text.StringBuilder(260);
+                    Shell32TestMethods.DragQueryFile(hGlobal, i, pathBuf, (uint)pathBuf.Capacity);
+                    retrievedPaths.Add(pathBuf.ToString());
+                }
+
+                Assert.Contains(tempFile, retrievedPaths);
+                Assert.Contains(tempDir, retrievedPaths);
+            }
+        }
+        finally
+        {
+            try { File.Delete(tempFile); } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    private static class Shell32TestMethods
+    {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        public static extern int DragQueryFile(IntPtr hDrop, uint iFile, System.Text.StringBuilder? lpszFile, uint cch);
     }
 
     [Fact]
