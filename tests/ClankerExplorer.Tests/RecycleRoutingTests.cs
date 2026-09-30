@@ -32,16 +32,62 @@ public sealed class RecycleRoutingTests
     }
 
     [Fact]
-    public void WindowsRecycleFailure_RestoresNameAndPreventsReplacement()
+    public void WindowsRecycleFailure_FallsBackToManagedBin()
     {
+        // e.g. a USB drive (no Windows bin) or an item too large for the bin.
         using var fs = new TemporaryFileSystem();
         var service = new RecycleBinService(isNetworkPath: _ => false, windows: new FakeWindowsBin(fs.Root) { Fail = true });
         string old = fs.CreateFile("FolderB/report.txt", "old");
         string incoming = fs.CreateFile("FolderA/source.txt", "new");
-        Assert.Throws<IOException>(() => service.CommitReplacement(incoming, old));
-        Assert.Equal("old", File.ReadAllText(old));
-        Assert.Equal("new", File.ReadAllText(incoming));
+        var entry = service.CommitReplacement(incoming, old)!;
+        Assert.Equal("Managed", entry.Backend);
+        Assert.Equal("new", File.ReadAllText(old));
+        Assert.Equal("old", File.ReadAllText(entry.StoredPath));
         Assert.Single(Directory.GetFiles(fs.FolderB));
+        string reservations = Path.Combine(AppStoragePaths.GetDataDirectory(), "recycle-names");
+        Assert.Empty(Directory.Exists(reservations) ? Directory.GetFiles(reservations) : Array.Empty<string>());
+    }
+
+    [Fact]
+    public void WindowsRecycle_RemovesNameReservation()
+    {
+        using var fs = new TemporaryFileSystem();
+        var service = new RecycleBinService(isNetworkPath: _ => false, windows: new FakeWindowsBin(fs.Root));
+        string old = fs.CreateFile("FolderB/report.txt", "old");
+        service.Recycle(old);
+        string reservations = Path.Combine(AppStoragePaths.GetDataDirectory(), "recycle-names");
+        Assert.Empty(Directory.Exists(reservations) ? Directory.GetFiles(reservations) : Array.Empty<string>());
+    }
+
+    [Fact]
+    public void Commit_WithNothingToReplace_SkipsJournal()
+    {
+        using var fs = new TemporaryFileSystem();
+        var service = new RecycleBinService(isNetworkPath: _ => true);
+        string incoming = fs.CreateFile("FolderA/source.txt", "new");
+        string destination = Path.Combine(fs.FolderB, "fresh.txt");
+        long historyBefore = File.Exists(service.HistoryPath) ? new FileInfo(service.HistoryPath).Length : 0;
+        // An unwritable history must not block a copy that destroys nothing.
+        using (new FileStream(service.HistoryPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.Null(service.CommitReplacement(incoming, destination));
+        }
+        Assert.Equal("new", File.ReadAllText(destination));
+        Assert.Equal(historyBefore, new FileInfo(service.HistoryPath).Length);
+    }
+
+    [Fact]
+    public void Commit_FileOverFolder_IsRefusedAndLeavesFolderInPlace()
+    {
+        using var fs = new TemporaryFileSystem();
+        var service = new RecycleBinService(isNetworkPath: _ => true);
+        string folder = Path.Combine(fs.FolderB, "data");
+        fs.CreateFile("FolderB/data/keep.txt", "keep");
+        string incoming = fs.CreateFile("FolderA/data", "file");
+        Assert.Throws<IOException>(() => service.CommitReplacement(incoming, folder));
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(folder, "keep.txt")));
+        Assert.Equal("file", File.ReadAllText(incoming));
+        Assert.False(Directory.Exists(RecycleBinService.GetBinDirectory(fs.FolderB)));
     }
 
     [Fact]

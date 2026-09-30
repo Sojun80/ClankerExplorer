@@ -11,6 +11,7 @@ public sealed class RecycleBinService
     public const string DirectoryName = ".clanker-recycle";
     public static RecycleBinService Instance { get; internal set; } = new();
     private static readonly object Gate = new();
+    private const long MaxHistoryBytes = 16L * 1024 * 1024;
     private readonly Func<DateTimeOffset> _clock;
     private readonly Func<string, bool> _isNetworkPath;
     private readonly IWindowsRecycleBin _windows;
@@ -36,6 +37,7 @@ public sealed class RecycleBinService
     {
         lock (Gate)
         {
+            RotateHistoryIfNeeded();
             using var stream = new FileStream(HistoryPath, FileMode.Append, FileAccess.Write, FileShare.Read);
             byte[] line = System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
                 Action = action, Timestamp = _clock(), OriginalPath = Path.GetFullPath(path),
@@ -44,6 +46,17 @@ public sealed class RecycleBinService
             stream.Write(line);
             stream.Flush(flushToDisk: true);
         }
+    }
+
+    private void RotateHistoryIfNeeded()
+    {
+        try
+        {
+            var history = new FileInfo(HistoryPath);
+            if (history.Exists && history.Length > MaxHistoryBytes)
+                File.Move(HistoryPath, Path.ChangeExtension(HistoryPath, ".1.jsonl"), overwrite: true);
+        }
+        catch { } // Keep appending to the current file; rotation is housekeeping only.
     }
 
     public static string GetBinDirectory(string directory) => Path.Combine(directory, DirectoryName);
@@ -92,7 +105,12 @@ public sealed class RecycleBinService
             string parent = Path.GetDirectoryName(path) ?? throw new IOException("A drive root cannot be recycled.");
             bool isDirectory = (File.GetAttributes(path) & FileAttributes.Directory) != 0;
             if (OperatingSystem.IsWindows() && !_isNetworkPath(path))
-                return RecycleLocal(path, isDirectory, incomingSource);
+            {
+                // Removable drives, oversized items and disabled bins cannot use the Windows bin.
+                // The original is back in place, so keep it recoverable in the managed bin instead.
+                try { return RecycleLocal(path, isDirectory, incomingSource); }
+                catch (IOException) when (Exists(path)) { }
+            }
             string bin = GetBinDirectory(parent);
             EnsureStorageDirectory(bin);
             EnsureStorageDirectory(Path.Combine(bin, ".metadata"));
@@ -154,22 +172,30 @@ public sealed class RecycleBinService
             if (Exists(renamed) || File.Exists(reservation)) continue;
             try { using var file = new FileStream(reservation, FileMode.CreateNew); }
             catch (IOException) when (File.Exists(reservation)) { continue; }
-            var entry = new RecycleEntry(path, renamed, time, isDirectory, "Windows");
-            Record("RecycleRequested", path, source, entry);
-            Move(path, renamed);
             try
             {
-                string nativeItem = _windows.Recycle(renamed);
-                entry = entry with { NativeItem = nativeItem };
-                try { Record("Recycled", path, source, entry); }
-                catch { _windows.Restore(nativeItem, path); throw; }
-                return entry;
+                var entry = new RecycleEntry(path, renamed, time, isDirectory, "Windows");
+                Record("RecycleRequested", path, source, entry);
+                Move(path, renamed);
+                try
+                {
+                    string nativeItem = _windows.Recycle(renamed);
+                    entry = entry with { NativeItem = nativeItem };
+                    try { Record("Recycled", path, source, entry); }
+                    catch { _windows.Restore(nativeItem, path); throw; }
+                    return entry;
+                }
+                catch (Exception error)
+                {
+                    if (Exists(renamed) && !Exists(path)) Move(renamed, path);
+                    try { Record("RecycleFailed", path, source, entry, error.Message); } catch { }
+                    throw new IOException($"Windows could not recycle '{path}': {error.Message}. The operation was stopped.", error);
+                }
             }
-            catch (Exception error)
+            finally
             {
-                if (Exists(renamed) && !Exists(path)) Move(renamed, path);
-                try { Record("RecycleFailed", path, source, entry, error.Message); } catch { }
-                throw new IOException($"Windows could not recycle '{path}': {error.Message}. The operation was stopped.", error);
+                // The reservation only guards name selection while this recycle is in flight.
+                try { File.Delete(reservation); } catch { }
             }
         }
     }
@@ -220,9 +246,26 @@ public sealed class RecycleBinService
 
     public RecycleEntry? CommitReplacement(string preparedPath, string destination, string? incomingSource = null)
     {
+        // Validate the new item before touching the destination.
+        bool incomingIsDirectory = (File.GetAttributes(preparedPath) & FileAttributes.Directory) != 0;
+
+        // Nothing to preserve: skip the journal and the global lock. Move never overwrites,
+        // so a destination that appears in the meantime makes this throw rather than vanish.
+        if (!Exists(destination))
+        {
+            Move(preparedPath, destination);
+            return null;
+        }
+
         lock (Gate)
         {
-            File.GetAttributes(preparedPath); // Validate the new item before touching the destination.
+            if (Exists(destination) &&
+                ((File.GetAttributes(destination) & FileAttributes.Directory) != 0) != incomingIsDirectory)
+            {
+                throw new IOException(incomingIsDirectory
+                    ? $"Cannot replace the file '{destination}' with a folder."
+                    : $"Cannot replace the folder '{destination}' with a file.");
+            }
             RecycleEntry? previous = Exists(destination) ? Recycle(destination, incomingSource) : null;
             try
             {
