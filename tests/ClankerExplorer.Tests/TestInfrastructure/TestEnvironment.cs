@@ -24,6 +24,8 @@ public static class TestEnvironment
             AppStoragePaths.DataDirectoryEnvironmentVariable,
             DataDirectory);
 
+        RecycleBinService.Instance = new RecycleBinService(isNetworkPath: _ => true);
+
         var settings = new AppSettings
         {
             DefaultPath = DefaultFolder,

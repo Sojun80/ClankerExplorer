@@ -997,6 +997,7 @@ public class FileSystemService
                 if (permanent)
                 {
                     ValidatePermanentDeleteTarget(path);
+                    RecycleBinService.Instance.Record("PermanentDeleteRequested", path);
 
                     if (File.Exists(path))
                     {
@@ -1014,28 +1015,14 @@ public class FileSystemService
                             Directory.Delete(path, true);
                         }
                     }
+                    RecycleBinService.Instance.Record("PermanentlyDeleted", path);
                 }
                 else
                 {
                     // Move to Recycle Bin / Trash
                     if (OperatingSystem.IsWindows())
                     {
-                        if (File.Exists(path))
-                        {
-                            Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
-                                path,
-                                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin
-                            );
-                        }
-                        else if (Directory.Exists(path))
-                        {
-                            Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
-                                path,
-                                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin
-                            );
-                        }
+                        RecycleBinService.Instance.Recycle(path);
                     }
                     else
                     {

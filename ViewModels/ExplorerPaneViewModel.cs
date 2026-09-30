@@ -1006,6 +1006,7 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(CanPaste));
         OnPropertyChanged(nameof(IsItemSelected));
+        OnPropertyChanged(nameof(IsRecycledItemSelected));
         OnPropertyChanged(nameof(IsFolderSelected));
         OnPropertyChanged(nameof(IsArchiveSelected));
         OnPropertyChanged(nameof(IsNormalFileSelected));
@@ -1808,7 +1809,9 @@ public partial class ExplorerPaneViewModel : ObservableObject, IDisposable
     public event Action<FileItem, bool>? RequestDeleteWithConfirmation;
 
     [RelayCommand]
-    public void DeleteSelected(bool permanent = false)
+    public void DeleteSelected() => DeleteSelected(permanent: false);
+
+    public void DeleteSelected(bool permanent)
     {
         var items = GetSelectedFileItems();
         if (items.Count > 1 && RequestDeleteMultipleWithConfirmation != null)

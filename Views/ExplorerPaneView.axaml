@@ -411,6 +411,10 @@
                      Foreground="{DynamicResource AppTextBrush}"
                      BorderBrush="{DynamicResource AppBorderBrush}"
                      BorderThickness="1">
+          <MenuItem Header="Open Recycle Bin" Command="{Binding OpenRecycleBinCommand}"/>
+          <MenuItem Header="Open Recycle History" Command="{Binding OpenRecycleHistoryCommand}"/>
+          <MenuItem Header="Restore to Original Location" Command="{Binding RestoreRecycledItemCommand}" IsVisible="{Binding IsRecycledItemSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}"/>
 
           <!-- ==================== 1. NORMAL FILES ==================== -->
           <MenuItem Header="Open" Command="{Binding OpenItemCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
@@ -736,6 +740,10 @@
                        Foreground="{DynamicResource AppTextBrush}"
                        BorderBrush="{DynamicResource AppBorderBrush}"
                        BorderThickness="1">
+          <MenuItem Header="Open Recycle Bin" Command="{Binding OpenRecycleBinCommand}"/>
+          <MenuItem Header="Open Recycle History" Command="{Binding OpenRecycleHistoryCommand}"/>
+          <MenuItem Header="Restore to Original Location" Command="{Binding RestoreRecycledItemCommand}" IsVisible="{Binding IsRecycledItemSelected}"/>
+          <Separator Background="{DynamicResource AppBorderBrush}"/>
             <!-- Normal Files -->
             <MenuItem Header="Open" Command="{Binding OpenItemCommand}" IsVisible="{Binding IsNormalFileSelected}"/>
             <MenuItem Header="{Binding EditActionLabel}" Command="{Binding EditItemCommand}" IsVisible="{Binding IsNormalFileSelected}"/>

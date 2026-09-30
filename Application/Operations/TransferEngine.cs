@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ClankerExplorer.AppLayer;
+using ClankerExplorer.Services;
 
 namespace ClankerExplorer.AppLayer.Operations;
 
@@ -598,7 +599,7 @@ public sealed class TransferEngine
                         }
                     }
 
-                    if (!SafeCreateOrReplaceDirectoryLink(finalTargetDir, srcDirInfo.LinkTarget, out var linkErr))
+                    if (!SafeCreateOrReplaceDirectoryLink(job, source, finalTargetDir, srcDirInfo.LinkTarget, out var linkErr))
                     {
                         results.Add(new FileTransferItemResult(source, null, FileTransferStatus.Failed, $"Failed to preserve directory link {source}: {linkErr}"));
                         job.AddError(source, linkErr ?? "Failed to create directory link.");
@@ -1050,7 +1051,7 @@ public sealed class TransferEngine
                                 }
                             }
 
-                            if (!SafeCreateOrReplaceDirectoryLink(targetDirForSub, sub.LinkTarget, out var linkErr))
+                            if (!SafeCreateOrReplaceDirectoryLink(job, sub.FullName, targetDirForSub, sub.LinkTarget, out var linkErr))
                             {
                                 errors.Add($"Failed to preserve directory link {sub.FullName} -> {targetDirForSub}: {linkErr}");
                                 job.AddError(sub.FullName, $"Failed to preserve directory link: {linkErr}");
@@ -1158,7 +1159,16 @@ public sealed class TransferEngine
         return await job.PromptConflictAsync(conflict, ct).ConfigureAwait(false);
     }
 
-    private static bool SafeCreateOrReplaceDirectoryLink(string targetDir, string linkTarget, out string? error)
+    private static void CommitReplacement(OperationJob job, string sourcePath, string preparedPath, string destination)
+    {
+        var recycled = RecycleBinService.Instance.CommitReplacement(preparedPath, destination, sourcePath);
+        if (recycled != null)
+        {
+            job.AddLog($"Replaced '{recycled.OriginalPath}'; recycled as '{recycled.StoredPath}'; incoming source '{Path.GetFullPath(sourcePath)}'; recycled at {recycled.RecycledAt:O}.");
+        }
+    }
+
+    private static bool SafeCreateOrReplaceDirectoryLink(OperationJob job, string sourcePath, string targetDir, string linkTarget, out string? error)
     {
         error = null;
         var parentDir = Path.GetDirectoryName(targetDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
@@ -1188,57 +1198,10 @@ public sealed class TransferEngine
                 return true;
             }
 
-            // 4. Target exists - safe backup/replace
-            var backupDir = Path.Combine(parentDir, $".clanker-transfer-{Guid.NewGuid():N}.bak");
-            RegisterActiveTempFile(backupDir);
-            try
-            {
-                if (Directory.Exists(targetDir))
-                {
-                    Directory.Move(targetDir, backupDir);
-                }
-                else
-                {
-                    File.Move(targetDir, backupDir);
-                }
-            }
-            catch (Exception ex)
-            {
-                error = $"Cannot safely replace existing destination without destroying it first: {ex.Message}";
-                return false;
-            }
-
-            // Move temp link to targetDir
-            try
-            {
-                Directory.Move(tempDir, targetDir);
-                UnregisterActiveTempFile(tempDir);
-                tempDir = null;
-            }
-            catch (Exception ex)
-            {
-                // Rollback: restore backup
-                try
-                {
-                    if (Directory.Exists(backupDir)) Directory.Move(backupDir, targetDir);
-                    else if (File.Exists(backupDir)) File.Move(backupDir, targetDir);
-                }
-                catch { }
-                error = $"Failed to move new directory link into destination: {ex.Message}";
-                return false;
-            }
-
-            // Delete backup now that new link is in place
-            try
-            {
-                if (Directory.Exists(backupDir)) Directory.Delete(backupDir, recursive: true);
-                else if (File.Exists(backupDir)) File.Delete(backupDir);
-            }
-            catch { }
-            finally
-            {
-                UnregisterActiveTempFile(backupDir);
-            }
+            // Preserve the old item with its recovery record before promoting the new link.
+            CommitReplacement(job, sourcePath, tempDir, targetDir);
+            UnregisterActiveTempFile(tempDir);
+            tempDir = null;
 
             return true;
         }
@@ -1286,7 +1249,6 @@ public sealed class TransferEngine
                 if (srcInfo.LinkTarget != null)
                 {
                     string? tempLink = null;
-                    FileAttributes? symlinkTargetAttrs = null;
                     try
                     {
                         var destDirectory = targetDir ?? Directory.GetCurrentDirectory();
@@ -1307,33 +1269,9 @@ public sealed class TransferEngine
                             throw new OperationCanceledException(job.CancellationToken);
                         }
 
-                        if (File.Exists(targetFile))
-                        {
-                            try
-                            {
-                                symlinkTargetAttrs = File.GetAttributes(targetFile);
-                                if ((symlinkTargetAttrs.Value & FileAttributes.ReadOnly) != 0)
-                                {
-                                    File.SetAttributes(targetFile, symlinkTargetAttrs.Value & ~FileAttributes.ReadOnly);
-                                }
-                            }
-                            catch { }
-                        }
-
-                        try
-                        {
-                            File.Move(tempLink, targetFile, overwrite: true);
-                            UnregisterActiveTempFile(tempLink);
-                            tempLink = null;
-                        }
-                        catch
-                        {
-                            if (symlinkTargetAttrs.HasValue && File.Exists(targetFile))
-                            {
-                                try { File.SetAttributes(targetFile, symlinkTargetAttrs.Value); } catch { }
-                            }
-                            throw;
-                        }
+                        CommitReplacement(job, sourceFile, tempLink, targetFile);
+                        UnregisterActiveTempFile(tempLink);
+                        tempLink = null;
 
                         if (mode == FileTransferMode.Move)
                         {
@@ -1390,68 +1328,7 @@ public sealed class TransferEngine
                 // NEVER do File.Delete(targetFile) before File.Move!
                 if (File.Exists(targetFile))
                 {
-                    FileAttributes? targetAttrs = null;
-                    try
-                    {
-                        targetAttrs = File.GetAttributes(targetFile);
-                        if ((targetAttrs.Value & FileAttributes.ReadOnly) != 0)
-                        {
-                            File.SetAttributes(targetFile, targetAttrs.Value & ~FileAttributes.ReadOnly);
-                        }
-                    }
-                    catch { }
-
-                    try
-                    {
-                        File.Move(sourceFile, targetFile, overwrite: true);
-                    }
-                    catch
-                    {
-                        // Restore target attributes if direct move failed
-                        if (targetAttrs.HasValue && File.Exists(targetFile))
-                        {
-                            try { File.SetAttributes(targetFile, targetAttrs.Value); } catch { }
-                        }
-
-                        // Fallback: safe temp-copy + replace + source delete
-                        var tempFile = Path.Combine(targetDir ?? Directory.GetCurrentDirectory(), $".clanker-transfer-{Guid.NewGuid():N}.tmp");
-                        RegisterActiveTempFile(tempFile);
-                        try
-                        {
-                            File.Copy(sourceFile, tempFile, overwrite: true);
-                            try
-                            {
-                                File.Move(tempFile, targetFile, overwrite: true);
-                            }
-                            catch
-                            {
-                                if (targetAttrs.HasValue && File.Exists(targetFile))
-                                {
-                                    try { File.SetAttributes(targetFile, targetAttrs.Value); } catch { }
-                                }
-                                throw;
-                            }
-
-                            if (ct.IsCancellationRequested || job.CancellationToken.IsCancellationRequested)
-                            {
-                                return (true, targetFile, FileTransferStatus.PartialSuccessSourceDeleteFailed, "Operation was cancelled before source cleanup could complete.");
-                            }
-
-                            try
-                            {
-                                File.Delete(sourceFile);
-                            }
-                            catch (Exception delEx)
-                            {
-                                return (true, targetFile, FileTransferStatus.PartialSuccessSourceDeleteFailed, $"Destination copy succeeded, but source could not be deleted: {delEx.Message}");
-                            }
-                        }
-                        finally
-                        {
-                            UnregisterActiveTempFile(tempFile);
-                            try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
-                        }
-                    }
+                    CommitReplacement(job, sourceFile, sourceFile, targetFile);
                 }
                 else
                 {
@@ -1466,7 +1343,7 @@ public sealed class TransferEngine
                         try
                         {
                             File.Copy(sourceFile, tempFile, overwrite: true);
-                            File.Move(tempFile, targetFile, overwrite: true);
+                            CommitReplacement(job, sourceFile, tempFile, targetFile);
 
                             if (ct.IsCancellationRequested || job.CancellationToken.IsCancellationRequested)
                             {
@@ -1503,7 +1380,6 @@ public sealed class TransferEngine
 
         // Copy or cross-volume Move: Safe overwrite via temporary sibling
         string? tempPath = null;
-        FileAttributes? originalTargetAttrs = null;
         try
         {
             var sourceInfo = new FileInfo(sourceFile);
@@ -1544,34 +1420,9 @@ public sealed class TransferEngine
             }
             catch { }
 
-            // Atomically/safely replace target with tempPath
-            if (File.Exists(targetFile))
-            {
-                try
-                {
-                    originalTargetAttrs = File.GetAttributes(targetFile);
-                    if ((originalTargetAttrs.Value & FileAttributes.ReadOnly) != 0)
-                    {
-                        File.SetAttributes(targetFile, originalTargetAttrs.Value & ~FileAttributes.ReadOnly);
-                    }
-                }
-                catch { }
-            }
-
-            try
-            {
-                File.Move(tempPath, targetFile, overwrite: true);
-                UnregisterActiveTempFile(tempPath);
-                tempPath = null; // Successfully replaced target, no temp file to clean up
-            }
-            catch
-            {
-                if (originalTargetAttrs.HasValue && File.Exists(targetFile))
-                {
-                    try { File.SetAttributes(targetFile, originalTargetAttrs.Value); } catch { }
-                }
-                throw;
-            }
+            CommitReplacement(job, sourceFile, tempPath, targetFile);
+            UnregisterActiveTempFile(tempPath);
+            tempPath = null;
 
             // If move, check cancellation before deleting source!
             if (mode == FileTransferMode.Move)

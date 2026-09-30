@@ -223,7 +223,7 @@ public class ArchiveService
                 return (false, $"Extraction exited with code {proc.ExitCode}");
             }
 
-            return PromoteStagingDirectory(stagingDir, destinationDirectory, overwrite);
+            return PromoteStagingDirectory(stagingDir, destinationDirectory, overwrite, archivePath);
         }
         catch (OperationCanceledException)
         {
@@ -253,7 +253,7 @@ public class ArchiveService
     internal static (bool success, string message) PromoteStagingDirectory(
         string stagingDir,
         string destinationDirectory,
-        bool overwrite)
+        bool overwrite, string? sourceArchive = null)
     {
         if (!Directory.Exists(stagingDir))
         {
@@ -301,7 +301,8 @@ public class ArchiveService
 
                 try
                 {
-                    File.Move(stagedFile, destFile, overwrite: overwrite);
+                    if (overwrite) RecycleBinService.Instance.CommitReplacement(stagedFile, destFile, sourceArchive);
+                    else File.Move(stagedFile, destFile);
                 }
                 catch (Exception ex)
                 {
@@ -394,7 +395,8 @@ public class ArchiveService
                         continue;
                     }
 
-                    File.Move(tempPath, destPath, overwrite: overwrite);
+                    if (overwrite) RecycleBinService.Instance.CommitReplacement(tempPath, destPath, archivePath);
+                    else File.Move(tempPath, destPath);
                 }
                 finally
                 {
@@ -481,6 +483,25 @@ public class ArchiveService
     }
 
     public async Task<(bool success, string message, string? targetPath)> CreateZipAsync(
+        string sourcePath, string? targetZipPath = null, CancellationToken cancellationToken = default)
+    {
+        string directory = Path.GetDirectoryName(sourcePath.TrimEnd('\\', '/')) ?? "";
+        targetZipPath ??= Path.Combine(directory, Path.GetFileName(sourcePath.TrimEnd('\\', '/')) + ".zip");
+        string prepared = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(targetZipPath))!, $".clanker-zip-{Guid.NewGuid():N}.zip");
+        try
+        {
+            var result = await CreateZipCoreAsync(sourcePath, prepared, cancellationToken);
+            if (!result.success) return (false, result.message, targetZipPath);
+            cancellationToken.ThrowIfCancellationRequested();
+            RecycleBinService.Instance.CommitReplacement(prepared, Path.GetFullPath(targetZipPath), sourcePath);
+            return (true, result.message, targetZipPath);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { return (false, $"ZIP creation error: {ex.Message}", targetZipPath); }
+        finally { try { File.Delete(prepared); } catch { } }
+    }
+
+    private async Task<(bool success, string message, string? targetPath)> CreateZipCoreAsync(
         string sourcePath,
         string? targetZipPath = null,
         CancellationToken cancellationToken = default)
